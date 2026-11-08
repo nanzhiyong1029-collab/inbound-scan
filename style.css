@@ -114,4 +114,6 @@ label.chk small { font-weight: 400; color: var(--mute); }
 .tag-bad { display: inline-block; margin-top: 3px; font-size: 12px; background: #fee4e2; color: var(--err); border-radius: 6px; padding: 1px 6px; }
 textarea.remark { width: 100%; font: inherit; font-size: 16px; padding: 10px; border: 1px solid #c9ced6; border-radius: 10px; resize: vertical; }
 .grid2 input.dt { font: 600 18px/1.2 ui-monospace, "Roboto Mono", Menlo, monospace; letter-spacing: 1px; }
+.grid2 input.auto { background: #eef6ff; border-color: #7aa7e6; }
+.autotag { margin-left: 6px; padding: 0 6px; border-radius: 8px; background: #dbeafe; color: #1d4ed8; font-weight: 600; }
 .grid2 input.bad { border-color: var(--err); background: #fef3f2; }
