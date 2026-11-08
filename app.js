@@ -3,7 +3,7 @@
  * 原则：只采集原始资料，不做任何核对。先存手机（离线队列），再上传云端。 */
 (function () {
   'use strict';
-  var VERSION = '1.1.0';
+  var VERSION = '1.1.1';
   var $ = function (s, el) { return (el || document).querySelector(s); };
   var app = $('#app');
 
@@ -35,9 +35,9 @@
   function hhmm(iso) { try { var d = new Date(iso); return ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2) + ':' + ('0' + d.getSeconds()).slice(-2); } catch (e) { return ''; } }
 
   // ---------------- 首次设置：#setup=<base64> ----------------
-  (function readSetupLink() {
+  function readSetupLink() {
     var m = location.hash.match(/#setup=([A-Za-z0-9_\-=]+)/);
-    if (!m) return;
+    if (!m) return false;
     try {
       var b = m[1].replace(/-/g, '+').replace(/_/g, '/');
       while (b.length % 4) b += '=';
@@ -46,7 +46,9 @@
       if (o.u && o.k) { cfg = { u: o.u, k: o.k }; LS.set('cfg', cfg); toast('设置已保存'); }
     } catch (e) { toast('设置链接无效'); }
     history.replaceState(null, '', location.pathname + '#/');
-  })();
+    return true;
+  }
+  readSetupLink();
 
   // ---------------- 网络 ----------------
   function api(params, post) {
@@ -248,6 +250,7 @@
   var curHash = location.hash, ignoreHash = false;
   window.addEventListener('hashchange', function () {
     if (ignoreHash) { ignoreHash = false; return; }
+    if (readSetupLink()) { leaveGuard = null; route(); return; }   // APP 已打开时再点设置链接
     if (leaveGuard && leaveGuard()) {
       var target = location.hash;
       ignoreHash = true; location.hash = curHash;
