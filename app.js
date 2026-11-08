@@ -3,7 +3,7 @@
  * 原则：只采集原始资料，不做任何核对。先存手机（离线队列），再上传云端。 */
 (function () {
   'use strict';
-  var VERSION = '1.2.0';
+  var VERSION = '1.2.1';
   var $ = function (s, el) { return (el || document).querySelector(s); };
   var app = $('#app');
 
@@ -57,6 +57,19 @@
     var t = new Date(Date.UTC(yy, mm - 1, dd));
     if (t.getUTCFullYear() !== yy || t.getUTCMonth() !== mm - 1 || t.getUTCDate() !== dd) return null;
     return yy + '-' + pad2(mm) + '-' + pad2(dd);
+  }
+  // 日期联动：有效期 = 生产日期 + 保质期(月)（同一天；该月没有这一天就取月底）
+  function addMonths(iso, n) {
+    var m = String(iso).match(/^(\d{4})-(\d{2})-(\d{2})$/); if (!m) return null;
+    var y = +m[1], mo = +m[2] - 1 + n, d = +m[3];
+    var ty = y + Math.floor(mo / 12), tm = ((mo % 12) + 12) % 12;
+    var last = new Date(Date.UTC(ty, tm + 1, 0)).getUTCDate();
+    return ty + '-' + pad2(tm + 1) + '-' + pad2(Math.min(d, last));
+  }
+  /** 两个日期相差几个月（四舍五入，例如 22/09/2026 → 21/03/2028 = 18） */
+  function monthsBetween(a, b) {
+    var x = String(a).split('-').map(Number), y = String(b).split('-').map(Number);
+    return Math.round((y[0] - x[0]) * 12 + (y[1] - x[1]) + (y[2] - x[2]) / 30);
   }
   function isoToDmy(s) { var m = String(s || '').match(/^(\d{4})-(\d{2})-(\d{2})$/); return m ? m[3] + '/' + m[2] + '/' + m[1] : String(s || ''); }
   function hhmm(iso) { try { var d = new Date(iso); return ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2) + ':' + ('0' + d.getSeconds()).slice(-2); } catch (e) { return ''; } }
@@ -547,9 +560,10 @@
       '<details class="more"' + (moreOpen ? ' open' : '') + '><summary>更多资料（选填）：无条码原因 / 日期 / 保质期</summary><div class="grid2">' +
       '<div class="full"><label>无条码原因</label><select id="f_reason"><option value=""></option>' + REASONS.map(function (r) { return '<option' + (orig.reason === r ? ' selected' : '') + '>' + r + '</option>'; }).join('') +
       (orig.reason && REASONS.indexOf(orig.reason) < 0 ? '<option selected>' + esc(orig.reason) + '</option>' : '') + '</select></div>' +
-      '<div class="full"><label>保质期（月）</label><input id="f_shelf" inputmode="numeric" maxlength="3" value="' + esc(orig.shelf) + '"></div>' +
-      '<div><label>生产日期（日/月/年）</label><input id="f_mfg" class="dt" inputmode="numeric" autocomplete="off" maxlength="10" placeholder="例 22092026" value="' + esc(isoToDmy(orig.mfg)) + '"></div>' +
-      '<div><label>有效期（日/月/年）</label><input id="f_exp" class="dt" inputmode="numeric" autocomplete="off" maxlength="10" placeholder="例 21032028" value="' + esc(isoToDmy(orig.exp)) + '"></div>' +
+      '<div class="full hint">生产日期 / 保质期 / 有效期：填任意 2 个，第 3 个自动算出</div>' +
+      '<div class="full"><label>保质期（月）<small class="autotag" id="a_shelf" hidden>自动</small></label><input id="f_shelf" inputmode="numeric" maxlength="3" value="' + esc(orig.shelf) + '"></div>' +
+      '<div><label>生产日期（日/月/年）<small class="autotag" id="a_mfg" hidden>自动</small></label><input id="f_mfg" class="dt" inputmode="numeric" autocomplete="off" maxlength="10" placeholder="例 22092026" value="' + esc(isoToDmy(orig.mfg)) + '"></div>' +
+      '<div><label>有效期（日/月/年）<small class="autotag" id="a_exp" hidden>自动</small></label><input id="f_exp" class="dt" inputmode="numeric" autocomplete="off" maxlength="10" placeholder="例 21032028" value="' + esc(isoToDmy(orig.exp)) + '"></div>' +
       '</div></details><div id="dock" class="dock"></div>';
 
     var F = {}; ['pcs', 'pack', 'ctn', 'reason', 'qty', 'shelf', 'mfg', 'exp', 'specBad', 'specActual', 'remark'].forEach(function (k) { F[k] = $('#f_' + k); });
@@ -667,6 +681,35 @@
     ['mfg', 'exp'].forEach(function (k) {
       F[k].addEventListener('input', function () { var v = dmyFormat(F[k].value); if (v !== F[k].value) F[k].value = v; F[k].classList.toggle('bad', !!v && v.replace(/\D/g, '').length >= 6 && dmyToIso(v) === null); });
     });
+    // —— 日期联动：填任意 2 个 → 自动算第 3 个；改了来源字段会重新计算；手动改自动值后就不再覆盖
+    var autoKey = null;
+    function dateVal(k) {
+      var v = F[k].value.trim(); if (!v) return null;
+      if (k === 'shelf') return /^\d{1,3}$/.test(v) && +v > 0 && +v <= 600 ? +v : null;
+      return dmyToIso(v) || null;
+    }
+    function paintAuto() { ['mfg', 'shelf', 'exp'].forEach(function (x) { F[x].classList.toggle('auto', x === autoKey); $('#a_' + x).hidden = x !== autoKey; }); }
+    function setAuto(k, v) {
+      autoKey = v === '' ? null : k;
+      F[k].value = v;
+      if (k !== 'shelf') F[k].classList.remove('bad');
+      paintAuto();
+    }
+    function linkDates(changed) {
+      if (changed === autoKey) { autoKey = null; paintAuto(); }    // 员工手动改了自动算出的值 → 以手动为准，不再自动
+      var keys = ['mfg', 'shelf', 'exp'];
+      var src = keys.filter(function (k) { return k !== autoKey && dateVal(k) !== null; });
+      var target = keys.filter(function (k) { return src.indexOf(k) < 0; })[0];
+      if (src.length === 2 && target && target !== changed && (target === autoKey || !F[target].value.trim())) {   // 正在输入的那一格不自动填
+        var mfg = dateVal('mfg'), sh = dateVal('shelf'), exp = dateVal('exp'), out = null;
+        if (target === 'exp') out = isoToDmy(addMonths(mfg, sh));
+        else if (target === 'mfg') out = isoToDmy(addMonths(exp, -sh));
+        else { var n = monthsBetween(mfg, exp); out = n > 0 && n <= 600 ? String(n) : null; }
+        if (out) setAuto(target, out); else if (target === autoKey) setAuto(target, '');
+      } else if (autoKey && src.length < 2) setAuto(autoKey, '');      // 来源不完整了 → 清掉自动值
+      onEdit();
+    }
+    ['mfg', 'shelf', 'exp'].forEach(function (k) { F[k].addEventListener('input', function () { linkDates(k); }); });
     F.qty.addEventListener('focus', function () { $('#w_qty').classList.add('focus'); try { F.qty.select(); } catch (e) { } });
     F.qty.addEventListener('blur', function () { $('#w_qty').classList.remove('focus'); });
     F.qty.addEventListener('keydown', function (e) {
