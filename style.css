@@ -112,3 +112,6 @@ label.chk input { width: 28px; height: 28px; accent-color: var(--err); }
 label.chk small { font-weight: 400; color: var(--mute); }
 #specBox { margin-top: 6px; }
 .tag-bad { display: inline-block; margin-top: 3px; font-size: 12px; background: #fee4e2; color: var(--err); border-radius: 6px; padding: 1px 6px; }
+textarea.remark { width: 100%; font: inherit; font-size: 16px; padding: 10px; border: 1px solid #c9ced6; border-radius: 10px; resize: vertical; }
+.grid2 input.dt { font: 600 18px/1.2 ui-monospace, "Roboto Mono", Menlo, monospace; letter-spacing: 1px; }
+.grid2 input.bad { border-color: var(--err); background: #fef3f2; }
