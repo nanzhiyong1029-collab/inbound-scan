@@ -4,11 +4,13 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#1f3864">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.jsdelivr.net; connect-src 'self' https://script.google.com https://script.googleusercontent.com https://cdn.jsdelivr.net; img-src 'self' data: blob:; media-src 'self' blob: mediastream:; style-src 'self' 'unsafe-inline'; worker-src 'self' blob:; manifest-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
+<meta name="referrer" content="no-referrer">
 <title>入库扫码</title>
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="icon-192.png">
-<link rel="stylesheet" href="style.css?v=1.1.2">
+<link rel="stylesheet" href="style.css?v=1.2.0">
 </head>
 <body>
 <header id="bar">
@@ -20,7 +22,7 @@
 <main id="app"></main>
 <div id="toast" role="status" aria-live="polite"></div>
 <div id="modal" hidden></div>
-<script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js" defer></script>
-<script src="app.js?v=1.1.2" defer></script>
+<script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js" integrity="sha384-c9d8RFSL+u3exBOJ4Yp3HUJXS4znl9f+z66d1y54ig+ea249SpqR+w1wyvXz/lk+" crossorigin="anonymous" defer></script>
+<script src="app.js?v=1.2.0" defer></script>
 </body>
 </html>
