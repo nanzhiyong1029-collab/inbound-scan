@@ -1,9 +1,9 @@
-/* 入库条码采集 PWA  v1.0.0
+/* 入库条码采集 PWA  v1.2.0
  * 页面：#/ 任务列表 → #/job/<JobID> 商品清单 → #/p/<JobID>/<ProductID> 条码采集
  * 原则：只采集原始资料，不做任何核对。先存手机（离线队列），再上传云端。 */
 (function () {
   'use strict';
-  var VERSION = '1.1.2';
+  var VERSION = '1.2.0';
   var $ = function (s, el) { return (el || document).querySelector(s); };
   var app = $('#app');
 
@@ -13,8 +13,15 @@
     set: function (k, v) { try { localStorage.setItem(k, JSON.stringify(v)); return true; } catch (e) { return false; } },
     del: function (k) { try { localStorage.removeItem(k); } catch (e) { } }
   };
-  var cfg = LS.get('cfg', null);               // {u: WebApp URL, k: key}
-  var operator = LS.get('operator', '');
+  // 安全（v1.2）：每台设备自己的凭据 cfg.d（办公室可单独撤销）+ 员工 PIN 登录得到的会话 sess（后台核对）
+  var TOKEN_RE = /^[0-9a-f]{40,80}$/;
+  var cfg = LS.get('cfg', null);               // {u: WebApp URL, d: 设备凭据}
+  var authMsg = '';
+  if (cfg && !(cfg.u && TOKEN_RE.test(cfg.d || ''))) { cfg = null; LS.del('cfg'); authMsg = '系统已升级：请找办公室要本设备的新设置链接（旧链接已停用）。未上传的资料仍保存在本机。'; }
+  var sess = LS.get('sess', null);             // {t: 会话, name: 员工, dev: 设备编号}
+  if (sess && !(sess.t && sess.name)) sess = null;
+  var operator = sess ? sess.name : '';
+  LS.del('operator');
   var device = LS.get('device', '');
   if (!device) { device = 'D' + Math.random().toString(36).slice(2, 8).toUpperCase(); LS.set('device', device); }
   var prefs = LS.get('prefs', { pda: true, autoNext: true });
@@ -63,7 +70,11 @@
       while (b.length % 4) b += '=';
       var json = decodeURIComponent(Array.prototype.map.call(atob(b), function (c) { return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2); }).join(''));
       var o = JSON.parse(json);
-      if (o.u && o.k) { cfg = { u: o.u, k: o.k }; LS.set('cfg', cfg); toast('设置已保存'); }
+      if (o.u && TOKEN_RE.test(o.d || '')) {
+        cfg = { u: o.u, d: o.d }; LS.set('cfg', cfg); authMsg = '';
+        setSession(null); toast('设置已保存，请登录');
+      } else if (o.k) { authMsg = '这是旧版设置链接，已停用。请找办公室在【PDA 设备管理】生成本设备的新链接。'; toast('旧版链接已停用', 3000); }
+      else toast('设置链接无效');
     } catch (e) { toast('设置链接无效'); }
     history.replaceState(null, '', location.pathname + '#/');
     return true;
@@ -75,18 +86,18 @@
     if (!cfg) return Promise.reject(new Error('NOCFG'));
     var ctl = window.AbortController ? new AbortController() : null;
     var timer = setTimeout(function () { if (ctl) ctl.abort(); }, post ? 45000 : 30000);
-    var body = Object.assign({}, params, { key: cfg.k });
-    var req;
-    if (post) {
-      req = fetch(cfg.u, { method: 'POST', body: JSON.stringify(body), headers: { 'Content-Type': 'text/plain;charset=utf-8' }, redirect: 'follow', signal: ctl && ctl.signal });
-    } else {
-      var q = Object.keys(body).map(function (k) { return encodeURIComponent(k) + '=' + encodeURIComponent(body[k]); }).join('&');
-      req = fetch(cfg.u + (cfg.u.indexOf('?') >= 0 ? '&' : '?') + q, { redirect: 'follow', signal: ctl && ctl.signal });
-    }
+    // 凭据只放在 POST 内容里，不出现在网址中
+    var body = Object.assign({}, params, { dev: cfg.d, sess: sess ? sess.t : '' });
+    var req = fetch(cfg.u, { method: 'POST', body: JSON.stringify(body), headers: { 'Content-Type': 'text/plain;charset=utf-8' }, redirect: 'follow', signal: ctl && ctl.signal });
     return req.then(function (r) { return r.json(); }).then(function (d) {
       clearTimeout(timer);
       setOnline(true);
-      if (!d.ok) { var e = new Error(d.message || d.error || '服务器错误'); e.server = true; e.code = d.error; throw e; }
+      if (!d.ok) {
+        var e = new Error(d.message || d.error || '服务器错误'); e.server = true; e.code = d.error;
+        if (d.error === 'DEVICE') authLost('device', e.message);
+        else if (d.error === 'SESSION') authLost('session', e.message);
+        throw e;
+      }
       return d;
     }, function (err) {
       clearTimeout(timer);
@@ -95,11 +106,21 @@
     });
   }
 
+  function setSession(s) { sess = s; operator = s ? s.name : ''; if (s) LS.set('sess', s); else LS.del('sess'); }
+  /** 后台说设备被撤销 / 登录失效：清掉凭据，回到设置或登录页（未上传的资料保留在本机） */
+  function authLost(kind, msg) {
+    if (kind === 'device') { cfg = null; LS.del('cfg'); authMsg = msg + '（未上传的资料仍保存在本机）'; }
+    else authMsg = msg;
+    setSession(null);
+    if (!(leaveGuard && leaveGuard())) setTimeout(route, 0); else toast(msg, 3000);
+  }
+
   var online = navigator.onLine !== false;
   function setOnline(v) { online = v; renderNet(); }
   function renderNet() {
     var n = $('#net'), t = $('#netText');
     var pend = outbox.length;
+    if (!n) return;
     n.className = !online ? 'off' : (pend ? 'sync' : '');
     t.textContent = (!online ? '离线' : '在线') + (pend ? ' · 待上传 ' + pend : '');
   }
@@ -110,14 +131,18 @@
   var flushing = null;
   function flush() {
     if (flushing) return flushing;
-    if (!outbox.length || !cfg) { renderNet(); return Promise.resolve(); }
-    var batch = outbox.slice(0, 40);
+    // 只上传当前登录员工自己的记录（后台按会话记录操作员，不能替别人上传）
+    var mine = outbox.filter(function (s) { return s.operator === operator; });
+    if (!mine.length || !cfg || !sess) { renderNet(); return Promise.resolve(); }
+    var batch = mine.slice(0, 40);
     flushing = api({ action: 'saveBatch', saves: batch }, true).then(function (d) {
       var done = {};
       (d.results || []).forEach(function (r) {
-        if (r.status === 'saved' || r.status === 'duplicate' || r.status === 'stale' || r.status === 'error') done[r.saveId] = r;
-        if (r.status === 'error') {
-          var failed = LS.get('failed', []); failed.push({ r: r, at: new Date().toISOString() }); LS.set('failed', failed.slice(-200));
+        if (r.status === 'saved' || r.status === 'duplicate' || r.status === 'stale' || r.status === 'error' || r.status === 'rejected') done[r.saveId] = r;
+        if (r.status === 'error' || r.status === 'rejected') {
+          var orig = batch.filter(function (s) { return s.saveId === r.saveId; })[0];
+          var failed = LS.get('failed', []); failed.push({ r: r, s: orig, at: new Date().toISOString() }); LS.set('failed', failed.slice(-200));
+          toast('有资料被服务器拒绝：' + (r.message || ''), 4000);
         }
       });
       outbox = LS.get('outbox', []).filter(function (s) { return !done[s.saveId]; });
@@ -137,7 +162,7 @@
       flushing = null;
       renderNet();
       document.dispatchEvent(new CustomEvent('synced', { detail: done }));
-      if (outbox.length) return flush();
+      if (outbox.some(function (s) { return s.operator === operator; })) return flush();
     }, function (e) {
       lastSyncError = e.message;
       flushing = null;
@@ -145,7 +170,7 @@
     });
     return flushing;
   }
-  setInterval(function () { if (outbox.length) flush(); }, 15000);
+  setInterval(function () { if (outbox.length && sess) flush(); }, 15000);
   document.addEventListener('visibilitychange', function () { if (!document.hidden && outbox.length) flush(); });
 
   // ---------------- 商品缓存（每个任务一份） ----------------
@@ -225,18 +250,20 @@
 
   function openMenu() {
     modal('<div class="menu">' +
-      '<div class="hint">员工：<b>' + esc(operator || '未登录') + '</b> · 设备 ' + esc(device) + ' · v' + VERSION + '</div>' +
+      '<div class="hint">员工：<b>' + esc(operator || '未登录') + '</b> · 设备 ' + esc((sess && sess.dev) || device) + ' · v' + VERSION + '</div>' +
       '<button id="mSync">立即上传（待上传 ' + outbox.length + '）</button>' +
-      '<button id="mOp">切换员工</button>' +
+      othersNote() +
+      '<button id="mOp">退出 / 切换员工</button>' +
       '<button id="mPda">PDA 扫描头模式：' + (prefs.pda ? '开（不弹出键盘）' : '关（手机键盘输入）') + '</button>' +
       '<button id="mNext">扫完箱码后自动跳到 SAVE：' + (prefs.autoNext ? '开' : '关') + '</button>' +
       '<button id="mTest">扫描头测试</button>' +
       '<button id="mCfg">服务器设置</button>' +
       '<button id="mClear">清除商品缓存（不会删除待上传资料）</button>' +
       (lastSyncError ? '<div class="err hint">上次上传失败：' + esc(lastSyncError) + '</div>' : '') +
+      failedNote() +
       '</div>', function (m) {
         $('#mSync', m).onclick = function () { closeModal(); toast('上传中…'); flush().then(function () { toast(outbox.length ? '还有 ' + outbox.length + ' 条未上传（网络不可用）' : '全部已上传 ✓'); }); };
-        $('#mOp', m).onclick = function () { closeModal(); guardLeave(function () { operator = ''; LS.set('operator', ''); route(); }); };
+        $('#mOp', m).onclick = function () { closeModal(); guardLeave(function () { if (sess && cfg) api({ action: 'logout' }).catch(function () { }); setSession(null); route(); }); };
         $('#mPda', m).onclick = function () { prefs.pda = !prefs.pda; LS.set('prefs', prefs); closeModal(); route(); };
         $('#mNext', m).onclick = function () { prefs.autoNext = !prefs.autoNext; LS.set('prefs', prefs); closeModal(); };
         $('#mTest', m).onclick = function () { closeModal(); scannerTest(); };
@@ -246,6 +273,18 @@
           memCache = {}; closeModal(); toast('已清除'); route();
         };
       });
+  }
+
+  function othersNote() {
+    var o = {}; outbox.forEach(function (s) { if (s.operator !== operator) o[s.operator] = (o[s.operator] || 0) + 1; });
+    var k = Object.keys(o);
+    return k.length ? '<div class="hint err">' + k.map(function (n) { return esc(n || '?') + ' 的 ' + o[n] + ' 条'; }).join('、') + ' 还没上传：需要本人在这台设备登录后才会上传。</div>' : '';
+  }
+  function failedNote() {
+    var f = LS.get('failed', []);
+    if (!f.length) return '';
+    var last = f[f.length - 1];
+    return '<div class="hint err">被服务器拒绝的保存共 ' + f.length + ' 条（资料保存在本机）。最近一条：' + esc((last.r && last.r.message) || '') + '</div>';
   }
 
   function scannerTest() {
@@ -288,7 +327,7 @@
     app.onclick = null;
     curHash = location.hash;
     if (!cfg) return viewSetup(false);
-    if (!operator) return viewLogin();
+    if (!sess) return viewLogin();
     var h = location.hash || '#/';
     var m;
     if ((m = h.match(/^#\/job\/([^/]+)$/))) return viewProducts(decodeURIComponent(m[1]));
@@ -299,17 +338,18 @@
   // ---------------- 设置 & 登录 ----------------
   function viewSetup(editing) {
     setBar('服务器设置', editing);
-    app.innerHTML = '<div class="card"><p>请用办公室发来的<b>设置链接</b>打开本页面（会自动完成设置）。也可以手动填写：</p>' +
+    app.innerHTML = '<div class="card">' + (authMsg ? '<p class="err">' + esc(authMsg) + '</p>' : '') +
+      '<p>请用办公室发来的<b>本设备专用设置链接</b>打开本页面（会自动完成设置）。每台设备的链接不同，不要转发给别人。也可以手动填写：</p>' +
       '<div class="field"><label>服务器网址 (Web App URL)</label><input id="sU" value="' + esc(cfg ? cfg.u : '') + '"></div>' +
-      '<div class="field"><label>访问密钥</label><input id="sK" value="' + esc(cfg ? cfg.k : '') + '"></div>' +
+      '<div class="field"><label>设备凭据</label><input id="sK" type="password" autocomplete="off" value="' + esc(cfg ? cfg.d : '') + '"></div>' +
       '<button class="btn save" id="sSave" style="width:100%">保存并测试连接</button><p id="sMsg" class="hint"></p></div>';
     $('#sSave').onclick = function () {
       var u = $('#sU').value.trim(), k = $('#sK').value.trim();
-      if (!u || !k) { $('#sMsg').textContent = '请填写完整'; return; }
-      cfg = { u: u, k: k }; LS.set('cfg', cfg);
+      if (!/^https:\/\//.test(u) || !TOKEN_RE.test(k)) { $('#sMsg').textContent = '网址必须以 https:// 开头，设备凭据格式不对'; return; }
+      cfg = { u: u, d: k }; LS.set('cfg', cfg); setSession(null); authMsg = '';
       $('#sMsg').textContent = '测试中…';
       api({ action: 'ping' }).then(function () { toast('连接成功'); location.hash = '#/'; route(); },
-        function (e) { $('#sMsg').innerHTML = '<span class="err">连接失败：' + esc(e.message) + '</span>（已保存，可稍后再试）'; });
+        function (e) { if (e.code === 'DEVICE') return; $('#sMsg').innerHTML = '<span class="err">连接失败：' + esc(e.message) + '</span>（已保存，可稍后再试）'; });
     };
   }
 
@@ -318,33 +358,37 @@
     var cached = LS.get('staff', []);
     var chosen = null;
     function draw(list, msg) {
-      app.innerHTML = '<div class="card"><h3 style="margin-top:0">请选择你的名字</h3><div class="staff">' +
-        list.map(function (s, i) { return '<button data-i="' + i + '">' + esc(s.name) + '</button>'; }).join('') +
-        '</div><div id="pinBox" hidden class="field" style="margin-top:12px"><label>PIN</label><input id="pin" type="password" inputmode="numeric" autocomplete="off"></div>' +
+      app.innerHTML = '<div class="card">' + (authMsg ? '<p class="err">' + esc(authMsg) + '</p>' : '') + '<h3 style="margin-top:0">请选择你的名字</h3><div class="staff">' +
+        list.map(function (s, i) { return '<button data-i="' + i + '"' + (s.ready === false ? ' disabled title="办公室还没设置 PIN"' : '') + '>' + esc(s.name) + (s.ready === false ? '（未设 PIN）' : '') + '</button>'; }).join('') +
+        '</div><div id="pinBox" hidden class="field" style="margin-top:12px"><label>PIN（4–8 位数字）</label><input id="pin" type="password" inputmode="numeric" maxlength="8" autocomplete="off"></div>' +
         '<button class="btn save" id="lgo" style="width:100%;margin-top:12px" disabled>进入</button>' +
         '<p class="hint" id="lmsg">' + esc(msg || '') + '</p></div>';
       Array.prototype.forEach.call(app.querySelectorAll('.staff button'), function (b) {
         b.onclick = function () {
           Array.prototype.forEach.call(app.querySelectorAll('.staff button'), function (x) { x.classList.remove('on'); });
           b.classList.add('on'); chosen = list[+b.dataset.i];
-          $('#pinBox').hidden = !chosen.pin; $('#lgo').disabled = false; if (chosen.pin) $('#pin').focus();
+          $('#pinBox').hidden = false; $('#lgo').disabled = false; $('#pin').value = ''; $('#pin').focus();
         };
       });
+      $('#pin').onkeydown = function (e) { if (e.key === 'Enter') { e.preventDefault(); $('#lgo').click(); } };
       $('#lgo').onclick = function () {
         if (!chosen) return;
+        var pin = $('#pin').value.trim();
+        if (!/^\d{4,8}$/.test(pin)) { $('#lmsg').innerHTML = '<span class="err">请输入 4–8 位数字 PIN</span>'; $('#pin').focus(); return; }
         $('#lgo').disabled = true;
-        api({ action: 'login', name: chosen.name, pin: chosen.pin ? $('#pin').value : '' }).then(function (d) {
-          if (!d.login) { $('#lmsg').innerHTML = '<span class="err">' + esc(d.message) + '</span>'; $('#lgo').disabled = false; return; }
-          operator = d.name; LS.set('operator', operator); location.hash = '#/'; route();
+        api({ action: 'login', name: chosen.name, pin: pin }).then(function (d) {
+          if (!d.login) { $('#lmsg').innerHTML = '<span class="err">' + esc(d.message) + '</span>'; $('#lgo').disabled = false; $('#pin').value = ''; return; }
+          authMsg = ''; setSession({ t: d.session, name: d.name, dev: d.device });
+          location.hash = '#/'; route(); flush();
         }, function (e) {
-          if (e.network && !chosen.pin) { operator = chosen.name; LS.set('operator', operator); route(); return; }
-          $('#lmsg').innerHTML = '<span class="err">' + esc(e.message) + '</span>'; $('#lgo').disabled = false;
+          if (e.code === 'DEVICE') return;
+          $('#lmsg').innerHTML = '<span class="err">' + esc(e.network ? '需要联网才能登录' : e.message) + '</span>'; $('#lgo').disabled = false;
         });
       };
     }
     draw(cached, cached.length ? '' : '加载员工名单…');
     api({ action: 'staff' }).then(function (d) { LS.set('staff', d.staff); draw(d.staff); },
-      function (e) { if (!cached.length) draw([], '无法加载员工名单：' + e.message); });
+      function (e) { if (e.code !== 'DEVICE' && !cached.length) draw([], '无法加载员工名单：' + e.message); });
   }
 
   // ---------------- 页面 1：入库任务列表 ----------------
@@ -447,6 +491,21 @@
   // ---------------- 页面 3：条码采集 ----------------
   var BC = [['pcs', 'Single Item Barcode', '单品条码 PCS'], ['pack', 'Middle Package Barcode', '中包装条码 PACK'], ['ctn', 'Carton Barcode', '箱码 CTN']];
   var REASONS = ['货本来就没条码', '货没收到不知道实际码', '自包装产品'];
+  // 与后台相同的输入检查（后台为准；这里先提示，免得白跑一趟）
+  var BARCODE_RE = /^[0-9A-Za-z][0-9A-Za-z\-.\/]*$/;
+  function checkInput(v) {
+    var errs = [];
+    BC.forEach(function (b) { var x = v[b[0]]; if (x && (x.length > 64 || !BARCODE_RE.test(x))) errs.push(b[2] + '：只能是字母、数字和 - . /，最多 64 位（现在是 ' + x + '）'); });
+    if (v.qty && !(/^\d{1,7}(\.\d{1,3})?$/.test(v.qty) && +v.qty <= 1000000)) errs.push('实收数量：只能填数字');
+    if (v.shelf && !(/^\d{1,3}$/.test(v.shelf) && +v.shelf <= 600)) errs.push('保质期（月）：0–600 的整数');
+    [['specActual', '实际规格', 60], ['remark', '备注', 200]].forEach(function (x) {
+      var t = v[x[0]] || '';
+      if (t.length > x[2]) errs.push(x[1] + '：最多 ' + x[2] + ' 个字');
+      if (t.charAt(0) === '=') errs.push(x[1] + '：不能以 = 开头');
+    });
+    if (v.reason && REASONS.indexOf(v.reason) < 0) errs.push('无条码原因：请从选项里选');
+    return errs;
+  }
 
   function viewCollect(jobId, pid) {
     var c = cacheGet(jobId);
@@ -475,20 +534,20 @@
       BC.map(function (b, i) {
         return '<div class="bc" id="w_' + b[0] + '"><label><span>' + (i + 1) + '. ' + b[2] + ' <small id="t_' + b[0] + '">' + b[1] + '</small></span>' +
           '<span class="tools"><button class="tbtn" data-kbd="' + b[0] + '">⌨ 手输</button><button class="tbtn" data-clr="' + b[0] + '">✕ 清除</button></span></label>' +
-          '<div class="bcrow"><input id="f_' + b[0] + '" data-k="' + b[0] + '" inputmode="' + im + '" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="next" value="' + esc(orig[b[0]]) + '" placeholder="扫描或输入">' +
+          '<div class="bcrow"><input id="f_' + b[0] + '" data-k="' + b[0] + '" inputmode="' + im + '" maxlength="64" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="next" value="' + esc(orig[b[0]]) + '" placeholder="扫描或输入">' +
           '<button class="btn cam" data-cam="' + b[0] + '">📷 扫描</button></div></div>';
       }).join('') +
       '<div class="bc" id="w_qty"><label><span>4. 实收数量 <small>按供应商单位（' + esc(unit) + '）清点</small></span></label>' +
       '<div class="bcrow qtyrow"><button class="btn clr" data-step="-1" aria-label="减1">−</button>' +
-      '<input id="f_qty" inputmode="decimal" enterkeyhint="done" autocomplete="off" value="' + esc(orig.qty) + '" placeholder="数量">' +
+      '<input id="f_qty" inputmode="decimal" maxlength="11" enterkeyhint="done" autocomplete="off" value="' + esc(orig.qty) + '" placeholder="数量">' +
       '<span class="unit">' + esc(unit) + '</span><button class="btn clr" data-step="1" aria-label="加1">+</button></div></div>' +
       '<div class="bc" id="w_spec"><label class="chk"><input type="checkbox" id="f_specBad"' + (orig.specBad ? ' checked' : '') + '><span>5. 规格不符</span><small>（与上面规格不一致时勾选）</small></label>' +
-      '<div id="specBox"' + (orig.specBad ? '' : ' hidden') + '><input id="f_specActual" class="search" autocomplete="off" placeholder="实际规格（选填），如 1箱=24包" value="' + esc(orig.specActual) + '"></div></div>' +
-      '<div class="bc" id="w_remark"><label><span>6. 备注（选填）</span></label><textarea id="f_remark" class="remark" rows="2" placeholder="例：外箱破损2箱 / 少1件 / 条码模糊">' + esc(orig.remark) + '</textarea></div>' +
+      '<div id="specBox"' + (orig.specBad ? '' : ' hidden') + '><input id="f_specActual" class="search" maxlength="60" autocomplete="off" placeholder="实际规格（选填），如 1箱=24包" value="' + esc(orig.specActual) + '"></div></div>' +
+      '<div class="bc" id="w_remark"><label><span>6. 备注（选填）</span></label><textarea id="f_remark" class="remark" rows="2" maxlength="200" placeholder="例：外箱破损2箱 / 少1件 / 条码模糊">' + esc(orig.remark) + '</textarea></div>' +
       '<details class="more"' + (moreOpen ? ' open' : '') + '><summary>更多资料（选填）：无条码原因 / 日期 / 保质期</summary><div class="grid2">' +
       '<div class="full"><label>无条码原因</label><select id="f_reason"><option value=""></option>' + REASONS.map(function (r) { return '<option' + (orig.reason === r ? ' selected' : '') + '>' + r + '</option>'; }).join('') +
       (orig.reason && REASONS.indexOf(orig.reason) < 0 ? '<option selected>' + esc(orig.reason) + '</option>' : '') + '</select></div>' +
-      '<div class="full"><label>保质期（月）</label><input id="f_shelf" inputmode="numeric" value="' + esc(orig.shelf) + '"></div>' +
+      '<div class="full"><label>保质期（月）</label><input id="f_shelf" inputmode="numeric" maxlength="3" value="' + esc(orig.shelf) + '"></div>' +
       '<div><label>生产日期（日/月/年）</label><input id="f_mfg" class="dt" inputmode="numeric" autocomplete="off" maxlength="10" placeholder="例 22092026" value="' + esc(isoToDmy(orig.mfg)) + '"></div>' +
       '<div><label>有效期（日/月/年）</label><input id="f_exp" class="dt" inputmode="numeric" autocomplete="off" maxlength="10" placeholder="例 21032028" value="' + esc(isoToDmy(orig.exp)) + '"></div>' +
       '</div></details><div id="dock" class="dock"></div>';
@@ -529,10 +588,17 @@
       if (saving || !btn) return;        // 防止连按造成重复提交
       var cur = values();
       var badDates = [['mfg', '生产日期'], ['exp', '有效期']].filter(function (x) { return F[x[0]].value.trim() && dmyToIso(F[x[0]].value) === null; });
-      if (force !== true && force !== 'date' && badDates.length) {
-        modal('<h3>日期看不懂</h3><p class="hint">' + badDates.map(function (x) { return x[1] + '：' + esc(F[x[0]].value); }).join('<br>') + '<br><br>请按 日/月/年 输入数字，例如 22092026 或 220926。</p><div class="row"><button class="btn ghost" id="dGo">去修改</button><button class="btn save" id="dSave">仍然保存</button></div>', function (m) {
+      if (badDates.length) {
+        modal('<h3>日期看不懂</h3><p class="hint">' + badDates.map(function (x) { return x[1] + '：' + esc(F[x[0]].value); }).join('<br>') + '<br><br>请按 日/月/年 输入数字，例如 22092026 或 220926；不知道就清空。</p><div class="row"><button class="btn save" id="dGo">去修改</button></div>', function (m) {
           $('#dGo', m).onclick = function () { closeModal(); var d = $('details.more'); if (d) d.open = true; F[badDates[0][0]].focus(); };
-          $('#dSave', m).onclick = function () { closeModal(); doSave('date'); };
+          setTimeout(function () { $('#dGo', m).focus(); }, 30);
+        });
+        return;
+      }
+      var errs = checkInput(cur);
+      if (errs.length) {
+        modal('<h3>这些资料需要修改</h3><p class="hint">' + errs.map(esc).join('<br>') + '</p><div class="row"><button class="btn save" id="eGo">去修改</button></div>', function (m) {
+          $('#eGo', m).onclick = closeModal; setTimeout(function () { $('#eGo', m).focus(); }, 30);
         });
         return;
       }
