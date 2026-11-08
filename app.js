@@ -3,7 +3,7 @@
  * 原则：只采集原始资料，不做任何核对。先存手机（离线队列），再上传云端。 */
 (function () {
   'use strict';
-  var VERSION = '1.1.1';
+  var VERSION = '1.1.2';
   var $ = function (s, el) { return (el || document).querySelector(s); };
   var app = $('#app');
 
@@ -32,6 +32,26 @@
     var t = $('#toast'); t.textContent = msg; t.classList.add('show');
     clearTimeout(toast._t); toast._t = setTimeout(function () { t.classList.remove('show'); }, ms || 1800);
   }
+  // 日期：只输入数字，按马来西亚习惯 日/月/年（6 位 ddmmyy 或 8 位 ddmmyyyy）
+  function pad2(n) { return ('0' + n).slice(-2); }
+  function dmyFormat(v) {
+    var d = String(v || '').replace(/\D/g, '').slice(0, 8);
+    if (d.length <= 2) return d;
+    if (d.length <= 4) return d.slice(0, 2) + '/' + d.slice(2);
+    return d.slice(0, 2) + '/' + d.slice(2, 4) + '/' + d.slice(4);
+  }
+  function dmyToIso(v) {
+    var d = String(v || '').replace(/\D/g, '');
+    if (!d) return '';
+    var dd, mm, yy;
+    if (d.length === 6) { dd = +d.slice(0, 2); mm = +d.slice(2, 4); yy = 2000 + +d.slice(4); }
+    else if (d.length === 8) { dd = +d.slice(0, 2); mm = +d.slice(2, 4); yy = +d.slice(4); }
+    else return null;
+    var t = new Date(Date.UTC(yy, mm - 1, dd));
+    if (t.getUTCFullYear() !== yy || t.getUTCMonth() !== mm - 1 || t.getUTCDate() !== dd) return null;
+    return yy + '-' + pad2(mm) + '-' + pad2(dd);
+  }
+  function isoToDmy(s) { var m = String(s || '').match(/^(\d{4})-(\d{2})-(\d{2})$/); return m ? m[3] + '/' + m[2] + '/' + m[1] : String(s || ''); }
   function hhmm(iso) { try { var d = new Date(iso); return ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2) + ':' + ('0' + d.getSeconds()).slice(-2); } catch (e) { return ''; } }
 
   // ---------------- 首次设置：#setup=<base64> ----------------
@@ -163,7 +183,7 @@
   }
   function hasV(x) { return x !== null && x !== undefined && String(x).trim() !== ''; }
   function statusOf(f) {
-    var any = ['pcs', 'pack', 'ctn', 'reason', 'qty', 'mfg', 'shelf', 'exp'].some(function (k) { return hasV(f[k]); }) || f.specBad === true || f.specBad === 'Y';
+    var any = ['pcs', 'pack', 'ctn', 'reason', 'qty', 'mfg', 'shelf', 'exp', 'remark'].some(function (k) { return hasV(f[k]); }) || f.specBad === true || f.specBad === 'Y';
     if (!any) return '未采集';
     var codesOk = hasV(f.reason) || (hasV(f.pcs) && hasV(f.ctn));
     var qtyOk = hasV(f.qty) || f.reason === '货没收到不知道实际码';
@@ -440,7 +460,7 @@
     var nav = LS.get('nav_' + jobId, null) || c.list.map(function (x) { return x.id; });
     var idx = nav.indexOf(pid);
     var orig = { pcs: p.pcs || '', pack: p.pack || '', ctn: p.ctn || '', reason: p.reason || '', qty: p.qty || '', mfg: p.mfg || '', shelf: p.shelf || '', exp: p.exp || '',
-      specBad: p.specBad === 'Y', specActual: p.specActual || '' };
+      specBad: p.specBad === 'Y', specActual: p.specActual || '', remark: p.remark || '' };
     var scanTimes = {};
     var moreOpen = LS.get('moreOpen', false) || !!(orig.reason || orig.mfg || orig.shelf || orig.exp);
     var unit = p.unit || '件';
@@ -464,20 +484,22 @@
       '<span class="unit">' + esc(unit) + '</span><button class="btn clr" data-step="1" aria-label="加1">+</button></div></div>' +
       '<div class="bc" id="w_spec"><label class="chk"><input type="checkbox" id="f_specBad"' + (orig.specBad ? ' checked' : '') + '><span>5. 规格不符</span><small>（与上面规格不一致时勾选）</small></label>' +
       '<div id="specBox"' + (orig.specBad ? '' : ' hidden') + '><input id="f_specActual" class="search" autocomplete="off" placeholder="实际规格（选填），如 1箱=24包" value="' + esc(orig.specActual) + '"></div></div>' +
+      '<div class="bc" id="w_remark"><label><span>6. 备注（选填）</span></label><textarea id="f_remark" class="remark" rows="2" placeholder="例：外箱破损2箱 / 少1件 / 条码模糊">' + esc(orig.remark) + '</textarea></div>' +
       '<details class="more"' + (moreOpen ? ' open' : '') + '><summary>更多资料（选填）：无条码原因 / 日期 / 保质期</summary><div class="grid2">' +
       '<div class="full"><label>无条码原因</label><select id="f_reason"><option value=""></option>' + REASONS.map(function (r) { return '<option' + (orig.reason === r ? ' selected' : '') + '>' + r + '</option>'; }).join('') +
       (orig.reason && REASONS.indexOf(orig.reason) < 0 ? '<option selected>' + esc(orig.reason) + '</option>' : '') + '</select></div>' +
       '<div class="full"><label>保质期（月）</label><input id="f_shelf" inputmode="numeric" value="' + esc(orig.shelf) + '"></div>' +
-      '<div><label>生产日期</label><input id="f_mfg" type="date" value="' + esc(orig.mfg) + '"></div>' +
-      '<div><label>有效期（包装印刷）</label><input id="f_exp" type="date" value="' + esc(orig.exp) + '"></div>' +
+      '<div><label>生产日期（日/月/年）</label><input id="f_mfg" class="dt" inputmode="numeric" autocomplete="off" maxlength="10" placeholder="例 22092026" value="' + esc(isoToDmy(orig.mfg)) + '"></div>' +
+      '<div><label>有效期（日/月/年）</label><input id="f_exp" class="dt" inputmode="numeric" autocomplete="off" maxlength="10" placeholder="例 21032028" value="' + esc(isoToDmy(orig.exp)) + '"></div>' +
       '</div></details><div id="dock" class="dock"></div>';
 
-    var F = {}; ['pcs', 'pack', 'ctn', 'reason', 'qty', 'shelf', 'mfg', 'exp', 'specBad', 'specActual'].forEach(function (k) { F[k] = $('#f_' + k); });
+    var F = {}; ['pcs', 'pack', 'ctn', 'reason', 'qty', 'shelf', 'mfg', 'exp', 'specBad', 'specActual', 'remark'].forEach(function (k) { F[k] = $('#f_' + k); });
     F.specBad.addEventListener('change', function () { $('#specBox').hidden = !F.specBad.checked; if (F.specBad.checked) F.specActual.focus(); });
     $('details.more').addEventListener('toggle', function (e) { LS.set('moreOpen', e.target.open); });
     function values() {
       var o = {}; Object.keys(F).forEach(function (k) { o[k] = k === 'specBad' ? F[k].checked : String(F[k].value || '').replace(/[\r\n\t]/g, '').trim(); });
       if (!o.specBad) o.specActual = '';
+      ['mfg', 'exp'].forEach(function (k) { var iso = dmyToIso(o[k]); if (iso !== null) o[k] = iso; });   // 日/月/年 → yyyy-mm-dd
       return o;
     }
     function dirty() { var v = values(); return Object.keys(v).some(function (k) { return k === 'specBad' ? v[k] !== !!orig[k] : v[k] !== String(orig[k] || ''); }); }
@@ -506,6 +528,14 @@
       var btn = $('#bSave');
       if (saving || !btn) return;        // 防止连按造成重复提交
       var cur = values();
+      var badDates = [['mfg', '生产日期'], ['exp', '有效期']].filter(function (x) { return F[x[0]].value.trim() && dmyToIso(F[x[0]].value) === null; });
+      if (force !== true && force !== 'date' && badDates.length) {
+        modal('<h3>日期看不懂</h3><p class="hint">' + badDates.map(function (x) { return x[1] + '：' + esc(F[x[0]].value); }).join('<br>') + '<br><br>请按 日/月/年 输入数字，例如 22092026 或 220926。</p><div class="row"><button class="btn ghost" id="dGo">去修改</button><button class="btn save" id="dSave">仍然保存</button></div>', function (m) {
+          $('#dGo', m).onclick = function () { closeModal(); var d = $('details.more'); if (d) d.open = true; F[badDates[0][0]].focus(); };
+          $('#dSave', m).onclick = function () { closeModal(); doSave('date'); };
+        });
+        return;
+      }
       if (force !== true && !cur.qty && cur.reason !== '货没收到不知道实际码') {
         modal('<h3>实收数量还没填</h3><p class="hint">这个商品会显示为“部分采集”。</p><div class="row"><button class="btn ghost" id="qGo">去填写</button><button class="btn save" id="qSave">仍然保存</button></div>', function (m) {
           $('#qGo', m).onclick = function () { closeModal(); F.qty.focus(); };
@@ -567,6 +597,9 @@
           else F.qty.focus();                       // 箱码扫完 → 实收数量
         }
       });
+    });
+    ['mfg', 'exp'].forEach(function (k) {
+      F[k].addEventListener('input', function () { var v = dmyFormat(F[k].value); if (v !== F[k].value) F[k].value = v; F[k].classList.toggle('bad', !!v && v.replace(/\D/g, '').length >= 6 && dmyToIso(v) === null); });
     });
     F.qty.addEventListener('focus', function () { $('#w_qty').classList.add('focus'); try { F.qty.select(); } catch (e) { } });
     F.qty.addEventListener('blur', function () { $('#w_qty').classList.remove('focus'); });
