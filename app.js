@@ -3,7 +3,7 @@
  * 原则：只采集原始资料，不做任何核对。先存手机（离线队列），再上传云端。 */
 (function () {
   'use strict';
-  var VERSION = '1.2.1';
+  var VERSION = '1.2.4';
   var $ = function (s, el) { return (el || document).querySelector(s); };
   var app = $('#app');
 
@@ -70,6 +70,12 @@
   function monthsBetween(a, b) {
     var x = String(a).split('-').map(Number), y = String(b).split('-').map(Number);
     return Math.round((y[0] - x[0]) * 12 + (y[1] - x[1]) + (y[2] - x[2]) / 30);
+  }
+  /** 应收 / 实收：返回 { cls, diff }（只做显示，不做核对） */
+  function pickCmp(exp, got) {
+    if (got === '' || got == null || exp === '' || exp == null || isNaN(+exp) || isNaN(+got)) return { cls: '', diff: '' };
+    var d = Math.round((+got - +exp) * 1000) / 1000;
+    return { cls: d === 0 ? 'eq' : (d < 0 ? 'lt' : 'gt'), diff: d === 0 ? '' : (d > 0 ? '+' + d : String(d)) };
   }
   function isoToDmy(s) { var m = String(s || '').match(/^(\d{4})-(\d{2})-(\d{2})$/); return m ? m[3] + '/' + m[2] + '/' + m[1] : String(s || ''); }
   function hhmm(iso) { try { var d = new Date(iso); return ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2) + ':' + ('0' + d.getSeconds()).slice(-2); } catch (e) { return ''; } }
@@ -478,6 +484,11 @@
       $('#plist').innerHTML = list.length ? '<div class="list">' + list.map(function (p) {
         return '<button class="prod" data-id="' + esc(p.id) + '"><span class="no">' + p.seq + '</span><span class="nm"><div>' + esc(p.name) + '</div>' +
           ((p.spec || p.sysSpec) ? '<div class="sp">' + esc(p.spec) + (p.sysSpec ? ' · 系统 ' + esc(p.sysSpec) : '') + '</div>' : '') +
+          ((p.expQty || p.qty) ? (function () {
+            var c = pickCmp(p.expQty, p.qty);
+            return '<div class="sp pick">应收 <b>' + esc(p.expQty || '—') + '</b> · 实收 <b class="got ' + c.cls + '">' + esc(p.qty === '' || p.qty == null ? '—' : p.qty) + '</b> ' + esc(p.unit || '件') +
+              (c.diff ? ' <span class="pdiff ' + c.cls + '">' + esc(c.diff) + '</span>' : '') + '</div>';
+          })() : '') +
           (p.specBad === 'Y' ? '<span class="tag-bad">规格不符</span>' : '') + '</span>' +
           '<span class="badge ' + (cls[p.status] || 'b-todo') + '">' + esc(p.status) + (p.pendingId ? '<span class="pend" title="待上传">⇡</span>' : '') + '</span></button>';
       }).join('') + '</div>' : '<div class="empty">没有符合条件的商品</div>';
@@ -543,6 +554,9 @@
       '<div class="card"><div class="pname">' + esc(p.name) + '</div>' +
       (p.sysName && p.sysName !== p.name ? '<div class="hint">系统商品：' + esc(p.sysName) + '</div>' : '') +
       '<div class="specs"><div><span>供应商规格</span><b>' + esc(p.spec || '—') + '</b></div><div><span>系统规格</span><b>' + esc(p.sysSpec || '—') + '</b></div></div>' +
+      '<div class="expq"><div><span>应收数量</span><b>' + esc(p.expQty || '—') + '</b> ' + esc(unit) + '</div>' +
+      '<div><span>实收数量</span><b id="pickGot">—</b> ' + esc(unit) + ' <span class="pdiff" id="pickDiff"></span></div>' +
+      (p.expText && p.expQty && p.expText !== p.expQty + ' ' + unit ? '<small>供应商原文：' + esc(p.expText) + '</small>' : '') + '</div>' +
       (p.op ? '<div class="hint" style="margin-top:4px">上次：' + esc(p.op) + ' ' + esc(p.time) + '</div>' : '') + '</div>' +
       BC.map(function (b, i) {
         return '<div class="bc" id="w_' + b[0] + '"><label><span>' + (i + 1) + '. ' + b[2] + ' <small id="t_' + b[0] + '">' + b[1] + '</small></span>' +
@@ -550,7 +564,7 @@
           '<div class="bcrow"><input id="f_' + b[0] + '" data-k="' + b[0] + '" inputmode="' + im + '" maxlength="64" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="next" value="' + esc(orig[b[0]]) + '" placeholder="扫描或输入">' +
           '<button class="btn cam" data-cam="' + b[0] + '">📷 扫描</button></div></div>';
       }).join('') +
-      '<div class="bc" id="w_qty"><label><span>4. 实收数量 <small>按供应商单位（' + esc(unit) + '）清点</small></span></label>' +
+      '<div class="bc" id="w_qty"><label><span>4. 实收数量 <small>按供应商单位（' + esc(unit) + '）清点' + (p.expQty ? ' · 应收 ' + esc(p.expQty) : '') + '</small></span></label>' +
       '<div class="bcrow qtyrow"><button class="btn clr" data-step="-1" aria-label="减1">−</button>' +
       '<input id="f_qty" inputmode="decimal" maxlength="11" enterkeyhint="done" autocomplete="off" value="' + esc(orig.qty) + '" placeholder="数量">' +
       '<span class="unit">' + esc(unit) + '</span><button class="btn clr" data-step="1" aria-label="加1">+</button></div></div>' +
@@ -576,7 +590,10 @@
       return o;
     }
     function dirty() { var v = values(); return Object.keys(v).some(function (k) { return k === 'specBad' ? v[k] !== !!orig[k] : v[k] !== String(orig[k] || ''); }); }
-    function markHas() { BC.concat([['qty']]).forEach(function (b) { F[b[0]].classList.toggle('has', !!F[b[0]].value.trim()); }); var s = statusOf(values()); $('#pst').innerHTML = '<span class="badge ' + ({ '已采集': 'b-done', '部分采集': 'b-part', '未采集': 'b-todo' })[s] + '">' + s + '</span>'; }
+    function markHas() {
+      var q = F.qty.value.trim(), c = pickCmp(p.expQty, q), g = $('#pickGot'), dd = $('#pickDiff');
+      if (g) { g.textContent = q || '—'; g.className = c.cls; dd.textContent = c.diff; dd.className = 'pdiff ' + c.cls; }
+      BC.concat([['qty']]).forEach(function (b) { F[b[0]].classList.toggle('has', !!F[b[0]].value.trim()); }); var s = statusOf(values()); $('#pst').innerHTML = '<span class="badge ' + ({ '已采集': 'b-done', '部分采集': 'b-part', '未采集': 'b-todo' })[s] + '">' + s + '</span>'; }
     leaveGuard = dirty;
 
     // —— 底部按钮：SAVE ⇄ NEXT PRODUCT / 返回清单
@@ -605,14 +622,14 @@
       if (badDates.length) {
         modal('<h3>日期看不懂</h3><p class="hint">' + badDates.map(function (x) { return x[1] + '：' + esc(F[x[0]].value); }).join('<br>') + '<br><br>请按 日/月/年 输入数字，例如 22092026 或 220926；不知道就清空。</p><div class="row"><button class="btn save" id="dGo">去修改</button></div>', function (m) {
           $('#dGo', m).onclick = function () { closeModal(); var d = $('details.more'); if (d) d.open = true; F[badDates[0][0]].focus(); };
-          setTimeout(function () { $('#dGo', m).focus(); }, 30);
+          setTimeout(function () { var x = $('#dGo', m); if (x) x.focus(); }, 30);
         });
         return;
       }
       var errs = checkInput(cur);
       if (errs.length) {
         modal('<h3>这些资料需要修改</h3><p class="hint">' + errs.map(esc).join('<br>') + '</p><div class="row"><button class="btn save" id="eGo">去修改</button></div>', function (m) {
-          $('#eGo', m).onclick = closeModal; setTimeout(function () { $('#eGo', m).focus(); }, 30);
+          $('#eGo', m).onclick = closeModal; setTimeout(function () { var x = $('#eGo', m); if (x) x.focus(); }, 30);
         });
         return;
       }
@@ -620,7 +637,7 @@
         modal('<h3>实收数量还没填</h3><p class="hint">这个商品会显示为“部分采集”。</p><div class="row"><button class="btn ghost" id="qGo">去填写</button><button class="btn save" id="qSave">仍然保存</button></div>', function (m) {
           $('#qGo', m).onclick = function () { closeModal(); F.qty.focus(); };
           $('#qSave', m).onclick = function () { closeModal(); doSave(true); };
-          setTimeout(function () { $('#qGo', m).focus(); }, 30);
+          setTimeout(function () { var x = $('#qGo', m); if (x) x.focus(); }, 30);
         });
         return;
       }
@@ -753,11 +770,123 @@
   }, true);
 
   // ---------------- 摄像头扫码 ----------------
-  var cam = null, camOpen = false;
+  // ---------------- 摄像头扫码（v1.2.2 重写） ----------------
+  // 1) 安卓 Chrome：直接用系统条码识别 BarcodeDetector，识别整张画面，不用对准小框，速度快
+  //    其他手机（如 iPhone）：用 ZXing（html5-qrcode），扫描区改成宽的横条
+  // 2) 要求 1920×1080 高分辨率 + 连续自动对焦（一维条码靠横向像素，之前默认只有 640×480）
+  // 3) 只识别商品条码格式（EAN/UPC/Code128/ITF/Code39），之前连 QR/DataMatrix 一起找，慢
+  // 4) 手电筒、放大按钮；8 秒还没扫到给提示
+  // 5) EAN/UPC 检查校验位；没有校验位的格式要连续读到 2 次相同才接受（防误读）
+  var cam = null, camOpen = false, camState = null;
+  var RETAIL_FORMATS = ['ean_13', 'ean_8', 'upc_a', 'upc_e', 'code_128', 'itf', 'code_39'];
+  function checkDigitOk(v, fmt) {
+    var len = { ean13: 13, ean8: 8, upca: 12 }[fmt];
+    if (!len) return true;
+    if (!new RegExp('^\\d{' + len + '}$').test(v)) return false;
+    var sum = 0;
+    for (var i = v.length - 2, w = 3; i >= 0; i--, w = 4 - w) sum += +v[i] * w;
+    return (10 - sum % 10) % 10 === +v[v.length - 1];
+  }
   function stopCamera() {
+    var st = camState; camState = null;
+    if (st) {
+      clearTimeout(st.loopT); clearTimeout(st.tipT);
+      if (st.stream) st.stream.getTracks().forEach(function (t) { try { t.stop(); } catch (e) { } });
+    }
     if (cam) { var c = cam; cam = null; try { c.stop().catch(function () { }).then(function () { try { c.clear(); } catch (e) { } }); } catch (e) { } }
     var s = $('.scanner'); if (s) s.remove();
     camOpen = false;
+  }
+  function openCamera(kind, onCode) {
+    var label = BC.filter(function (b) { return b[0] === kind; })[0][2];
+    var wrap = document.createElement('div');
+    wrap.className = 'scanner';
+    wrap.innerHTML = '<div class="top"><span>扫描：' + label + '</span><span id="camMsg" class="hint"></span></div>' +
+      '<div class="camview"><video id="camVideo" playsinline muted autoplay></video><div class="aim"><i></i></div><div id="reader"></div></div>' +
+      '<div class="camtip" id="camTip">把条码横着放进框里，离手机 10–20 厘米，拿稳</div>' +
+      '<div class="bottom"><button class="btn ghost" id="camClose">取消</button><button class="btn ghost" id="camTorch" hidden>🔦 手电筒</button><button class="btn ghost" id="camZoom" hidden>🔍 放大</button></div>';
+    document.body.appendChild(wrap);
+    camOpen = true;
+    var st = camState = { done: false, last: '', lastT: 0, torch: false, zoomed: false };
+    $('#camClose').onclick = stopCamera;
+    function accept(text, fmt) {
+      if (st.done || camState !== st) return;
+      var v = String(text || '').replace(/[\r\n\t]/g, '').trim();
+      if (!v) return;
+      var f = String(fmt || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+      if (/^(ean13|ean8|upca|upce)$/.test(f)) { if (!checkDigitOk(v, f)) return; }
+      else { var now = Date.now(); if (v !== st.last || now - st.lastT > 1500) { st.last = v; st.lastT = now; return; } }
+      st.done = true; beep(); stopCamera(); onCode(v);
+    }
+    function fail(err) {
+      if (camState !== st) return;
+      var r = $('.scanner .camview'); if (r) r.innerHTML = '<p style="color:#fff;padding:20px">无法打开摄像头：' + esc(err && (err.message || err.name) || err) +
+        '<br><br>请在 Chrome 网站设置里允许本网站使用相机；或改用扫描头 / 手动输入。</p>';
+    }
+    // 手电筒 / 放大（手机支持才显示）
+    function setupControls(getCaps, apply) {
+      var caps = {}; try { caps = getCaps() || {}; } catch (e) { }
+      if (caps.focusMode && caps.focusMode.indexOf('continuous') >= 0) apply({ advanced: [{ focusMode: 'continuous' }] }).catch(function () { });
+      if (caps.torch) {
+        var tb = $('#camTorch'); tb.hidden = false;
+        tb.onclick = function () { st.torch = !st.torch; apply({ advanced: [{ torch: st.torch }] }).catch(function () { }); tb.classList.toggle('on', st.torch); };
+      }
+      if (caps.zoom && caps.zoom.max >= 1.5) {
+        var zb = $('#camZoom'), z2 = Math.min(2, caps.zoom.max); zb.hidden = false;
+        zb.onclick = function () { st.zoomed = !st.zoomed; apply({ advanced: [{ zoom: st.zoomed ? z2 : (caps.zoom.min || 1) }] }).catch(function () { }); zb.classList.toggle('on', st.zoomed); };
+      }
+    }
+    st.tipT = setTimeout(function () {
+      var t = $('#camTip'); if (t && camState === st) t.textContent = '还没扫到？光线暗→开手电筒；条码小→点放大或靠近一点；反光→手机稍微斜一点';
+    }, 8000);
+    var video = $('#camVideo');
+    var hi = { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } };
+    function startNative(formats) {
+      var det = new BarcodeDetector({ formats: formats });
+      navigator.mediaDevices.getUserMedia({ audio: false, video: hi }).then(function (stream) {
+        if (camState !== st) { stream.getTracks().forEach(function (t) { t.stop(); }); return; }
+        st.stream = stream; video.srcObject = stream;
+        var track = stream.getVideoTracks()[0];
+        setupControls(function () { return track.getCapabilities ? track.getCapabilities() : {}; }, function (c) { return track.applyConstraints(c); });
+        return video.play();
+      }).then(function () {
+        (function loop() {
+          if (camState !== st) return;
+          if (video.readyState < 2) { st.loopT = setTimeout(loop, 80); return; }
+          det.detect(video).then(function (rs) {
+            (rs || []).forEach(function (r) { accept(r.rawValue, r.format); });
+          }).catch(function () { }).then(function () { if (camState === st && !st.done) st.loopT = setTimeout(loop, 40); });
+        })();
+      }).catch(fail);
+    }
+    function startZxing() {
+      if (!window.Html5Qrcode) { stopCamera(); toast('扫码组件未加载，请联网后刷新一次'); return; }
+      wrap.classList.add('zx');
+      var F = Html5QrcodeSupportedFormats;
+      cam = new Html5Qrcode('reader', {
+        verbose: false,
+        formatsToSupport: [F.EAN_13, F.EAN_8, F.UPC_A, F.UPC_E, F.CODE_128, F.ITF, F.CODE_39],
+        experimentalFeatures: { useBarCodeDetectorIfSupported: true }
+      });
+      var c = cam;
+      c.start({ facingMode: 'environment' }, {
+        fps: 20, videoConstraints: hi,
+        qrbox: function (vw, vh) { return { width: Math.floor(vw * 0.92), height: Math.max(80, Math.floor(Math.min(vh * 0.45, vw * 0.5))) }; }
+      }, function (text, res) {
+        accept(text, res && res.result && res.result.format && res.result.format.formatName);
+      }, function () { }).then(function () {
+        if (cam !== c) return;
+        setupControls(function () { return c.getRunningTrackCapabilities(); }, function (x) { return c.applyVideoConstraints(x); });
+      }).catch(fail);
+    }
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { fail('这个浏览器不支持摄像头（请用 Chrome，网址必须是 https）'); return; }
+    if ('BarcodeDetector' in window && BarcodeDetector.getSupportedFormats) {
+      BarcodeDetector.getSupportedFormats().then(function (all) {
+        if (camState !== st) return;
+        var f = RETAIL_FORMATS.filter(function (x) { return all.indexOf(x) >= 0; });
+        if (f.indexOf('ean_13') >= 0) startNative(f); else startZxing();
+      }, startZxing);
+    } else startZxing();
   }
   function beep() {
     try { if (navigator.vibrate) navigator.vibrate(80); } catch (e) { }
@@ -767,37 +896,6 @@
       o.frequency.value = 1800; g.gain.value = 0.15; o.connect(g); g.connect(ctx.destination); o.start(); o.stop(ctx.currentTime + 0.09);
     } catch (e) { }
   }
-  function openCamera(kind, onCode) {
-    if (!window.Html5Qrcode) { toast('扫码组件未加载，请联网后刷新一次'); return; }
-    var label = BC.filter(function (b) { return b[0] === kind; })[0][2];
-    var wrap = document.createElement('div');
-    wrap.className = 'scanner';
-    wrap.innerHTML = '<div class="top"><span>扫描：' + label + '</span><span id="camMsg" class="hint" style="color:#ccc"></span></div><div id="reader"></div>' +
-      '<div class="bottom"><button class="btn ghost" id="camClose">取消</button></div>';
-    document.body.appendChild(wrap);
-    camOpen = true;
-    $('#camClose').onclick = stopCamera;
-    var F = Html5QrcodeSupportedFormats;
-    cam = new Html5Qrcode('reader', {
-      verbose: false,
-      formatsToSupport: [F.EAN_13, F.EAN_8, F.UPC_A, F.UPC_E, F.CODE_128, F.CODE_39, F.CODE_93, F.ITF, F.CODABAR, F.QR_CODE, F.DATA_MATRIX],
-      experimentalFeatures: { useBarCodeDetectorIfSupported: true }
-    });
-    var w = Math.min(window.innerWidth - 40, 360);
-    var done = false;
-    cam.start({ facingMode: 'environment' }, { fps: 15, qrbox: { width: w, height: Math.round(w * 0.5) } },
-      function (text) {
-        if (done) return; done = true;
-        beep();
-        stopCamera();
-        onCode(String(text).replace(/[\r\n\t]/g, '').trim());
-      }, function () { }).catch(function (err) {
-        var m = $('#camMsg'); if (m) m.textContent = '';
-        var r = $('#reader'); if (r) r.innerHTML = '<p style="color:#fff;padding:20px">无法打开摄像头：' + esc(err && err.message || err) +
-          '<br><br>请在 Chrome 网站设置里允许本网站使用相机；或改用扫描头 / 手动输入。</p>';
-      });
-  }
-
   // ---------------- Service Worker（离线打开 APP） ----------------
   if ('serviceWorker' in navigator && location.protocol === 'https:') {
     navigator.serviceWorker.register('sw.js').catch(function () { });
