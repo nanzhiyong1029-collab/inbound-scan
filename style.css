@@ -87,11 +87,31 @@ details.more summary { padding: 10px 0; font-weight: 600; }
 .sheet .row .btn { flex: 1; }
 .menu button { display: block; width: 100%; text-align: left; padding: 14px 6px; border: 0; border-bottom: 1px solid var(--line); background: none; font-size: 16px; }
 .scanner { position: fixed; inset: 0; background: #000; z-index: 45; display: flex; flex-direction: column; }
-.scanner #reader { flex: 1; width: 100%; overflow: hidden; }
-.scanner #reader video { object-fit: cover; }
 .scanner .top { color: #fff; padding: 12px 14px; font-size: 17px; display: flex; justify-content: space-between; align-items: center; }
-.scanner .bottom { padding: 14px; display: flex; gap: 8px; }
+.scanner .top .hint { color: #ccc; }
+.scanner .camview { position: relative; flex: 1; overflow: hidden; background: #000; }
+.scanner #camVideo { width: 100%; height: 100%; object-fit: cover; display: block; }
+.scanner .aim { position: absolute; left: 5%; right: 5%; top: 50%; height: 34%; transform: translateY(-50%); border: 3px solid rgba(255,255,255,.9); border-radius: 12px; box-shadow: 0 0 0 9999px rgba(0,0,0,.35); pointer-events: none; }
+.scanner .aim i { position: absolute; left: 4%; right: 4%; top: 50%; height: 2px; background: #ff3b30; box-shadow: 0 0 8px #ff3b30; }
+.scanner #reader { display: none; }
+.scanner.zx #camVideo, .scanner.zx .aim { display: none; }
+.scanner.zx #reader { display: block; position: absolute; inset: 0; }
+.scanner .camtip { color: #ddd; padding: 10px 14px; font-size: 15px; text-align: center; line-height: 1.4; }
+.scanner .bottom { padding: 10px 14px calc(14px + env(safe-area-inset-bottom)); display: flex; gap: 8px; }
 .scanner .bottom .btn { flex: 1; }
+.scanner .bottom .btn.on { background: #ffd60a; color: #000; border-color: #ffd60a; }
+.expq { margin-top: 8px; padding: 8px 12px; border-radius: 10px; background: #fff7e6; border: 1px solid #ffd591; display: grid; grid-template-columns: 1fr 1fr; gap: 4px 12px; align-items: baseline; }
+.expq span { color: var(--mute); font-size: 14px; margin-right: 6px; }
+.expq b { font-size: 24px; color: #ad4e00; }
+.expq small { color: var(--mute); grid-column: 1 / -1; }
+.expq b.eq, .prod .pick b.eq { color: #1a7f37; }
+.expq b.lt, .prod .pick b.lt { color: #c2410c; }
+.expq b.gt, .prod .pick b.gt { color: #1d4ed8; }
+.pdiff { font-size: 13px; font-weight: 700; padding: 0 6px; border-radius: 8px; }
+.pdiff.lt { background: #ffedd5; color: #c2410c; }
+.pdiff.gt { background: #dbeafe; color: #1d4ed8; }
+.prod .sp.pick { color: var(--mute); }
+.prod .sp.pick b { color: #ad4e00; }
 .field { margin-bottom: 12px; }
 .field label { display: block; font-size: 14px; color: var(--mute); margin-bottom: 4px; }
 .field input, .field textarea { width: 100%; font-size: 16px; padding: 10px; border: 1px solid #c9ced6; border-radius: 10px; }
