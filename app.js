@@ -1,9 +1,9 @@
-/* 入库条码采集 + 库位转移 PWA  v1.3.1
+/* 入库条码采集 + 库位转移 PWA  v1.3.3
  * 页面：#/ 任务列表 → #/job/<JobID> 商品清单 → #/p/<JobID>/<ProductID> 条码采集
  * 原则：只采集原始资料，不做任何核对。先存手机（离线队列），再上传云端。 */
 (function () {
   'use strict';
-  var VERSION = '1.3.1';
+  var VERSION = '1.3.3';
   var $ = function (s, el) { return (el || document).querySelector(s); };
   var app = $('#app');
 
@@ -930,7 +930,7 @@
       var rows = STEPS.map(function (s) {
         var k = s[0], v = st[k], val;
         if (k === 'bc') val = !v ? '' : st.item ? '<b class="tv">' + esc(st.item) + '</b><div class="td">' + esc(st.desc || '') + '</div><div class="hint">箱码 ' + esc(v) + (st.match === 'Item Code' ? '（按 Item Code 识别）' : '') + '</div>'
-          : '<b class="tv">' + esc(v) + '</b><div class="hint">主档没有这个条码，照样记录，办公室按照片确认</div>';
+          : '<b class="tv loc">' + esc(v) + '</b>';
         else if (k === 'photo') val = v ? '<img class="tphoto" src="' + v + '" alt="照片">' : '';
         else val = v ? '<b class="tv loc">' + esc(v) + '</b>' : '';
         return '<button class="tstep' + (cur === k ? ' cur' : '') + (v ? ' ok' : '') + '" data-edit="' + k + '"><span class="tl">' + s[1] + '</span>' +
@@ -938,7 +938,7 @@
       }).join('');
       var scanning = cur === 'src' || cur === 'bc' || cur === 'dst';
       app.innerHTML = modTabs('t') +
-        '<div class="topline"><span>员工：' + esc(operator) + '</span><span class="hint">' + (masters ? '商品主档 ' + masters.count + ' 个条码' : '正在下载商品主档…') + '</span></div>' +
+        '<div class="topline"><span>员工：' + esc(operator) + '</span><span class="hint">' + (masters && masters.count ? '商品主档 ' + masters.count + ' 个条码' : '') + '</span></div>' +
         '<div class="card tcard">' + rows + '</div>' +
         (msg.text ? '<div class="tmsg ' + msg.cls + '">' + esc(msg.text) + '</div>' : '') +
         (scanning ? '<div class="bcrow tscan"><input id="tIn" inputmode="' + im + '" maxlength="64" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="' +
@@ -1009,7 +1009,7 @@
         var it = lookupItem(code) || { itemCode: '', desc: '', match: '未识别' };   // 主档没有也照样记录
         st.bc = code; st.item = it.itemCode; st.desc = it.desc; st.match = it.match;
       } else return;
-      beep(); st.edit = ''; msg = { cls: 'good', text: '✓ ' + (k === 'bc' ? (st.item ? st.item + ' ' + (st.desc || '') : st.bc + '（主档没有，照样记录）') : normLoc(raw)) };
+      beep(); st.edit = ''; msg = { cls: 'good', text: '✓ ' + (k === 'bc' ? (st.item ? st.item + ' ' + (st.desc || '') : st.bc) : normLoc(raw)) };
       draw();
     }
     function reset(keep) {
@@ -1023,7 +1023,7 @@
       var r = { transferId: uuid(), source: st.src, dest: st.dst, barcode: st.bc, itemCode: st.item, desc: st.desc, photo: st.photo,
         clientTime: new Date().toISOString(), operator: operator };
       IDB.put(r).then(function () {
-        recent.unshift({ src: r.source, dst: r.dest, item: r.itemCode || r.barcode, desc: r.itemCode ? r.desc : '（未识别）', t: hhmm(r.clientTime) });
+        recent.unshift({ src: r.source, dst: r.dest, item: r.itemCode || r.barcode, desc: r.itemCode ? r.desc : '', t: hhmm(r.clientTime) });
         recent = recent.slice(0, 5); LS.set('trecent', recent);
         beep(); toast('✓ 已提交');
         busy = false;
@@ -1036,7 +1036,7 @@
     currentRedraw = function () { if (location.hash === '#/t') draw(); };
     draw();
     loadMasters().then(function () { if (location.hash === '#/t') draw(); },
-      function (e) { if (location.hash === '#/t') { msg = { cls: 'bad', text: (e.network ? '离线：' : '') + '商品主档下载失败，' + (masters ? '使用本机旧资料' : '箱码暂时显示不出 Item Code，照样可以记录') }; draw(); } });
+      function (e) { if (location.hash === '#/t') { msg = { cls: 'bad', text: (e.network ? '离线：' : '') + '设置下载失败，' + (masters ? '使用本机旧资料' : '照样可以记录') }; draw(); } });
     flushTransfers();
   }
   // 焦点不在输入框时，扫描头的按键送到扫描框
