@@ -160,6 +160,5 @@ textarea.remark { width: 100%; font: inherit; font-size: 16px; padding: 10px; bo
 .tmsg.good { background: #e8f7ec; color: #1a7f37; }
 .tmsg.bad { background: #fde8e7; color: #b42318; }
 .tphotobtn { display: block; text-align: center; margin: 10px 0; padding: 18px; font-size: 20px; cursor: pointer; }
-.tkeep { margin: 10px 2px; }
 .trow { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 6px 0; border-top: 1px solid var(--line); font-size: 14px; }
 .tsub { display: flex; gap: 8px; }
