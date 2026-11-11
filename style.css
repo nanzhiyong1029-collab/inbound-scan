@@ -137,3 +137,29 @@ textarea.remark { width: 100%; font: inherit; font-size: 16px; padding: 10px; bo
 .grid2 input.auto { background: #eef6ff; border-color: #7aa7e6; }
 .autotag { margin-left: 6px; padding: 0 6px; border-radius: 8px; background: #dbeafe; color: #1d4ed8; font-weight: 600; }
 .grid2 input.bad { border-color: var(--err); background: #fef3f2; }
+
+/* ---------- v1.3 模块切换 + 库位转移 ---------- */
+.mods { display: flex; gap: 8px; margin-bottom: 10px; }
+.mods .mod { flex: 1; padding: 12px 6px; font: 600 17px/1.2 inherit; border-radius: 12px; border: 2px solid var(--line); background: #fff; color: inherit; }
+.mods .mod.on { background: #1f3864; border-color: #1f3864; color: #fff; }
+.tcard { padding: 6px; }
+.tstep { display: block; width: 100%; text-align: left; padding: 10px 12px; margin: 4px 0; border-radius: 10px; border: 2px solid transparent; background: #f6f8fb; font: inherit; color: inherit; }
+.tstep.cur { border-color: #c55a11; background: #fff7f0; }
+.tstep.ok { background: #effaf1; }
+.tstep.ok.cur { border-color: #c55a11; }
+.tstep .tl { display: block; font-size: 14px; color: var(--mute); margin-bottom: 2px; }
+.tstep .tp { font-size: 16px; color: #c55a11; font-weight: 600; }
+.tstep .tv { font-size: 22px; letter-spacing: .5px; }
+.tstep .tv.loc { font-size: 28px; font-weight: 800; letter-spacing: 1px; }
+.tstep .td { font-size: 15px; }
+.tphoto { max-width: 100%; max-height: 160px; border-radius: 8px; display: block; margin-top: 4px; }
+.tscan { margin-top: 10px; }
+.tscan input { font-size: 20px; font-weight: 600; letter-spacing: .5px; }
+.tsub { margin-top: 6px; justify-content: flex-start; }
+.tmsg { margin: 10px 0; padding: 12px; border-radius: 10px; font-size: 17px; font-weight: 600; }
+.tmsg.good { background: #e8f7ec; color: #1a7f37; }
+.tmsg.bad { background: #fde8e7; color: #b42318; }
+.tphotobtn { display: block; text-align: center; margin: 10px 0; padding: 18px; font-size: 20px; cursor: pointer; }
+.tkeep { margin: 10px 2px; }
+.trow { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 6px 0; border-top: 1px solid var(--line); font-size: 14px; }
+.tsub { display: flex; gap: 8px; }
