@@ -1,9 +1,9 @@
-/* 入库条码采集 + 库位转移 PWA  v1.3.0
+/* 入库条码采集 + 库位转移 PWA  v1.3.1
  * 页面：#/ 任务列表 → #/job/<JobID> 商品清单 → #/p/<JobID>/<ProductID> 条码采集
  * 原则：只采集原始资料，不做任何核对。先存手机（离线队列），再上传云端。 */
 (function () {
   'use strict';
-  var VERSION = '1.3.0';
+  var VERSION = '1.3.1';
   var $ = function (s, el) { return (el || document).querySelector(s); };
   var app = $('#app');
 
@@ -824,10 +824,12 @@
 
   // —— 商品条码主档（本机）
   var masters = null;      // { version, byBarcode, byItem, locRe, count }
+  var LOC_DEFAULT = '^\\d{2}-[A-Z]-\\d{2}$';   // 库位标签如 15-O-02（后台可改）
+  function locRe() { return masters ? masters.locRe : new RegExp(LOC_DEFAULT); }
   function buildMasters(m) {
     var byB = {}, byI = {};
     (m.barcodes || []).forEach(function (x) { byB[x[0]] = x; if (!byI[x[1]]) byI[x[1]] = x; });
-    var re; try { re = new RegExp(m.locPattern || '^\\d{2}-[A-Z]\\d{2}$'); } catch (e) { re = /^\d{2}-[A-Z]\d{2}$/; }
+    var re; try { re = new RegExp(m.locPattern || LOC_DEFAULT); } catch (e) { re = new RegExp(LOC_DEFAULT); }
     return { version: m.version, byBarcode: byB, byItem: byI, locRe: re, count: (m.barcodes || []).length, raw: m };
   }
   function loadMasters() {
@@ -918,7 +920,6 @@
   var tState = null;       // 当前这一笔（离开页面后保留，回来继续）
   function viewTransfer() {
     setBar('库位转移', false);
-    prefs.keepLoc = prefs.keepLoc !== false;
     var st = tState || (tState = { src: '', bc: '', item: '', desc: '', match: '', dst: '', photo: '', edit: '' });
     var msg = { cls: '', text: '' }, recent = LS.get('trecent', []), busy = false;
     var STEPS = [['src', '1. 来源库位', '扫描原来的库位条码'], ['bc', '2. 商品箱码', '扫描箱子上的条码'], ['dst', '3. 目的库位', '扫描新的库位条码'], ['photo', '4. 拍照确认', '拍下货物在新库位的照片']];
@@ -928,7 +929,8 @@
       var cur = step(), im = prefs.pda ? 'none' : 'text';
       var rows = STEPS.map(function (s) {
         var k = s[0], v = st[k], val;
-        if (k === 'bc') val = v ? '<b class="tv">' + esc(st.item) + '</b><div class="td">' + esc(st.desc || '') + '</div><div class="hint">箱码 ' + esc(v) + (st.match === 'Item Code' ? '（按 Item Code 识别）' : '') + '</div>' : '';
+        if (k === 'bc') val = !v ? '' : st.item ? '<b class="tv">' + esc(st.item) + '</b><div class="td">' + esc(st.desc || '') + '</div><div class="hint">箱码 ' + esc(v) + (st.match === 'Item Code' ? '（按 Item Code 识别）' : '') + '</div>'
+          : '<b class="tv">' + esc(v) + '</b><div class="hint">主档没有这个条码，照样记录，办公室按照片确认</div>';
         else if (k === 'photo') val = v ? '<img class="tphoto" src="' + v + '" alt="照片">' : '';
         else val = v ? '<b class="tv loc">' + esc(v) + '</b>' : '';
         return '<button class="tstep' + (cur === k ? ' cur' : '') + (v ? ' ok' : '') + '" data-edit="' + k + '"><span class="tl">' + s[1] + '</span>' +
@@ -943,7 +945,6 @@
           esc(STEPS.filter(function (s) { return s[0] === cur; })[0][2]) + '"><button class="btn cam" id="tCam">📷 扫描</button></div>' +
           '<div class="row tsub"><button class="tbtn" id="tKbd">⌨ 手输</button>' + (st.edit ? '<button class="tbtn" id="tCancelEdit">取消修改</button>' : '') + '</div>' : '') +
         (cur === 'photo' ? '<label class="btn save tphotobtn">📸 拍照<input id="tPhoto" type="file" accept="image/*" capture="environment" hidden></label>' : '') +
-        '<label class="chk tkeep"><input type="checkbox" id="tKeep"' + (prefs.keepLoc ? ' checked' : '') + '><span>提交后下一件沿用相同的来源和目的库位</span></label>' +
         (tqCount ? '<p class="hint">待上传 ' + tqCount + ' 笔（联网后自动上传）</p>' : '') +
         (tqRejected.length ? '<div class="card"><b class="err">被退回 ' + tqRejected.length + ' 笔（请检查后删除）</b>' + tqRejected.map(function (r) {
           return '<div class="trow"><div>' + esc(r.source) + ' → ' + esc(r.dest) + ' · ' + esc(r.itemCode || r.barcode) + '<div class="err hint">' + esc(r.rejected) + '</div></div><button class="tbtn" data-tdel="' + esc(r.transferId) + '">删除</button></div>';
@@ -979,11 +980,13 @@
         compressPhoto(f).then(function (d) { st.photo = d; st.edit = ''; msg = { cls: 'good', text: '照片已拍好，确认无误后点“提交”' }; draw(); },
           function (e) { msg = { cls: 'bad', text: e.message }; errBeep(); draw(); });
       };
-      $('#tKeep').onchange = function () { prefs.keepLoc = $('#tKeep').checked; LS.set('prefs', prefs); };
       $('#tReset').onclick = function () { confirmBox('清空这一笔，重新开始？', '重新开始', function () { reset(false); }); };
       $('#tSubmit').onclick = submit;
       Array.prototype.forEach.call(app.querySelectorAll('[data-edit]'), function (b) {
-        b.onclick = function () { var k = b.dataset.edit; if (!st[k] && step() !== k) return; st.edit = k; msg = { cls: '', text: '重新' + (k === 'photo' ? '拍照' : '扫描') + '：' + STEPS.filter(function (s) { return s[0] === k; })[0][1] }; draw(); };
+        b.onclick = function () {          // 任何一栏随时可点：先扫哪个都行，点了已填的就是重扫
+          var k = b.dataset.edit; if (step() === k) return;
+          st.edit = k; msg = { cls: '', text: (st[k] ? '重新' : '') + (k === 'photo' ? '拍照' : '扫描') + '：' + STEPS.filter(function (s) { return s[0] === k; })[0][1] }; draw();
+        };
       });
       Array.prototype.forEach.call(app.querySelectorAll('[data-tdel]'), function (b) {
         b.onclick = function () { confirmBox('删除这笔被退回的记录？', '删除', function () { IDB.del(b.dataset.tdel).then(refreshTq).then(draw); }); };
@@ -995,20 +998,18 @@
       if (k === 'src' || k === 'dst') {
         var loc = normLoc(raw);
         if (!loc) return;
-        if (!masters) return fail('商品主档还没下载，请联网后重试');
-        if (!masters.locRe.test(loc)) return fail(lookupItem(normCode(raw)) ? '这是商品条码，请扫描库位条码' : '库位条码格式不对：' + loc);
+        if (!locRe().test(loc)) return fail(lookupItem(normCode(raw)) ? '这是商品条码，请扫描库位条码' : '库位条码格式不对：' + loc);
         if (k === 'dst' && loc === st.src) return fail('目的库位和来源库位相同：' + loc);
         if (k === 'src' && st.dst && loc === st.dst) return fail('来源库位和目的库位相同：' + loc);
         st[k] = loc;
       } else if (k === 'bc') {
         var code = normCode(raw);
         if (!code) return;
-        if (!masters) return fail('商品主档还没下载，请联网后重试');
-        var it = lookupItem(code);
-        if (!it) return fail(masters.locRe.test(normLoc(raw)) ? '这是库位条码，请扫描商品箱码' : '商品主档里找不到这个条码：' + code + '（请通知办公室加入主档）');
+        if (locRe().test(normLoc(raw))) return fail('这是库位条码，请扫描商品箱码');
+        var it = lookupItem(code) || { itemCode: '', desc: '', match: '未识别' };   // 主档没有也照样记录
         st.bc = code; st.item = it.itemCode; st.desc = it.desc; st.match = it.match;
       } else return;
-      beep(); st.edit = ''; msg = { cls: 'good', text: '✓ ' + (k === 'bc' ? st.item + ' ' + (st.desc || '') : normLoc(raw)) };
+      beep(); st.edit = ''; msg = { cls: 'good', text: '✓ ' + (k === 'bc' ? (st.item ? st.item + ' ' + (st.desc || '') : st.bc + '（主档没有，照样记录）') : normLoc(raw)) };
       draw();
     }
     function reset(keep) {
@@ -1022,20 +1023,20 @@
       var r = { transferId: uuid(), source: st.src, dest: st.dst, barcode: st.bc, itemCode: st.item, desc: st.desc, photo: st.photo,
         clientTime: new Date().toISOString(), operator: operator };
       IDB.put(r).then(function () {
-        recent.unshift({ src: r.source, dst: r.dest, item: r.itemCode, desc: r.desc, t: hhmm(r.clientTime) });
+        recent.unshift({ src: r.source, dst: r.dest, item: r.itemCode || r.barcode, desc: r.itemCode ? r.desc : '（未识别）', t: hhmm(r.clientTime) });
         recent = recent.slice(0, 5); LS.set('trecent', recent);
         beep(); toast('✓ 已提交');
         busy = false;
-        var done = '✓ 已提交：' + r.itemCode + '  ' + r.source + ' → ' + r.dest;
-        reset(prefs.keepLoc);
-        msg = { cls: 'good', text: done + (prefs.keepLoc ? '。下一件：直接扫箱码' : '') }; draw();
+        var done = '✓ 已提交：' + (r.itemCode || r.barcode) + '  ' + r.source + ' → ' + r.dest;
+        reset(false);
+        msg = { cls: 'good', text: done }; draw();
         return refreshTq().then(flushTransfers);
       }, function (e) { busy = false; fail('保存到手机失败：' + e.message); });
     }
     currentRedraw = function () { if (location.hash === '#/t') draw(); };
     draw();
     loadMasters().then(function () { if (location.hash === '#/t') draw(); },
-      function (e) { if (location.hash === '#/t') { msg = { cls: 'bad', text: (e.network ? '离线：' : '') + '商品主档下载失败，' + (masters ? '使用本机旧资料' : '需要联网后才能使用库位转移') }; draw(); } });
+      function (e) { if (location.hash === '#/t') { msg = { cls: 'bad', text: (e.network ? '离线：' : '') + '商品主档下载失败，' + (masters ? '使用本机旧资料' : '箱码暂时显示不出 Item Code，照样可以记录') }; draw(); } });
     flushTransfers();
   }
   // 焦点不在输入框时，扫描头的按键送到扫描框
