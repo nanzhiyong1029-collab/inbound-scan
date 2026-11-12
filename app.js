@@ -1,9 +1,9 @@
-/* 入库条码采集 + 库位转移 PWA  v1.3.5
+/* 入库条码采集 + 库位转移 PWA  v1.3.6
  * 页面：#/ 任务列表 → #/job/<JobID> 商品清单 → #/p/<JobID>/<ProductID> 条码采集
  * 原则：只采集原始资料，不做任何核对。先存手机（离线队列），再上传云端。 */
 (function () {
   'use strict';
-  var VERSION = '1.3.5';
+  var VERSION = '1.3.6';
   var $ = function (s, el) { return (el || document).querySelector(s); };
   var app = $('#app');
 
@@ -890,7 +890,7 @@
         }).then(function () { return next(i + 1); });
       }
       return next(0).then(function () { return done; });
-    }).then(function (n) { tqFlushing = null; refreshTq().then(function () { if (currentRedraw) currentRedraw(); }); return n; },
+    }).then(function (n) { tqFlushing = null; refreshTq().then(function () { if (currentRedraw) currentRedraw(); if (n && refreshRecentNow && location.hash === '#/t') refreshRecentNow(); }); return n; },
       function (e) { tqFlushing = null; lastSyncError = e.message; refreshTq(); });
     return tqFlushing;
   }
@@ -927,7 +927,21 @@
   function viewTransfer() {
     setBar('库位转移', false);
     var st = tState || (tState = { src: '', bc: '', item: '', desc: '', match: '', dst: '', photo: '', edit: '' });
-    var msg = { cls: '', text: '' }, recent = LS.get('trecent', []), busy = false;
+    var msg = { cls: '', text: '' }, recent = LS.get('trecent', []).filter(function (r) { return r.id; }), busy = false;
+    var TST = { '待上传': 't0', '待处理': 't1', '有问题': 't2', '已完成': 't3' };
+    // 最近提交以后台为准：办公室删除的记录在这里也消失，状态（已完成 / 有问题）同步；还没上传的留在最上面
+    function refreshRecent() {
+      if (!cfg || !sess) return Promise.resolve();
+      return Promise.all([api({ action: 'transfers' }, true), IDB.all().catch(function () { return []; })]).then(function (x) {
+        var server = (x[0] && x[0].list) || [], pend = {};
+        (x[1] || []).forEach(function (q) { if (!q.rejected) pend[q.transferId] = 1; });
+        var local = recent.filter(function (r) { return pend[r.id]; });
+        recent = local.concat(server.filter(function (r) { return !pend[r.id]; })).slice(0, 10);
+        LS.set('trecent', recent);
+        if (location.hash === '#/t') draw();
+      }, function () { /* 离线：继续显示上次的列表 */ });
+    }
+    refreshRecentNow = refreshRecent;
     var STEPS = [['src', '1. 来源库位', '扫描原来的库位条码'], ['bc', '2. 商品箱码', '扫描箱子上的条码'], ['dst', '3. 目的库位', '扫描新的库位条码'], ['photo', '4. 拍照确认', '拍下货物在新库位的照片']];
     function step() { if (st.edit) return st.edit; for (var i = 0; i < STEPS.length; i++) if (!st[STEPS[i][0]]) return STEPS[i][0]; return 'submit'; }
     // 这一笔的资料在切换页面时会保留（tState），所以不需要“未保存离开”提示
@@ -955,8 +969,9 @@
         (tqRejected.length ? '<div class="card"><b class="err">被退回 ' + tqRejected.length + ' 笔（请检查后删除）</b>' + tqRejected.map(function (r) {
           return '<div class="trow"><div>' + esc(r.source) + ' → ' + esc(r.dest) + ' · ' + esc(r.itemCode || r.barcode) + '<div class="err hint">' + esc(r.rejected) + '</div></div><button class="tbtn" data-tdel="' + esc(r.transferId) + '">删除</button></div>';
         }).join('') + '</div>' : '') +
-        (recent.length ? '<div class="card"><b>最近提交</b>' + recent.map(function (r) {
-          return '<div class="trow"><div>' + esc(r.src) + ' → ' + esc(r.dst) + ' · <b>' + esc(r.item) + '</b> ' + esc(r.desc || '') + '</div><span class="hint">' + esc(r.t) + '</span></div>';
+        (recent.length ? '<div class="card"><b>最近提交</b>' + recent.slice(0, 10).map(function (r) {
+          return '<div class="trow" data-rid="' + esc(r.id || '') + '"><div>' + esc(r.src) + ' → ' + esc(r.dst) + ' · <b>' + esc(r.item || r.bc || '') + '</b> ' + esc(r.desc || '') + '</div>' +
+            '<span class="hint">' + (r.status ? '<span class="tst ' + (TST[r.status] || '') + '">' + esc(r.status) + '</span> ' : '') + esc(r.t) + '</span></div>';
         }).join('') + '</div>' : '') +
         '<div id="dock" class="dock"><button class="btn ghost" id="tReset" style="flex:0 0 32%">重新开始</button><button class="btn save" id="tSubmit"' + (cur === 'submit' && !busy ? '' : ' disabled') + '>提交</button></div>';
       bindModTabs();
@@ -1029,22 +1044,27 @@
       var r = { transferId: uuid(), source: st.src, dest: st.dst, barcode: st.bc, itemCode: st.item, desc: st.desc, photo: st.photo,
         clientTime: new Date().toISOString(), operator: operator };
       IDB.put(r).then(function () {
-        recent.unshift({ src: r.source, dst: r.dest, item: r.itemCode || r.barcode, desc: r.itemCode ? r.desc : '', t: hhmm(r.clientTime) });
-        recent = recent.slice(0, 5); LS.set('trecent', recent);
+        recent.unshift({ id: r.transferId, src: r.source, dst: r.dest, item: r.itemCode || r.barcode, desc: r.itemCode ? r.desc : '', t: hhmm(r.clientTime), status: '待上传' });
+        recent = recent.slice(0, 10); LS.set('trecent', recent);
         beep(); toast('✓ 已提交');
         busy = false;
         var done = '✓ 已提交：' + (r.itemCode || r.barcode) + '  ' + r.source + ' → ' + r.dest;
         reset(false);
         msg = { cls: 'good', text: done }; draw();
-        return refreshTq().then(flushTransfers);
+        return refreshTq().then(flushTransfers).then(refreshRecent);
       }, function (e) { busy = false; fail('保存到手机失败：' + e.message); });
     }
     currentRedraw = function () { if (location.hash === '#/t') draw(); };
     draw();
     loadMasters().then(function () { if (location.hash === '#/t') draw(); },
       function (e) { if (location.hash === '#/t') { msg = { cls: 'bad', text: (e.network ? '离线：' : '') + '设置下载失败，' + (masters ? '使用本机旧资料' : '照样可以记录') }; draw(); } });
-    flushTransfers();
+    Promise.resolve(flushTransfers()).then(refreshRecent, refreshRecent);
   }
+  var refreshRecentNow;
+  // 切回 APP 时刷新“最近提交”（办公室可能刚删除/处理了记录）
+  document.addEventListener('visibilitychange', function () {
+    if (!document.hidden && location.hash === '#/t' && refreshRecentNow) refreshRecentNow();
+  });
   // 焦点不在输入框时，扫描头的按键送到扫描框
   document.addEventListener('keydown', function (e) {
     if (location.hash !== '#/t' || !$('#modal').hidden || camOpen) return;
