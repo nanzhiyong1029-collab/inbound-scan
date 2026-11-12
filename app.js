@@ -1,9 +1,9 @@
-/* 入库条码采集 + 库位转移 PWA  v1.3.3
+/* 入库条码采集 + 库位转移 PWA  v1.3.5
  * 页面：#/ 任务列表 → #/job/<JobID> 商品清单 → #/p/<JobID>/<ProductID> 条码采集
  * 原则：只采集原始资料，不做任何核对。先存手机（离线队列），再上传云端。 */
 (function () {
   'use strict';
-  var VERSION = '1.3.3';
+  var VERSION = '1.3.5';
   var $ = function (s, el) { return (el || document).querySelector(s); };
   var app = $('#app');
 
@@ -844,7 +844,13 @@
       }, function (e) { if (masters) return masters; throw e; });
     });
   }
-  function normLoc(v) { return String(v || '').replace(/[\r\n\t]/g, '').trim().toUpperCase(); }
+  // 货架标签扫出来是 04-C01 / 04C01，系统格式是 04-C-01：自动补上缺的杠
+  // （只在原样不符合库位格式时才转换，办公室改了格式也不受影响）
+  function normLoc(v) {
+    var s = String(v || '').replace(/[\r\n\t]/g, '').trim().toUpperCase();
+    if (!s || locRe().test(s)) return s;
+    return s.replace(/^(\d{2})-?([A-Z])-?(\d{2})$/, '$1-$2-$3');
+  }
   function normCode(v) { return String(v || '').replace(/[\r\n\t]/g, '').trim(); }
   function lookupItem(code) {
     if (!masters) return null;
