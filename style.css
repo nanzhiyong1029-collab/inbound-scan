@@ -162,3 +162,5 @@ textarea.remark { width: 100%; font: inherit; font-size: 16px; padding: 10px; bo
 .tphotobtn { display: block; text-align: center; margin: 10px 0; padding: 18px; font-size: 20px; cursor: pointer; }
 .trow { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 6px 0; border-top: 1px solid var(--line); font-size: 14px; }
 .tsub { display: flex; gap: 8px; }
+.tst { display: inline-block; padding: 1px 6px; border-radius: 8px; font-size: 12px; font-weight: 600; background: #eef1f5; color: #556; }
+.tst.t1 { background: #fff1e0; color: #b45309; } .tst.t2 { background: #fde8e7; color: #b42318; } .tst.t3 { background: #e6f4ea; color: #1a7f37; }
