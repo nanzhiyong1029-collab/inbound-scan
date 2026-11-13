@@ -1,9 +1,9 @@
-/* 入库条码采集 + 库位转移 PWA  v1.3.7
+/* 入库条码采集 + 库位转移 PWA  v1.3.8
  * 页面：#/ 任务列表 → #/job/<JobID> 商品清单 → #/p/<JobID>/<ProductID> 条码采集
  * 原则：只采集原始资料，不做任何核对。先存手机（离线队列），再上传云端。 */
 (function () {
   'use strict';
-  var VERSION = '1.3.7';
+  var VERSION = '1.3.8';
   var $ = function (s, el) { return (el || document).querySelector(s); };
   var app = $('#app');
 
@@ -897,19 +897,31 @@
   refreshTq();
 
   // —— 照片压缩：长边 1600 像素、JPEG，一般 200–400 KB
+  // （v1.3.8）高像素手机照片用 <img> 解码失败时，改用 createImageBitmap；生成的图片太小视为失败
   function compressPhoto(file) {
+    function toJpeg(src, w, h) {
+      var k = Math.min(1, 1600 / Math.max(w, h));
+      var c = document.createElement('canvas'); c.width = Math.max(1, Math.round(w * k)); c.height = Math.max(1, Math.round(h * k));
+      var g = c.getContext('2d'); if (!g) throw new Error('照片处理失败，请重拍');
+      g.drawImage(src, 0, 0, c.width, c.height);
+      var q = 0.72, d = c.toDataURL('image/jpeg', q);
+      while (d.length > 700000 && q > 0.35) { q -= 0.12; d = c.toDataURL('image/jpeg', q); }
+      if (!/^data:image\/jpeg;base64,/.test(d) || d.length < 2000) throw new Error('照片处理失败（手机内存不足？），请重拍或用“从相册选”');
+      return d;
+    }
+    function viaBitmap() {
+      if (!window.createImageBitmap) return Promise.reject(new Error('照片读取失败，请重拍或用“从相册选”'));
+      return createImageBitmap(file).then(function (b) { try { return toJpeg(b, b.width, b.height); } finally { try { b.close(); } catch (e) { } } },
+        function () { throw new Error('照片读取失败，请重拍或用“从相册选”'); });
+    }
+    if (!file || (file.type && !/^image\//.test(file.type))) return Promise.reject(new Error('选的不是照片，请重拍'));
     return new Promise(function (res, rej) {
       var url = URL.createObjectURL(file), img = new Image();
       img.onload = function () {
-        var w = img.naturalWidth, h = img.naturalHeight, k = Math.min(1, 1600 / Math.max(w, h));
-        var c = document.createElement('canvas'); c.width = Math.round(w * k); c.height = Math.round(h * k);
-        c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
-        URL.revokeObjectURL(url);
-        var q = 0.72, d = c.toDataURL('image/jpeg', q);
-        while (d.length > 700000 && q > 0.35) { q -= 0.12; d = c.toDataURL('image/jpeg', q); }
-        res(d);
+        try { var d = toJpeg(img, img.naturalWidth, img.naturalHeight); URL.revokeObjectURL(url); res(d); }
+        catch (e) { URL.revokeObjectURL(url); viaBitmap().then(res, rej); }
       };
-      img.onerror = function () { URL.revokeObjectURL(url); rej(new Error('照片读取失败，请重拍')); };
+      img.onerror = function () { URL.revokeObjectURL(url); viaBitmap().then(res, rej); };
       img.src = url;
     });
   }
@@ -926,8 +938,11 @@
   var tState = null;       // 当前这一笔（离开页面后保留，回来继续）
   function viewTransfer() {
     setBar('库位转移', false);
-    var st = tState || (tState = { src: '', bc: '', item: '', desc: '', match: '', dst: '', photo: '', edit: '' });
-    var msg = { cls: '', text: '' }, recent = LS.get('trecent', []).filter(function (r) { return r.id; }), busy = false;
+    // 草稿存手机（v1.3.8）：有些手机打开相机后内存不足会把网页重新载入，回来后已扫的资料不丢
+    var st = tState || (tState = Object.assign({ src: '', srcSkip: false, bc: '', item: '', desc: '', match: '', dst: '', photo: '', edit: '' }, LS.get('tdraft', {})));
+    var pend = LS.get('tphotoPending', 0);
+    LS.del('tphotoPending');
+    var msg = (pend && Date.now() - pend < 15 * 60e3 && !st.photo) ? { cls: 'bad', text: '刚才拍照后网页被手机重新打开了（手机内存不足时会这样）。已扫的资料都还在，请再拍一次；如果还是这样，请用“🖼 从相册选”。' } : { cls: '', text: '' }, recent = LS.get('trecent', []).filter(function (r) { return r.id; }), busy = false;
     var TST = { '待上传': 't0', '待处理': 't1', '有问题': 't2', '已完成': 't3' };
     // 最近提交以后台为准：办公室删除的记录在这里也消失，状态（已完成 / 有问题）同步；还没上传的留在最上面
     function refreshRecent() {
@@ -959,7 +974,9 @@
         }).join('') + '</div>' : '');
     }
     // 这一笔的资料在切换页面时会保留（tState），所以不需要“未保存离开”提示
+    function saveDraft() { LS.set('tdraft', { src: st.src, srcSkip: !!st.srcSkip, bc: st.bc, item: st.item, desc: st.desc, match: st.match, dst: st.dst }); }
     function draw() {
+      saveDraft();
       var keepIn = $('#tIn'), keepVal = keepIn ? keepIn.value : '', keepStep = keepIn ? keepIn.getAttribute('data-step') : '';
       var cur = step(), im = prefs.pda ? 'none' : 'text';
       var rows = STEPS.map(function (s) {
@@ -981,7 +998,10 @@
           esc(STEPS.filter(function (s) { return s[0] === cur; })[0][2]) + '"><button class="btn cam" id="tCam">📷 扫描</button></div>' +
           '<div class="row tsub"><button class="tbtn" id="tKbd">⌨ 手输</button>' + (cur === 'src' && !st.src ? '<button class="tbtn" id="tSkipSrc">跳过来源库位 →</button>' : '') +
           (st.edit ? '<button class="tbtn" id="tCancelEdit">取消修改</button>' : '') + '</div>' : '') +
-        (cur === 'photo' ? '<label class="btn save tphotobtn">📸 拍照<input id="tPhoto" type="file" accept="image/*" capture="environment" hidden></label>' : '') +
+        // 拍照按钮（v1.3.8）：用真正的按钮 + 不用 display:none 的文件框（部分安卓浏览器点 label 打不开隐藏的文件框）；另给“从相册选”备用
+        (cur === 'photo' ? '<div class="tphotos"><button class="btn save tphotobtn" id="tPhotoBtn">📸 拍照</button><button class="btn ghost tphotoalt" id="tPhotoAltBtn">🖼 从相册选</button></div>' +
+          '<input id="tPhoto" class="vh" type="file" accept="image/*" capture="environment" tabindex="-1" aria-hidden="true">' +
+          '<input id="tPhotoAlt" class="vh" type="file" accept="image/*" tabindex="-1" aria-hidden="true">' : '') +
         (tqCount ? '<p class="hint">待上传 ' + tqCount + ' 笔（联网后自动上传）</p>' : '') +
         (tqRejected.length ? '<div class="card"><b class="err">被退回 ' + tqRejected.length + ' 笔（请检查后删除）</b>' + tqRejected.map(function (r) {
           return '<div class="trow"><div>' + esc(r.source || '—') + ' → ' + esc(r.dest) + ' · ' + esc(r.itemCode || r.barcode) + '<div class="err hint">' + esc(r.rejected) + '</div></div><button class="tbtn" data-tdel="' + esc(r.transferId) + '">删除</button></div>';
@@ -1010,13 +1030,25 @@
         var ce = $('#tCancelEdit'); if (ce) ce.onclick = function () { st.edit = ''; msg = { cls: '', text: '' }; draw(); };
         var sk = $('#tSkipSrc'); if (sk) sk.onclick = function () { st.srcSkip = true; st.src = ''; st.edit = ''; msg = { cls: '', text: '来源库位不填，直接扫商品箱码' }; draw(); };
       }
-      var ph = $('#tPhoto');
-      if (ph) ph.onchange = function () {
-        var f = ph.files && ph.files[0]; if (!f) return;
-        msg = { cls: '', text: '处理照片中…' }; draw();
-        compressPhoto(f).then(function (d) { st.photo = d; st.edit = ''; msg = { cls: 'good', text: '照片已拍好，确认无误后点“提交”' }; draw(); },
-          function (e) { msg = { cls: 'bad', text: e.message }; errBeep(); draw(); });
-      };
+      [['#tPhotoBtn', '#tPhoto'], ['#tPhotoAltBtn', '#tPhotoAlt']].forEach(function (p) {
+        var b = $(p[0]), fi = $(p[1]); if (!b || !fi) return;
+        b.onclick = function () {
+          if (camOpen) stopCamera();                       // 扫码相机还开着时，系统相机会打不开
+          LS.set('tphotoPending', Date.now());
+          // 从相机回来时网页还在（没被重新载入）→ 清掉标记；只有真的被重新载入时才会看到提示
+          var back = function () { if (!document.hidden) { document.removeEventListener('visibilitychange', back); setTimeout(function () { LS.del('tphotoPending'); }, 1500); } };
+          document.addEventListener('visibilitychange', back);
+          try { fi.value = ''; } catch (e) { }
+          fi.click();
+        };
+        fi.onchange = function () {
+          LS.del('tphotoPending');
+          var f = fi.files && fi.files[0]; if (!f) return;
+          msg = { cls: '', text: '处理照片中…' }; draw();
+          compressPhoto(f).then(function (d) { st.photo = d; st.edit = ''; msg = { cls: 'good', text: '照片已拍好，确认无误后点“提交”' }; draw(); },
+            function (e) { msg = { cls: 'bad', text: e.message }; errBeep(); draw(); });
+        };
+      });
       $('#tReset').onclick = function () { confirmBox('清空这一笔，重新开始？', '重新开始', function () { reset(false); }); };
       $('#tSubmit').onclick = submit;
       Array.prototype.forEach.call(app.querySelectorAll('[data-edit]'), function (b) {
@@ -1053,6 +1085,7 @@
     function reset(keep) {
       var src = st.src, dst = st.dst;
       st = tState = { src: keep ? src : '', srcSkip: false, bc: '', item: '', desc: '', match: '', dst: keep ? dst : '', photo: '', edit: '' };
+      LS.del('tdraft');
       msg = { cls: '', text: '' }; draw();
     }
     function submit() {
