@@ -1,9 +1,9 @@
-/* 入库条码采集 + 库位转移 PWA  v1.3.8
+/* 入库条码采集 + 库位转移 PWA  v1.3.9
  * 页面：#/ 任务列表 → #/job/<JobID> 商品清单 → #/p/<JobID>/<ProductID> 条码采集
  * 原则：只采集原始资料，不做任何核对。先存手机（离线队列），再上传云端。 */
 (function () {
   'use strict';
-  var VERSION = '1.3.8';
+  var VERSION = '1.3.9';
   var $ = function (s, el) { return (el || document).querySelector(s); };
   var app = $('#app');
 
@@ -959,6 +959,40 @@
     }
     refreshRecentNow = refreshRecent;
     var STEPS = [['src', '1. 来源库位', '扫描原来的库位条码'], ['bc', '2. 商品箱码', '扫描箱子上的条码'], ['dst', '3. 目的库位', '扫描新的库位条码'], ['photo', '4. 拍照确认', '拍下货物在新库位的照片']];
+    // 提交前检查（v1.3.9）：必须有 商品箱码、目的库位、照片；来源库位选填
+    var NEED = { bc: ['商品箱码', '还没扫', '扫描箱子上的条码'], dst: ['目的库位', '还没扫', '扫描新库位（放货的货架）上的库位条码'], photo: ['拍照确认', '还没拍', '拍一张货物放在新库位的照片'] };
+    var photoBusy = false, showNeed = false;
+    function missing() { return ['bc', 'dst', 'photo'].filter(function (k) { return !st[k]; }); }
+    function goFix(k) {
+      closeModal();
+      st.edit = k; showNeed = true;
+      msg = { cls: 'bad', text: '👉 请' + (k === 'photo' ? '拍照（或从相册选）' : '扫描' + NEED[k][0]) };
+      draw();
+    }
+    function showMissing(miss) {
+      errBeep();
+      var li = function (cls, mk, title, sub, go) {
+        return '<li class="' + cls + '"' + (go ? ' data-go="' + go + '"' : '') + '><span class="mk">' + mk + '</span><span class="t"><b>' + title + '</b><span>' + sub + '</span></span>' + (go ? '<span class="go">去补 ›</span>' : '') + '</li>';
+      };
+      var items = li(st.src ? 'ok' : 'opt', st.src ? '✓' : '–', '来源库位', st.src ? esc(st.src) : '不填（选填，可以不扫）') +
+        ['bc', 'dst', 'photo'].map(function (k) {
+          if (st[k]) return li('ok', '✓', NEED[k][0], k === 'photo' ? '已拍好' : esc(k === 'bc' ? (st.item ? st.item + ' · ' + st.bc : st.bc) : st[k]));
+          return li('bad', '✗', NEED[k][0] + ' · ' + NEED[k][1], NEED[k][2], k);
+        }).join('');
+      modal('<div class="tmiss"><div class="tmiss-h"><span class="tmiss-ic">!</span><div><h3>还不能提交</h3>' +
+        '<div class="hint">还差 <b>' + miss.length + '</b> 项，补齐后再点“提交”</div></div></div>' +
+        '<ul class="tmiss-list">' + items + '</ul>' +
+        '<div class="row"><button class="btn ghost" id="mxOk">知道了</button><button class="btn save" id="mxGo">去补：' + NEED[miss[0]][0] + '</button></div></div>', function (m) {
+          $('#mxOk', m).onclick = function () { closeModal(); showNeed = true; draw(); };
+          $('#mxGo', m).onclick = function () { goFix(miss[0]); };
+          Array.prototype.forEach.call(m.querySelectorAll('[data-go]'), function (x) { x.onclick = function () { goFix(x.getAttribute('data-go')); }; });
+        });
+    }
+    function infoBox(title, text) {
+      errBeep();
+      modal('<div class="tmiss"><div class="tmiss-h"><span class="tmiss-ic">!</span><div><h3>' + esc(title) + '</h3></div></div>' +
+        '<p style="font-size:16px;margin:10px 0">' + esc(text) + '</p><div class="row"><button class="btn save" id="mxOk">知道了</button></div></div>', function (m) { $('#mxOk', m).onclick = closeModal; });
+    }
     // 来源库位可以不填（v1.3.7）：一开始停在来源库位；点“跳过”或直接扫/点别的栏后就不再要求
     function srcOptional() { return st.srcSkip || st.bc || st.dst || st.photo; }
     function step() {
@@ -986,7 +1020,7 @@
         else if (k === 'photo') val = v ? '<img class="tphoto" src="' + v + '" alt="照片">' : '';
         else if (k === 'src' && !v && srcOptional() && cur !== 'src') val = '<span class="tp" style="color:var(--mute)">不填（选填）</span>';
         else val = v ? '<b class="tv loc">' + esc(v) + '</b>' : '';
-        return '<button class="tstep' + (cur === k ? ' cur' : '') + (v ? ' ok' : '') + '" data-edit="' + k + '"><span class="tl">' + s[1] + '</span>' +
+        return '<button class="tstep' + (cur === k ? ' cur' : '') + (showNeed && k !== 'src' && !v ? ' need' : '') + (v ? ' ok' : '') + '" data-edit="' + k + '"><span class="tl">' + s[1] + '</span>' +
           (val || '<span class="tp">' + (cur === k ? '👉 ' + s[2] : '—') + '</span>') + '</button>';
       }).join('');
       var scanning = cur === 'src' || cur === 'bc' || cur === 'dst';
@@ -1007,7 +1041,7 @@
           return '<div class="trow"><div>' + esc(r.source || '—') + ' → ' + esc(r.dest) + ' · ' + esc(r.itemCode || r.barcode) + '<div class="err hint">' + esc(r.rejected) + '</div></div><button class="tbtn" data-tdel="' + esc(r.transferId) + '">删除</button></div>';
         }).join('') + '</div>' : '') +
         '<div id="tRecent">' + recentHtml() + '</div>' +
-        '<div id="dock" class="dock"><button class="btn ghost" id="tReset" style="flex:0 0 32%">重新开始</button><button class="btn save" id="tSubmit"' + (cur === 'submit' && !busy ? '' : ' disabled') + '>提交</button></div>';
+        '<div id="dock" class="dock"><button class="btn ghost" id="tReset" style="flex:0 0 32%">重新开始</button><button class="btn save' + (missing().length ? ' notready' : '') + '" id="tSubmit"' + (busy ? ' disabled' : '') + '>' + (missing().length ? '提交 <small>（还差 ' + missing().length + ' 项）</small>' : '提交') + '</button></div>';
       bindModTabs();
       var inp = $('#tIn');
       if (inp && keepVal && keepStep === cur) inp.value = keepVal;   // 重画时保留正在输入/扫描的内容
@@ -1044,9 +1078,9 @@
         fi.onchange = function () {
           LS.del('tphotoPending');
           var f = fi.files && fi.files[0]; if (!f) return;
-          msg = { cls: '', text: '处理照片中…' }; draw();
-          compressPhoto(f).then(function (d) { st.photo = d; st.edit = ''; msg = { cls: 'good', text: '照片已拍好，确认无误后点“提交”' }; draw(); },
-            function (e) { msg = { cls: 'bad', text: e.message }; errBeep(); draw(); });
+          msg = { cls: '', text: '处理照片中…' }; photoBusy = true; draw();
+          compressPhoto(f).then(function (d) { photoBusy = false; st.photo = d; st.edit = ''; msg = { cls: 'good', text: missing().length ? '照片已拍好' : '照片已拍好，确认无误后点“提交”' }; draw(); },
+            function (e) { photoBusy = false; msg = { cls: 'bad', text: e.message }; errBeep(); draw(); });
         };
       });
       $('#tReset').onclick = function () { confirmBox('清空这一笔，重新开始？', '重新开始', function () { reset(false); }); };
@@ -1085,24 +1119,28 @@
     function reset(keep) {
       var src = st.src, dst = st.dst;
       st = tState = { src: keep ? src : '', srcSkip: false, bc: '', item: '', desc: '', match: '', dst: keep ? dst : '', photo: '', edit: '' };
-      LS.del('tdraft');
+      LS.del('tdraft'); showNeed = false;
       msg = { cls: '', text: '' }; draw();
     }
     function submit() {
-      if (busy || step() !== 'submit') return;
+      if (busy) return;
+      if (photoBusy) return infoBox('照片还在处理中', '请等一两秒，照片处理好后再点“提交”。');
+      var miss = missing();
+      if (miss.length) return showMissing(miss);
+      st.edit = ''; showNeed = false;                  // 正在重扫某一栏但资料都齐了：直接用现有资料提交
       busy = true;
       var r = { transferId: uuid(), source: st.src, dest: st.dst, barcode: st.bc, itemCode: st.item, desc: st.desc, photo: st.photo,
         clientTime: new Date().toISOString(), operator: operator };
       IDB.put(r).then(function () {
         recent.unshift({ id: r.transferId, src: r.source, dst: r.dest, item: r.itemCode || r.barcode, desc: r.itemCode ? r.desc : '', t: hhmm(r.clientTime), status: '待上传' });
         recent = recent.slice(0, 10); LS.set('trecent', recent);
-        beep(); toast('✓ 已提交');
+        beep(); toast(navigator.onLine === false ? '✓ 已保存到手机，联网后自动上传' : '✓ 已提交');
         busy = false;
         var done = '✓ 已提交：' + (r.itemCode || r.barcode) + '  ' + (r.source || '（无来源）') + ' → ' + r.dest;
         reset(false);
         msg = { cls: 'good', text: done }; draw();
         return refreshTq().then(flushTransfers).then(refreshRecent);
-      }, function (e) { busy = false; fail('保存到手机失败：' + e.message); });
+      }, function (e) { busy = false; draw(); infoBox('提交失败', '保存到手机失败（' + e.message + '）。请再点一次“提交”；如果一直这样，请清理手机空间后再试。已扫的资料还在。'); });
     }
     currentRedraw = function () { if (location.hash === '#/t') draw(); };
     draw();
