@@ -1,9 +1,9 @@
-/* 入库条码采集 + 库位转移 PWA  v1.3.9
+/* 入库条码采集 + 库位转移 PWA  v1.4.0
  * 页面：#/ 任务列表 → #/job/<JobID> 商品清单 → #/p/<JobID>/<ProductID> 条码采集
  * 原则：只采集原始资料，不做任何核对。先存手机（离线队列），再上传云端。 */
 (function () {
   'use strict';
-  var VERSION = '1.3.9';
+  var VERSION = '1.4.0';
   var $ = function (s, el) { return (el || document).querySelector(s); };
   var app = $('#app');
 
@@ -90,8 +90,8 @@
       var json = decodeURIComponent(Array.prototype.map.call(atob(b), function (c) { return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2); }).join(''));
       var o = JSON.parse(json);
       if (o.u && TOKEN_RE.test(o.d || '')) {
-        cfg = { u: o.u, d: o.d }; LS.set('cfg', cfg); authMsg = '';
-        setSession(null); toast('设置已保存，请登录');
+        cfg = { u: o.u, d: o.d, r: o.r === 'up' ? 'up' : '' }; LS.set('cfg', cfg); authMsg = '';
+        setSession(null); toast(cfg.r === 'up' ? '设置已保存：这台电脑用来上传 DO' : '设置已保存，请登录');
       } else if (o.k) { authMsg = '这是旧版设置链接，已停用。请找办公室在【PDA 设备管理】生成本设备的新链接。'; toast('旧版链接已停用', 3000); }
       else toast('设置链接无效');
     } catch (e) { toast('设置链接无效'); }
@@ -138,12 +138,12 @@
   function setOnline(v) { online = v; renderNet(); }
   function renderNet() {
     var n = $('#net'), t = $('#netText');
-    var pend = outbox.length + (typeof tqCount === 'number' ? tqCount : 0);
+    var pend = outbox.length + (typeof tqCount === 'number' ? tqCount : 0) + (typeof ldPendN === 'number' ? ldPendN : 0);
     if (!n) return;
     n.className = !online ? 'off' : (pend ? 'sync' : '');
     t.textContent = (!online ? '离线' : '在线') + (pend ? ' · 待上传 ' + pend : '');
   }
-  window.addEventListener('online', function () { setOnline(true); flush(); flushTransfers(); });
+  window.addEventListener('online', function () { setOnline(true); flush(); flushTransfers(); ldFlush(); });
   window.addEventListener('offline', function () { setOnline(false); });
 
   // ---------------- 离线队列：上传 ----------------
@@ -189,7 +189,7 @@
     });
     return flushing;
   }
-  setInterval(function () { if (outbox.length && sess) flush(); if (tqCount && sess) flushTransfers(); }, 15000);
+  setInterval(function () { if (outbox.length && sess) flush(); if (tqCount && sess) flushTransfers(); if (ldPendN && sess) ldFlush(); }, 15000);
   document.addEventListener('visibilitychange', function () { if (!document.hidden && outbox.length) flush(); });
 
   // ---------------- 商品缓存（每个任务一份） ----------------
@@ -252,6 +252,9 @@
     var h = location.hash;
     var m = h.match(/^#\/p\/([^/]+)\//);
     if (m) return guardLeave(function () { location.hash = '#/job/' + m[1]; });
+    var l = h.match(/^#\/ld\/([^/]+)\/review$/);
+    if (l) { location.hash = '#/ld/' + l[1]; return; }
+    if (/^#\/ld\//.test(h)) { location.hash = '#/ld'; return; }
     location.hash = '#/';
   }
 
@@ -270,7 +273,7 @@
   function openMenu() {
     modal('<div class="menu">' +
       '<div class="hint">员工：<b>' + esc(operator || '未登录') + '</b> · 设备 ' + esc((sess && sess.dev) || device) + ' · v' + VERSION + '</div>' +
-      '<button id="mSync">立即上传（待上传 ' + (outbox.length + tqCount) + '）</button>' +
+      '<button id="mSync">立即上传（待上传 ' + (outbox.length + tqCount + ldPendN) + '）</button>' +
       othersNote() +
       '<button id="mOp">退出 / 切换员工</button>' +
       '<button id="mPda">PDA 扫描头模式：' + (prefs.pda ? '开（不弹出键盘）' : '关（手机键盘输入）') + '</button>' +
@@ -281,7 +284,7 @@
       (lastSyncError ? '<div class="err hint">上次上传失败：' + esc(lastSyncError) + '</div>' : '') +
       failedNote() +
       '</div>', function (m) {
-        $('#mSync', m).onclick = function () { closeModal(); toast('上传中…'); flushTransfers(); flush().then(function () { toast(outbox.length ? '还有 ' + outbox.length + ' 条未上传（网络不可用）' : '全部已上传 ✓'); }); };
+        $('#mSync', m).onclick = function () { closeModal(); toast('上传中…'); flushTransfers(); ldFlush(); flush().then(function () { toast(outbox.length ? '还有 ' + outbox.length + ' 条未上传（网络不可用）' : '全部已上传 ✓'); }); };
         $('#mOp', m).onclick = function () { closeModal(); guardLeave(function () { if (sess && cfg) api({ action: 'logout' }).catch(function () { }); setSession(null); route(); }); };
         $('#mPda', m).onclick = function () { prefs.pda = !prefs.pda; LS.set('prefs', prefs); closeModal(); route(); };
         $('#mNext', m).onclick = function () { prefs.autoNext = !prefs.autoNext; LS.set('prefs', prefs); closeModal(); };
@@ -346,12 +349,15 @@
     app.onclick = null;
     curHash = location.hash;
     if (!cfg) return viewSetup(false);
+    if (cfg.r === 'up') return viewUpload();          // 装车点货：办公室上传电脑，不用员工登录
     if (!sess) return viewLogin();
     var h = location.hash || '#/';
     var m;
     if ((m = h.match(/^#\/job\/([^/]+)$/))) return viewProducts(decodeURIComponent(m[1]));
     if ((m = h.match(/^#\/p\/([^/]+)\/([^/]+)$/))) return viewCollect(decodeURIComponent(m[1]), decodeURIComponent(m[2]));
     if (h === '#/t') return viewTransfer();
+    if (h === '#/ld') return viewLdList();
+    if ((m = h.match(/^#\/ld\/([^/]+?)(\/review)?$/))) return viewLdTask(decodeURIComponent(m[1]), !!m[2]);
     return viewJobs();
   }
 
@@ -777,12 +783,13 @@
   // =====================================================================
   function modTabs(active) {
     return '<div class="mods"><button class="mod' + (active === 'in' ? ' on' : '') + '" data-mod="in">📦 入库</button>' +
-      '<button class="mod' + (active === 't' ? ' on' : '') + '" data-mod="t">🔁 库位转移</button></div>';
+      '<button class="mod' + (active === 't' ? ' on' : '') + '" data-mod="t">🔁 库位转移</button>' +
+      '<button class="mod' + (active === 'ld' ? ' on' : '') + '" data-mod="ld">🚚 装车点货</button></div>';
   }
   function bindModTabs() {
     Array.prototype.forEach.call(app.querySelectorAll('[data-mod]'), function (b) {
       b.onclick = function () {
-        var to = b.dataset.mod === 't' ? '#/t' : '#/';
+        var to = b.dataset.mod === 't' ? '#/t' : b.dataset.mod === 'ld' ? '#/ld' : '#/';
         if (location.hash === to || (to === '#/' && !location.hash)) return;
         guardLeave(function () { leaveGuard = null; location.hash = to; });
       };
@@ -1169,6 +1176,626 @@
   // 3) 只识别商品条码格式（EAN/UPC/Code128/ITF/Code39），之前连 QR/DataMatrix 一起找，慢
   // 4) 手电筒、放大按钮；8 秒还没扫到给提示
   // 5) EAN/UPC 检查校验位；没有校验位的格式要连续读到 2 次相同才接受（防误读）
+  // =====================================================================
+  // 装车前点货（v1.4）
+  // 办公室上传电脑：选 AutoCount「Delivery Order Detail Listing」(+ 可选「送货单」补单位/规格) → 预览 → 上传建任务
+  // PDA：任务列表 → 扫条码 / 搜索 → 输入本次数量 → 累加（只追加流水，离线先存手机，联网自动上传）→ 复核 → 确认完成
+  // =====================================================================
+
+  // ---------- 读取 .xlsx（浏览器自带解压，不依赖外部库，离线也能用） ----------
+  function xlsxRead(buf) {
+    var u8 = new Uint8Array(buf), dv = new DataView(buf), eocd = -1;
+    for (var i = u8.length - 22; i >= Math.max(0, u8.length - 65557); i--) if (dv.getUint32(i, true) === 0x06054b50) { eocd = i; break; }
+    if (eocd < 0) return Promise.reject(new Error('不是 .xlsx 文件。请在 AutoCount 导出为 Excel（.xlsx）'));
+    var n = dv.getUint16(eocd + 10, true), off = dv.getUint32(eocd + 16, true), files = {}, td = new TextDecoder();
+    for (var k = 0; k < n && dv.getUint32(off, true) === 0x02014b50; k++) {
+      var nl = dv.getUint16(off + 28, true), xl = dv.getUint16(off + 30, true), cl = dv.getUint16(off + 32, true);
+      files[td.decode(u8.subarray(off + 46, off + 46 + nl))] = { m: dv.getUint16(off + 10, true), size: dv.getUint32(off + 20, true), lho: dv.getUint32(off + 42, true) };
+      off += 46 + nl + xl + cl;
+    }
+    function read(name) {
+      var f = files[name]; if (!f) return Promise.resolve('');
+      var st = f.lho + 30 + dv.getUint16(f.lho + 26, true) + dv.getUint16(f.lho + 28, true), data = u8.subarray(st, st + f.size);
+      if (f.m === 0) return Promise.resolve(td.decode(data));
+      if (f.m !== 8 || !window.DecompressionStream) return Promise.reject(new Error('浏览器版本太旧，请用最新版 Chrome 或 Edge'));
+      return new Response(new Blob([data]).stream().pipeThrough(new DecompressionStream('deflate-raw'))).text();
+    }
+    var xml = function (s) { return new DOMParser().parseFromString(s, 'application/xml'); };
+    var kids = function (el, tag) { return Array.prototype.filter.call(el.getElementsByTagName('*'), function (x) { return x.localName === tag; }); };
+    return Promise.all([read('xl/workbook.xml'), read('xl/_rels/workbook.xml.rels'), read('xl/sharedStrings.xml')]).then(function (a) {
+      if (!a[0]) throw new Error('读不出这个 Excel 文件');
+      var sheet = kids(xml(a[0]), 'sheet')[0], rid = sheet && (sheet.getAttribute('r:id') || sheet.getAttributeNS('http://schemas.openxmlformats.org/officeDocument/2006/relationships', 'id'));
+      var target = 'worksheets/sheet1.xml';
+      kids(xml(a[1] || '<x/>'), 'Relationship').forEach(function (r) { if (r.getAttribute('Id') === rid) target = r.getAttribute('Target'); });
+      target = target.charAt(0) === '/' ? target.slice(1) : 'xl/' + target;
+      var sst = a[2] ? kids(xml(a[2]), 'si').map(function (si) { return kids(si, 't').map(function (t) { return t.textContent; }).join(''); }) : [];
+      return read(target).then(function (sx) {
+        var doc = xml(sx), rows = {}, merges = [], maxRow = 0;
+        kids(doc, 'c').forEach(function (c) {
+          var ref = c.getAttribute('r') || '', m = ref.match(/^([A-Z]+)(\d+)$/); if (!m) return;
+          var t = c.getAttribute('t'), vEl = kids(c, 'v')[0], v = vEl ? vEl.textContent : '';
+          if (t === 's') v = sst[+v] || '';
+          else if (t === 'inlineStr') v = kids(c, 't').map(function (x) { return x.textContent; }).join('');
+          else if (t === 'b') v = v === '1';
+          else if (t !== 'str' && t !== 'e' && v !== '' && !isNaN(+v)) v = +v;
+          if (v === '' || v === null) return;
+          var r = +m[2], col = colNum(m[1]); (rows[r] = rows[r] || {})[col] = v; maxRow = Math.max(maxRow, r);
+        });
+        kids(doc, 'mergeCell').forEach(function (mc) {
+          var p = (mc.getAttribute('ref') || '').match(/^([A-Z]+)(\d+):([A-Z]+)(\d+)$/);
+          if (p) merges.push({ r1: +p[2], c1: colNum(p[1]), r2: +p[4], c2: colNum(p[3]) });
+        });
+        var spanEnd = {}; merges.forEach(function (g) { spanEnd[g.r1 + ',' + g.c1] = g.c2; });
+        return { rows: rows, maxRow: maxRow, spanEnd: spanEnd };
+      });
+    });
+  }
+  function colNum(s) { var n = 0; for (var i = 0; i < s.length; i++) n = n * 26 + s.charCodeAt(i) - 64; return n; }
+  function cellText(v) { return v == null ? '' : typeof v === 'number' ? (Number.isInteger(v) ? v.toFixed(0) : String(v)) : String(v).replace(/\s+/g, ' ').trim(); }
+  function rowCells(sh, r) {
+    var row = sh.rows[r] || {};
+    return Object.keys(row).map(Number).sort(function (a, b) { return a - b; }).map(function (c) { return { c1: c, c2: sh.spanEnd[r + ',' + c] || c, v: row[c] }; });
+  }
+  // 表头和数据因为合并单元格不在同一列：按“列范围重叠”对齐，没有重叠时取相邻一列
+  function assignCols(heads, cells) {
+    var ov = function (h, x) { return Math.max(0, Math.min(h.c2, x.c2) - Math.max(h.c1, x.c1) + 1); };
+    var out = {}, used = [];
+    cells.forEach(function (x, i) {
+      var best = null, bo = 0;
+      heads.forEach(function (h) { var o = ov(h, x); if (o > bo) { bo = o; best = h; } });
+      if (best && out[best.f] === undefined) { out[best.f] = x.v; used[i] = 1; }
+    });
+    heads.forEach(function (h) {
+      if (out[h.f] !== undefined) return;
+      cells.forEach(function (x, i) { if (!used[i] && out[h.f] === undefined && Math.abs(x.c1 - h.c1) <= 1) { out[h.f] = x.v; used[i] = 1; } });
+    });
+    return out;
+  }
+  function xlDate(v) {
+    if (typeof v === 'number' && v > 20000 && v < 80000) { var d = new Date(Math.round((v - 25569) * 864e5)); return d.toISOString().slice(0, 10); }
+    var m = cellText(v).match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/); if (m) return m[3] + '-' + ('0' + m[2]).slice(-2) + '-' + ('0' + m[1]).slice(-2);
+    m = cellText(v).match(/^(\d{4})[-\/](\d{1,2})[-\/](\d{1,2})/); if (m) return m[1] + '-' + ('0' + m[2]).slice(-2) + '-' + ('0' + m[3]).slice(-2);
+    return '';
+  }
+  function ldNorm(v) { var s = cellText(v).replace(/\s/g, '').toUpperCase(); return /^\d+$/.test(s) ? (s.replace(/^0+/, '') || '0') : s; }
+
+  var LIST_FIELDS = [['date', /^date$/i], ['doNo', /delivery\s*order\s*no|^do\s*no/i], ['itemCode', /^item\s*code/i], ['desc', /^desc/i],
+    ['barcode', /bar\s*code/i], ['qty', /^(qty|quantity)$/i], ['uom', /^(uom|unit)$/i], ['fromDoc', /from\s*doc/i], ['customer', /debtor|customer/i]];
+  /** AutoCount「Delivery Order Detail Listing」：每行一条 DO 明细，带 DO 号 */
+  function parseListing(sh) {
+    for (var r = 1; r <= Math.min(sh.maxRow, 60); r++) {
+      var cells = rowCells(sh, r), heads = [], extra = [];
+      cells.forEach(function (x) {
+        var t = cellText(x.v), f = LIST_FIELDS.filter(function (p) { return p[1].test(t); })[0];
+        if (f) heads.push({ f: f[0], c1: x.c1, c2: x.c2, t: t }); else if (t) extra.push(t);
+      });
+      var has = function (f) { return heads.some(function (h) { return h.f === f; }); };
+      if (!(has('doNo') && has('itemCode') && has('qty'))) continue;
+      var lines = [], hdrSig = heads.map(function (h) { return h.t; }).join('|');
+      for (var rr = r + 1; rr <= sh.maxRow; rr++) {
+        var cs = rowCells(sh, rr); if (!cs.length) continue;
+        var texts = cs.map(function (x) { return cellText(x.v); });
+        if (texts.join('|').indexOf(hdrSig.split('|')[0]) >= 0 && texts.some(function (t) { return /item\s*code/i.test(t); })) continue;   // 每页重复的表头
+        if (texts.some(function (t) { return /^(count:|end of report|report criteria)/i.test(t); })) continue;
+        var o = assignCols(heads, cs);
+        if (o.doNo === undefined && o.itemCode === undefined) continue;
+        lines.push({ row: rr, doNo: cellText(o.doNo), doDate: xlDate(o.date), itemCode: cellText(o.itemCode), desc: cellText(o.desc), barcode: cellText(o.barcode),
+          qty: typeof o.qty === 'number' ? o.qty : Number(cellText(o.qty).replace(/,/g, '')), qtyRaw: cellText(o.qty), uom: cellText(o.uom), fromDoc: cellText(o.fromDoc) });
+      }
+      return { kind: 'listing', lines: lines, hasUom: has('uom'), extra: extra.filter(function (t) { return !/^(page|date|user id)/i.test(t); }) };
+    }
+    return null;
+  }
+  var PRINT_FIELDS = [['seq', /^序号$/], ['batch', /^批次号$/], ['barcode', /^条码$/], ['desc', /^商品名称$/], ['qty', /^数量$/], ['spec', /^规格$/], ['uom', /^单位$/]];
+  /** AutoCount「送货单」打印版式：用来补单位、规格、批次号 */
+  function parsePrinted(sh) {
+    var heads = [], hr = 0;
+    for (var r = 1; r <= sh.maxRow && !hr; r++) {
+      var t = rowCells(sh, r).map(function (x) { return cellText(x.v); });
+      if (t.indexOf('条码') >= 0 && t.indexOf('商品名称') >= 0) hr = r;
+    }
+    if (!hr) return null;
+    [hr, hr + 1].forEach(function (r) {
+      rowCells(sh, r).forEach(function (x) {
+        var t = cellText(x.v), f = PRINT_FIELDS.filter(function (p) { return p[1].test(t); })[0];
+        if (f && !heads.some(function (h) { return h.f === f[0]; })) heads.push({ f: f[0], c1: x.c1, c2: x.c2 });
+      });
+    });
+    var blocks = [], cur = null, docNo = '';
+    for (var rr = 1; rr <= sh.maxRow; rr++) {
+      var cs = rowCells(sh, rr), texts = cs.map(function (x) { return cellText(x.v); });
+      var dn = texts.join(' ').match(/\b[A-Z]{1,6}DO-\d{4,}\b/); if (dn && rr < hr || dn && !cur) docNo = dn[0];
+      if (texts.some(function (t) { return /拣货人签字/.test(t); })) { if (cur) blocks.push(cur); cur = null; docNo = ''; continue; }
+      if (rr <= hr + 1) continue;
+      var o = assignCols(heads, cs);
+      if (!/^\d+\.?$/.test(cellText(o.seq))) continue;
+      if (!cur) cur = { doNo: docNo, lines: [] };
+      cur.lines.push({ barcode: cellText(o.barcode), desc: cellText(o.desc), qty: Number(cellText(o.qty)), spec: cellText(o.spec), uom: cellText(o.uom), batch: cellText(o.batch) });
+    }
+    if (cur) blocks.push(cur);
+    return { kind: 'printed', blocks: blocks };
+  }
+  /** 用送货单补单位：每张 DO 找到条码+数量完全一样的一段，再逐行对应 */
+  function supplement(lines, printed) {
+    var byDo = {}, order = [], rep = { matched: 0, missingDo: [], blocks: printed.blocks.length };
+    lines.forEach(function (l) { if (!byDo[l.doNo]) { byDo[l.doNo] = []; order.push(l.doNo); } byDo[l.doNo].push(l); });
+    var sig = function (arr, bk) { return arr.map(function (x) { return (ldNorm(x[bk]) || x.desc) + '#' + Number(x.qty); }).sort().join(','); };
+    var usedB = [];
+    order.forEach(function (d) {
+      var s = sig(byDo[d], 'barcode'), bi = -1;
+      printed.blocks.forEach(function (b, i) { if (bi < 0 && !usedB[i] && (b.doNo === d || (!b.doNo && sig(b.lines, 'barcode') === s))) bi = i; });
+      if (bi < 0) { rep.missingDo.push(d); return; }
+      usedB[bi] = 1; rep.matched++;
+      var pool = printed.blocks[bi].lines.slice();
+      byDo[d].forEach(function (l) {
+        var k = pool.findIndex(function (p) { return (ldNorm(p.barcode) || p.desc) === (ldNorm(l.barcode) || l.desc) && Number(p.qty) === Number(l.qty); });
+        if (k < 0) return;
+        var p = pool.splice(k, 1)[0];
+        if (!l.uom) l.uom = p.uom; l.spec = p.spec; l.batch = p.batch;
+      });
+    });
+    return rep;
+  }
+
+  // ---------- 上传电脑：上传 DO 页面 ----------
+  function viewUpload() {
+    setBar('装车点货 · 上传 DO', false);
+    document.body.classList.add('wide');            // 电脑屏幕：用整个宽度显示预览表
+    var st = { files: [], lines: null, errors: [], warns: [], infos: [], carry: null, pick: {}, busy: false, done: null, importId: uuid(), fileName: '' };
+    function readFiles(list) {
+      st.done = null; st.lines = null; st.errors = []; st.warns = []; st.infos = []; st.importId = uuid();
+      var arr = Array.prototype.slice.call(list || []);
+      if (!arr.length) return draw();
+      st.fileName = arr.map(function (f) { return f.name; }).join(' + ');
+      draw('读取中…');
+      Promise.all(arr.map(function (f) {
+        if (/\.xls$/i.test(f.name)) return Promise.reject(new Error(f.name + '：是旧版 .xls，请在 AutoCount 导出为 .xlsx'));
+        return f.arrayBuffer().then(xlsxRead).then(function (sh) { return { name: f.name, listing: parseListing(sh), printed: parsePrinted(sh) }; });
+      })).then(function (res) {
+        var L = res.filter(function (x) { return x.listing; }), P = res.filter(function (x) { return !x.listing && x.printed; });
+        res.forEach(function (x) { if (!x.listing && !x.printed) st.errors.push(x.name + '：认不出格式（需要 Delivery Order Detail Listing）'); });
+        if (!L.length) st.errors.push('需要 AutoCount 的「Delivery Order Detail Listing」（每行带 DO 号和 Item Code）。只有送货单不能建任务，因为送货单里只有第一张 DO 有单号。');
+        if (L.length > 1) st.errors.push('一次只能上传一份 Delivery Order Detail Listing');
+        if (st.errors.length) return draw();
+        var li = L[0].listing, lines = li.lines;
+        if (li.extra.length) st.infos.push('没用到的列：' + li.extra.join('、'));
+        if (P.length) {
+          var rep = supplement(lines, P[0].printed);
+          st.infos.push('送货单 ' + rep.blocks + ' 段，对上 ' + rep.matched + ' 张 DO（补上单位 / 规格 / 批次号）');
+          if (rep.missingDo.length) st.warns.push('这些 DO 在送货单里没找到对应的一段，单位会是空的：' + rep.missingDo.join('、'));
+        }
+        var noUom = lines.filter(function (l) { return !l.uom; }).length;
+        if (noUom) st.warns.push(noUom + ' 行没有单位（UOM）。' + (P.length ? '' : '可以同时选择「送货单」Excel，系统会自动补上单位。'));
+        var seen = {};
+        lines.forEach(function (l) {
+          var e = [];
+          if (!l.doNo) e.push('缺 DO 号'); if (!l.itemCode) e.push('缺 Item Code');
+          if (!(l.qty > 0)) e.push('数量不对（' + (l.qtyRaw || '空') + '）');
+          if (e.length) st.errors.push('Excel 第 ' + l.row + ' 行：' + e.join('，'));
+          if (!l.barcode && l.itemCode) st.infos.push('Excel 第 ' + l.row + ' 行没有条码（' + l.desc + '），PDA 上可用 Item Code 或搜索');
+          var k = [l.doNo, l.itemCode, l.barcode, l.qty, l.uom].join('|');
+          if (seen[k]) st.warns.push('Excel 第 ' + seen[k] + ' 行和第 ' + l.row + ' 行完全一样（' + l.doNo + ' ' + l.desc + ' ×' + l.qty + '），会相加，请确认不是重复导出');
+          else seen[k] = l.row;
+        });
+        if (!lines.length) st.errors.push('文件里没有商品行');
+        st.lines = lines;
+        draw();
+        loadCarry();
+      }, function (e) { st.errors.push(e.message); draw(); });
+    }
+    function loadCarry() {
+      api({ action: 'ldCarry' }, true).then(function (d) { st.carry = d.items || []; st.carry.forEach(function (c) { if (st.pick[c.ref] === undefined) st.pick[c.ref] = true; }); draw(); },
+        function (e) { st.carry = []; st.warns.push('读不到之前未装的商品：' + e.message); draw(); });
+    }
+    function merged() {
+      var m = {}, order = [];
+      (st.lines || []).forEach(function (l) {
+        var k = l.itemCode.toUpperCase() + '|' + l.uom;
+        if (!m[k]) { m[k] = { code: l.itemCode, desc: l.desc, uom: l.uom, spec: l.spec || '', bc: [], qty: 0, src: [] }; order.push(k); }
+        var it = m[k]; it.qty = Math.round((it.qty + l.qty) * 1000) / 1000; it.src.push(l.doNo + '×' + l.qty);
+        if (l.barcode && it.bc.indexOf(l.barcode) < 0) it.bc.push(l.barcode);
+      });
+      return order.map(function (k) { return m[k]; });
+    }
+    function upload(force) {
+      if (st.busy) return;
+      st.busy = true; draw();
+      var refs = Object.keys(st.pick).filter(function (k) { return st.pick[k] && (st.carry || []).some(function (c) { return c.ref === k; }); });
+      api({ action: 'ldImport', importId: st.importId, fileName: st.fileName, force: !!force, carry: refs,
+        lines: st.lines.map(function (l) { return { doNo: l.doNo, doDate: l.doDate, itemCode: l.itemCode, desc: l.desc, barcode: l.barcode, qty: l.qty, uom: l.uom, spec: l.spec || '', batch: l.batch || '', fromDoc: l.fromDoc }; }) }, true)
+        .then(function (d) {
+          st.busy = false;
+          if (d.status === 'created' || d.status === 'duplicate') { st.done = d; beep(); return draw(); }
+          if (d.status === 'dupDO') {
+            draw();
+            return modal('<div class="tmiss"><div class="tmiss-h"><span class="tmiss-ic">!</span><div><h3>这些 DO 已经上传过</h3></div></div><ul class="tmiss-list">' +
+              d.dos.map(function (x) { return '<li class="bad"><span class="mk">!</span><span class="t"><b>' + esc(x.doNo) + '</b><span>已在任务 ' + esc(x.task) + '</span></span></li>'; }).join('') +
+              '</ul><p>确定还要再建一个任务吗？（通常是重复上传，选“取消”）</p><div class="row"><button class="btn ghost" id="dupNo">取消</button><button class="btn save" id="dupYes">仍然上传</button></div></div>', function (m) {
+                $('#dupNo', m).onclick = closeModal; $('#dupYes', m).onclick = function () { closeModal(); upload(true); };
+              });
+          }
+          st.errors = (d.errors || [d.message || '上传失败']).concat(d.errorCount > 30 ? ['…共 ' + d.errorCount + ' 个问题'] : []); draw();
+        }, function (e) { st.busy = false; st.errors = ['上传失败：' + (e.network ? '网络不可用，请检查网络后再点上传' : e.message)]; draw(); });
+    }
+    function draw(note) {
+      var items = st.lines ? merged() : [], dos = {}, units = {};
+      (st.lines || []).forEach(function (l) { dos[l.doNo] = 1; });
+      items.forEach(function (it) { var u = it.uom || '（无单位）'; units[u] = Math.round(((units[u] || 0) + it.qty) * 1000) / 1000; });
+      var picked = (st.carry || []).filter(function (c) { return st.pick[c.ref]; });
+      var h = '';
+      if (st.done) {
+        h = '<div class="card upok"><div class="upok-ic">✓</div><h2>已建立装车任务 ' + esc(st.done.taskId) + '</h2><p>' +
+          (st.done.status === 'duplicate' ? '（这个文件刚才已经上传过，没有重复建立）' : 'DO ' + st.done.doCount + ' 张 · ' + st.done.lineCount + ' 行 · 商品 ' + st.done.itemCount + ' 项' + (st.done.carryCount ? '（含之前未装 ' + st.done.carryCount + ' 项）' : '')) +
+          '</p><p class="hint">PDA 打开「🚚 装车点货」就能看到这个任务。</p><button class="btn save" id="upNew">上传下一个</button></div>';
+      } else {
+        h = '<div class="card"><h3 style="margin-top:0">选择 AutoCount 导出的 Excel</h3>' +
+          '<ol class="hint upsteps"><li><b>Delivery Order Detail Listing</b>（必需：每行有 DO 号、Item Code、条码、数量）</li><li><b>送货单</b>（可选：一起选上，自动补上单位 / 规格 / 批次号）</li></ol>' +
+          '<button class="btn save upfile" id="upPick">📂 选择 Excel 文件（可多选）</button><input id="upF" class="vh" type="file" accept=".xlsx,.xls" multiple tabindex="-1">' +
+          (st.fileName ? '<p class="hint">已选：' + esc(st.fileName) + '</p>' : '') + (note ? '<p>' + esc(note) + '</p>' : '') + '</div>';
+        if (st.errors.length) h += '<div class="card upbad"><b>不能上传：</b><ul>' + st.errors.slice(0, 40).map(function (e) { return '<li>' + esc(e) + '</li>'; }).join('') + '</ul></div>';
+        if (st.lines && !st.errors.length) {
+          h += '<div class="card"><div class="upsum"><div><b>' + Object.keys(dos).length + '</b><span>张 DO</span></div><div><b>' + st.lines.length + '</b><span>行</span></div><div><b>' + items.length + '</b><span>个商品（合并后）</span></div>' +
+            '<div><b>' + (st.carry ? picked.length : '…') + '</b><span>之前未装</span></div></div>' +
+            '<p class="hint">需求合计：' + Object.keys(units).map(function (u) { return units[u] + ' ' + esc(u); }).join(' · ') + '</p>' +
+            '<p class="hint">DO：' + esc(Object.keys(dos).join('、')) + '</p></div>';
+          if (st.warns.length) h += '<div class="card upwarn"><b>请注意：</b><ul>' + st.warns.map(function (e) { return '<li>' + esc(e) + '</li>'; }).join('') + '</ul></div>';
+          if (st.infos.length) h += '<details class="card"><summary>其他提示（' + st.infos.length + '）</summary><ul class="hint">' + st.infos.map(function (e) { return '<li>' + esc(e) + '</li>'; }).join('') + '</ul></details>';
+          if (st.carry && st.carry.length) h += '<div class="card"><h3 style="margin-top:0">之前没装上车的商品（打勾的会一起加进这次任务，注明原来的日期）</h3>' +
+            '<p><button class="tbtn" id="cAll">全选</button> <button class="tbtn" id="cNone">全不选</button></p><table class="uptab"><thead><tr><th></th><th>原来日期</th><th>品名</th><th>Item Code</th><th>单位</th><th class="n">未装</th><th>任务</th></tr></thead><tbody>' +
+            st.carry.map(function (c) {
+              return '<tr><td><input type="checkbox" data-ref="' + esc(c.ref) + '"' + (st.pick[c.ref] ? ' checked' : '') + '></td><td><span class="ldold">' + esc(c.originDate) + '</span></td><td>' + esc(c.desc) +
+                '</td><td>' + esc(c.code) + '</td><td>' + esc(c.uom) + '</td><td class="n"><b>' + c.remain + '</b></td><td class="hint">' + esc(c.task) + '</td></tr>';
+            }).join('') + '</tbody></table></div>';
+          h += '<div class="card"><h3 style="margin-top:0">合并后的商品清单（PDA 上看到的就是这张）</h3><div class="uptabw"><table class="uptab"><thead><tr><th>#</th><th>Item Code</th><th>条码</th><th>品名</th><th>单位</th><th>规格</th><th class="n">需求</th><th>来自 DO</th></tr></thead><tbody>' +
+            items.map(function (it, i) {
+              return '<tr><td class="hint">' + (i + 1) + '</td><td>' + esc(it.code) + '</td><td>' + esc(it.bc.join(' / ')) + '</td><td>' + esc(it.desc) + '</td><td>' + esc(it.uom) + '</td><td class="hint">' + esc(it.spec) +
+                '</td><td class="n"><b>' + it.qty + '</b></td><td class="hint">' + esc(it.src.join('; ')) + '</td></tr>';
+            }).join('') + '</tbody></table></div></div>';
+          h += '<div id="dock" class="dock"><button class="btn save" id="upGo"' + (st.busy || !st.carry ? ' disabled' : '') + '>' + (st.busy ? '上传中…' : '⬆ 上传并建立装车任务') + '</button></div>';
+        }
+      }
+      app.innerHTML = h;
+      var f = $('#upF'); if (f) { f.onchange = function () { readFiles(f.files); f.value = ''; }; $('#upPick').onclick = function () { f.click(); }; }
+      var n = $('#upNew'); if (n) n.onclick = function () { st = { files: [], lines: null, errors: [], warns: [], infos: [], carry: null, pick: {}, busy: false, done: null, importId: uuid(), fileName: '' }; draw(); };
+      var g = $('#upGo'); if (g) g.onclick = function () { upload(false); };
+      Array.prototype.forEach.call(app.querySelectorAll('[data-ref]'), function (c) { c.onchange = function () { st.pick[c.dataset.ref] = c.checked; draw(); }; });
+      var ca = $('#cAll'), cn = $('#cNone');
+      if (ca) ca.onclick = function () { st.carry.forEach(function (c) { st.pick[c.ref] = true; }); draw(); };
+      if (cn) cn.onclick = function () { st.carry.forEach(function (c) { st.pick[c.ref] = false; }); draw(); };
+    }
+    draw();
+  }
+
+  // ---------- PDA：本机存储 + 离线队列 ----------
+  var LDQ = null, ldMem = {}, ldFlushing = null, ldPendN = 0, ldLastErr = '';
+  function ldLoadQ() {
+    if (LDQ) return Promise.resolve(LDQ);
+    return IDB.get('ld:q').then(function (q) { LDQ = LDQ || q || []; ldPendN = LDQ.length; renderNet(); return LDQ; }, function () { LDQ = LDQ || []; return LDQ; });
+  }
+  function ldSaveQ() { ldPendN = LDQ.length; renderNet(); return IDB.set('ld:q', LDQ); }
+  function ldGet(id) { if (ldMem[id]) return Promise.resolve(ldMem[id]); return IDB.get('ld:' + id).then(function (s) { if (s) ldMem[id] = s; return s || null; }, function () { return null; }); }
+  function ldPut(s) { ldMem[s.task.id] = s; return IDB.set('ld:' + s.task.id, s); }
+  function ldFromServer(d, old) {
+    var items = d.items.map(function (r) { var o = {}; d.itemCols.forEach(function (c, i) { o[c] = r[i]; }); return o; });
+    var txns = {};
+    d.txns.forEach(function (r) { var o = {}; d.txnCols.forEach(function (c, i) { o[c] = r[i]; }); o.synced = true; txns[o.id] = o; });
+    if (old) Object.keys(old.txns).forEach(function (k) { if (!txns[k] && !old.txns[k].synced) txns[k] = old.txns[k]; });    // 本机还没上传的
+    var s = { task: d.task, items: items, txns: txns, localDone: !!(old && old.localDone && d.task.status !== '已完成'), fetched: new Date().toISOString() };
+    if (s.localDone) s.task.status = '已完成';
+    return s;
+  }
+  function r3(x) { return Math.round(x * 1000) / 1000; }
+  function ldCounts(s) { var c = {}; Object.keys(s.txns).forEach(function (k) { var t = s.txns[k]; c[t.key] = r3((c[t.key] || 0) + Number(t.qty)); }); return c; }
+  function ldItemSt(req, c, done) { return c > req ? '超出' : c === req ? '已点齐' : done ? '短少' : c > 0 ? '点货中' : '未点'; }
+  function ldCodes(it) { if (!it._codes) it._codes = [it.code].concat(String(it.bc || '').split(' / ')).map(ldNorm).filter(Boolean); return it._codes; }
+  function ldPending(id) { return (LDQ || []).filter(function (o) { return o.taskId === id; }).length; }
+  function ldFlush() {
+    if (ldFlushing) return ldFlushing;
+    if (!cfg || !sess || cfg.r === 'up') return Promise.resolve();
+    ldFlushing = ldLoadQ().then(function step() {
+      if (!LDQ.length) return;
+      var first = LDQ[0];
+      if (first.op === 'submit') {
+        return ldGet(first.taskId).then(function (s) {
+          var ids = s ? Object.keys(s.txns) : [];
+          return api({ action: 'ldSubmit', taskId: first.taskId, txnIds: ids }, true).then(function (d) {
+            if (d.status === 'missing') throw new Error('还有点货记录没上传完');
+            LDQ.shift();
+            if (d.status === 'rejected') toast('完成提交被退回：' + (d.message || ''), 4000);
+            if (s && d.task) { s.task = d.task; s.localDone = false; }
+            return (s ? ldPut(s) : Promise.resolve()).then(ldSaveQ).then(step);
+          });
+        });
+      }
+      var batch = [];
+      for (var i = 0; i < LDQ.length && batch.length < 40 && LDQ[i].op === 'txn'; i++) batch.push(LDQ[i]);
+      return api({ action: 'ldTxns', txns: batch.map(function (o) { return o.txn; }) }, true).then(function (d) {
+        var res = {}; (d.results || []).forEach(function (r) { res[r.txnId] = r; });
+        var ps = [];
+        batch.forEach(function (o) {
+          var r = res[o.txn.txnId]; if (!r) return;
+          LDQ.splice(LDQ.indexOf(o), 1);
+          if (r.status === 'rejected') { toast('有一笔点货被退回：' + r.message, 4000); var rj = LS.get('ldRejected', []); rj.push({ o: o, msg: r.message, at: new Date().toISOString() }); LS.set('ldRejected', rj.slice(-100)); }
+          ps.push(ldGet(o.taskId).then(function (s) {
+            if (!s || !s.txns[o.txn.txnId]) return;
+            if (r.status === 'rejected') delete s.txns[o.txn.txnId]; else s.txns[o.txn.txnId].synced = true;
+            return ldPut(s);
+          }));
+        });
+        return Promise.all(ps).then(ldSaveQ).then(step);
+      });
+    }).then(function () { ldFlushing = null; ldLastErr = ''; if (ldRedraw) ldRedraw(); }, function (e) { ldFlushing = null; ldLastErr = e.message; renderNet(); if (ldRedraw) ldRedraw(); });
+    return ldFlushing;
+  }
+  var ldRedraw = null;
+  ldLoadQ().then(function () { if (ldPendN && sess) ldFlush(); });
+
+  // ---------- PDA：任务列表 ----------
+  function ldBadge(s) { return '<span class="ldb ' + ({ '待点货': 'b1', '点货中': 'b2', '已完成': 'b3' }[s] || 'b1') + '">' + esc(s) + '</span>'; }
+  function viewLdList() {
+    setBar('装车点货', false);
+    var cached = LS.get('ldTasks', null), note = '';
+    function draw(list) {
+      app.innerHTML = modTabs('ld') + '<div class="topline"><span>员工：' + esc(operator) + '</span><button class="link" id="lr">刷新</button></div>' +
+        (note ? '<p class="hint">' + esc(note) + '</p>' : '') +
+        (!list ? '<div class="empty">加载中…</div>' : list.length ? '' : '<div class="empty">没有装车任务。办公室上传 DO 后会出现在这里。</div>') +
+        (list || []).map(function (t) {
+          var pct = t.required ? Math.min(100, t.counted / t.required * 100) : 0, pend = ldPending(t.id);
+          return '<button class="card job ldtask" data-id="' + esc(t.id) + '"><div class="id">' + esc(t.id) + ' ' + ldBadge(t.status) + '</div>' +
+            '<div class="meta"><span>日期</span><b>' + esc(t.date) + '</b><span>DO</span><b>' + t.doCount + ' 张' + (t.carry ? ' + 之前未装 ' + t.carry + ' 项' : '') + '</b>' +
+            '<span>商品</span><b>' + t.itemCount + ' 项</b><span>数量</span><b>已点 ' + t.counted + ' / 需求 ' + t.required + '</b></div>' +
+            '<div class="progress"><i class="d" style="width:' + pct + '%"></i></div>' +
+            (pend ? '<div class="ptext err">本机还有 ' + pend + ' 笔没上传</div>' : '') + '</button>';
+        }).join('');
+      Array.prototype.forEach.call(app.querySelectorAll('.ldtask'), function (b) { b.onclick = function () { location.hash = '#/ld/' + encodeURIComponent(b.dataset.id); }; });
+      $('#lr').onclick = load; bindModTabs();
+    }
+    function load() {
+      api({ action: 'ldTasks' }, true).then(function (d) { LS.set('ldTasks', d.tasks); note = ''; if (location.hash === '#/ld') draw(d.tasks); },
+        function (e) { note = e.network ? '离线：显示上次的任务列表' : e.message; if (location.hash === '#/ld') draw(cached || []); });
+    }
+    draw(cached); load(); ldFlush();
+  }
+
+  // ---------- PDA：点货 ----------
+  function viewLdTask(id, review) {
+    setBar(review ? '复核' : '装车点货', true);
+    var s = null, filter = 'todo', msg = null, busy = false;     // 每次打开任务都从“未点完”开始
+    function done() { return s && s.task.status === '已完成'; }
+    function stats() {
+      var c = ldCounts(s), o = { n: s.items.length, ok: 0, todo: 0, prog: 0, over: 0, short: 0, req: 0, cnt: 0 };
+      s.items.forEach(function (it) {
+        var v = c[it.key] || 0, st = ldItemSt(it.req, v, done());
+        it._c = v; it._st = st; o.req = r3(o.req + it.req); o.cnt = r3(o.cnt + v);
+        if (st === '已点齐') o.ok++; else if (st === '超出') o.over++; else if (st === '未点') o.todo++; else if (st === '短少') o.short++; else o.prog++;
+      });
+      return o;
+    }
+    function itemName(it) { return esc(it.desc) + (it.origin === '之前' ? ' <span class="ldold">之前 ' + esc(it.originDate) + '</span>' : ''); }
+    function itemRow(it) {
+      var diff = r3(it._c - it.req);
+      return '<button class="ldi ' + ({ '未点': 's0', '点货中': 's1', '已点齐': 's2', '超出': 's3', '短少': 's4' }[it._st]) + '" data-k="' + esc(it.key) + '">' +
+        '<div class="ldi-t"><b>' + itemName(it) + '</b><span>' + esc(it.code) + (it.bc && it.bc !== it.code ? ' · ' + esc(it.bc) : '') + (it.spec ? ' · ' + esc(it.spec) : '') + '</span></div>' +
+        '<div class="ldi-n"><b>' + it._c + '<small> / ' + it.req + ' ' + esc(it.uom) + '</small></b><span>' + esc(it._st) + (diff && it._c ? '（' + (diff > 0 ? '+' : '') + diff + '）' : '') + '</span></div></button>';
+    }
+    function draw() {
+      if (!s) { app.innerHTML = '<div class="empty">' + esc(msg ? msg.text : '加载中…') + '</div>'; return; }
+      var o = stats(), pend = ldPending(id);
+      setBar((review ? '复核 · ' : '') + s.task.id, true);
+      var head = '<div class="card ldhead"><div class="ldhead-t"><b>' + esc(s.task.id) + '</b> ' + ldBadge(s.task.status) + '<span class="hint">' + esc(s.task.date) + ' · DO ' + s.task.doCount + ' 张</span></div>' +
+        '<div class="ldstat"><div><b>' + o.n + '</b><span>商品</span></div><div class="g"><b>' + (o.ok + o.over) + '</b><span>点齐</span></div><div class="o"><b>' + (o.todo + o.prog + o.short) + '</b><span>未点完</span></div><div class="p"><b>' + o.over + '</b><span>超出</span></div></div>' +
+        '<div class="progress"><i class="d" style="width:' + (o.n ? (o.ok + o.over) / o.n * 100 : 0) + '%"></i></div>' +
+        '<div class="hint">数量：已点 <b>' + o.cnt + '</b> / 需求 ' + o.req + (pend ? ' · <span class="err">本机 ' + pend + ' 笔待上传</span>' : '') + (ldLastErr && pend ? ' · ' + esc(ldLastErr) : '') + '</div></div>';
+      if (review) return drawReview(head, o);
+      var list = s.items.filter(function (it) {
+        return filter === 'all' ? true : filter === 'todo' ? it._c < it.req : filter === 'over' ? it._c > it.req : it._c === it.req;
+      });
+      var order = { '点货中': 0, '未点': 1, '短少': 1, '超出': 2, '已点齐': 3 };
+      list.sort(function (a, b) { return (order[a._st] - order[b._st]) || ((b.origin === '之前') - (a.origin === '之前')); });    // 之前未装的排在前面
+      var im = prefs.pda ? 'none' : 'text';
+      app.innerHTML = head + (msg ? '<div class="tmsg ' + msg.cls + '">' + esc(msg.text) + '</div>' : '') +
+        (done() ? '<div class="card lddone">✓ 已完成' + (s.task.submittedBy ? '（' + esc(s.task.submittedBy) + ' ' + esc(s.task.submitted) + '）' : s.localDone ? '（待上传）' : '') + '，不能再修改。需要更正请找办公室重新打开。</div>' :
+          '<div class="bcrow tscan"><input id="ldIn" inputmode="' + im + '" maxlength="64" autocomplete="off" spellcheck="false" placeholder="扫描条码，或输入条码后几位 / 品名"><button class="btn cam" id="ldCam">📷 扫描</button></div>' +
+          '<div class="row tsub"><button class="tbtn" id="ldKbd">⌨ 手输</button><button class="tbtn" id="ldSearch">🔍 搜索 / 全部商品</button></div>') +
+        '<div class="ldf">' + [['todo', '未点完 ' + (o.todo + o.prog + o.short)], ['over', '超出 ' + o.over], ['ok', '已点齐 ' + o.ok], ['all', '全部 ' + o.n]].map(function (f) {
+          return '<button data-f="' + f[0] + '" class="' + (filter === f[0] ? 'on' : '') + '">' + f[1] + '</button>';
+        }).join('') + '</div>' +
+        (list.length ? list.map(itemRow).join('') : '<div class="empty">' + (filter === 'todo' ? '全部点齐了 👍 可以点“完成点货”复核' : '没有') + '</div>') +
+        '<div id="dock" class="dock"><button class="btn ghost" id="ldHist" style="flex:0 0 36%">点货记录</button>' +
+        (done() ? '<button class="btn ghost" id="ldRev">查看结果</button>' : '<button class="btn save" id="ldRev">完成点货 →</button>') + '</div>';
+      bind();
+    }
+    function drawReview(head, o) {
+      var bad = s.items.filter(function (it) { return it._c < it.req; }), over = s.items.filter(function (it) { return it._c > it.req; }), ok = s.items.filter(function (it) { return it._c === it.req; });
+      var tr = function (it) {
+        var d = r3(it._c - it.req);
+        return '<tr class="' + (d < 0 ? 'neg' : d > 0 ? 'pos' : '') + '" data-k="' + esc(it.key) + '"><td><b>' + itemName(it) + '</b><div class="hint">' + esc(it.code) + ' · ' + esc(it.uom) + '</div></td><td class="n">' + it.req + '</td><td class="n">' + it._c + '</td><td class="n"><b>' + (d > 0 ? '+' : '') + d + '</b></td></tr>';
+      };
+      var tbl = function (title, arr, cls) {
+        return arr.length ? '<div class="card"><h3 class="' + cls + '">' + title + '（' + arr.length + '）</h3><table class="ldrt"><thead><tr><th>商品</th><th class="n">需求</th><th class="n">已点</th><th class="n">差异</th></tr></thead><tbody>' + arr.map(tr).join('') + '</tbody></table></div>' : '';
+      };
+      app.innerHTML = head + (msg ? '<div class="tmsg ' + msg.cls + '">' + esc(msg.text) + '</div>' : '') +
+        tbl(done() ? '短少 / 未装' : '没点够 / 没点（未装）', bad, 'err') + tbl('超出', over, 'ldpos') +
+        (ok.length ? '<details class="card"><summary><b>已点齐 ' + ok.length + ' 项</b></summary><table class="ldrt"><tbody>' + ok.map(tr).join('') + '</tbody></table></details>' : '') +
+        (done() ? '' : '<p class="hint">提交的是实际点到的数量，不需要改成和 DO 一样。没点够的会记为<b>未装</b>，下次上传 DO 时可以带进新任务（会注明今天的日期）。</p>') +
+        '<div id="dock" class="dock"><button class="btn ghost" id="ldBack" style="flex:0 0 36%">‹ 继续点货</button>' +
+        (done() ? '' : '<button class="btn save" id="ldSubmit">✓ 确认完成点货</button>') + '</div>';
+      $('#ldBack').onclick = function () { location.hash = '#/ld/' + encodeURIComponent(id); };
+      var sb = $('#ldSubmit');
+      if (sb) sb.onclick = function () {
+        modal('<div class="tmiss"><div class="tmiss-h"><span class="tmiss-ic" style="background:#e6f4ea;color:#1a7f37">✓</span><div><h3>确认完成点货？</h3></div></div>' +
+          '<ul class="tmiss-list"><li class="' + (bad.length ? 'bad' : 'ok') + '"><span class="mk">' + (bad.length ? '!' : '✓') + '</span><span class="t"><b>未装 / 短少 ' + bad.length + ' 项</b><span>下次上传 DO 时可以带上</span></span></li>' +
+          '<li class="' + (over.length ? 'bad' : 'ok') + '"><span class="mk">' + (over.length ? '!' : '✓') + '</span><span class="t"><b>超出 ' + over.length + ' 项</b><span>按实际点到的数量记录</span></span></li>' +
+          '<li class="ok"><span class="mk">✓</span><span class="t"><b>已点齐 ' + ok.length + ' 项</b></span></li></ul>' +
+          '<p>完成后不能再修改。</p><div class="row"><button class="btn ghost" id="cfNo">再看看</button><button class="btn save" id="cfYes">确认完成</button></div></div>', function (m) {
+            $('#cfNo', m).onclick = closeModal;
+            $('#cfYes', m).onclick = function () {
+              closeModal();
+              s.localDone = true; s.task.status = '已完成'; s.task.submittedBy = operator;
+              LDQ.push({ op: 'submit', taskId: id, at: new Date().toISOString() });
+              Promise.all([ldPut(s), ldSaveQ()]).then(function () {
+                beep(); toast(navigator.onLine === false ? '✓ 已完成（没网，联网后自动上传）' : '✓ 已完成');
+                ldFlush(); location.hash = '#/ld/' + encodeURIComponent(id);
+              });
+            };
+          });
+      };
+      Array.prototype.forEach.call(app.querySelectorAll('tr[data-k]'), function (r) { r.onclick = function () { if (!done()) qty(byKey(r.dataset.k), 'SEARCH', ''); }; });
+    }
+    function byKey(k) { return s.items.filter(function (it) { return it.key === k; })[0]; }
+    function bind() {
+      Array.prototype.forEach.call(app.querySelectorAll('[data-f]'), function (b) { b.onclick = function () { filter = b.dataset.f; msg = null; draw(); }; });
+      Array.prototype.forEach.call(app.querySelectorAll('.ldi'), function (b) { b.onclick = function () { if (!done()) qty(byKey(b.dataset.k), 'SEARCH', ''); }; });
+      $('#ldHist').onclick = showHistory;
+      $('#ldRev').onclick = function () { location.hash = '#/ld/' + encodeURIComponent(id) + '/review'; };
+      var inp = $('#ldIn');
+      if (!inp) return;
+      inp.addEventListener('keydown', function (e) { if (e.key === 'Enter' || e.keyCode === 13) { e.preventDefault(); var v = inp.value; inp.value = ''; handle(v, 'BARCODE'); } });
+      var prev = 0, t;
+      inp.addEventListener('input', function () {      // PDA “直接填充”模式（没有回车）
+        var now = inp.value.length; clearTimeout(t);
+        if (now - prev >= 6) t = setTimeout(function () { if (document.activeElement === inp && inp.value) { var v = inp.value; inp.value = ''; handle(v, 'BARCODE'); } }, 250);
+        prev = now;
+      });
+      setTimeout(function () { var x = $('#ldIn'); if (x && $('#modal').hidden) x.focus(); }, 30);
+      $('#ldCam').onclick = function () { openCamera('ld', function (code) { handle(code, 'BARCODE'); }, { label: '商品条码' }); };
+      $('#ldKbd').onclick = function () { inp.setAttribute('inputmode', 'text'); inp.blur(); setTimeout(function () { inp.focus(); }, 30); };
+      $('#ldSearch').onclick = function () { pick(s.items, '搜索商品', ''); };
+    }
+    // 扫码 / 输入：先精确比对条码和 Item Code；没有就按“后几位”或品名找
+    function handle(raw, method) {
+      raw = String(raw || '').trim(); if (!raw || !s || done()) return;
+      var q = ldNorm(raw), exact = s.items.filter(function (it) { return ldCodes(it).indexOf(q) >= 0; });
+      if (exact.length === 1) return qty(exact[0], method, raw);
+      if (exact.length > 1) return pick(exact, '这个条码对应 ' + exact.length + ' 行，请选择', '', raw);
+      var found = find(raw);
+      if (found.length) { if (found.length === 1 && /^\d{4,}$/.test(q) && q.length < 8) return qty(found[0], 'SEARCH', raw); return pick(found, '找到 ' + found.length + ' 个可能的商品', raw); }
+      errBeep();
+      if (/^\d{8,}$/.test(q)) { LDQ.push({ op: 'txn', taskId: id, txn: { txnId: uuid(), taskId: id, method: 'UNKNOWN', code: raw, clientTime: new Date().toISOString() } }); ldSaveQ().then(ldFlush); }
+      modal('<div class="tmiss"><div class="tmiss-h"><span class="tmiss-ic">?</span><div><h3>条码不在本次装车单里</h3><div class="hint">' + esc(raw) + '</div></div></div>' +
+        '<p>可能是箱子上的备用码。请手动搜索（品名、Item Code 或条码后几位），或从列表里选正确的商品。<b>不会自动加进清单。</b></p>' +
+        '<div class="row"><button class="btn ghost" id="nfOk">知道了</button><button class="btn save" id="nfS">🔍 手动搜索 / 选商品</button></div></div>', function (m) {
+          $('#nfOk', m).onclick = closeModal; $('#nfS', m).onclick = function () { pick(s.items, '搜索商品', ''); };
+        });
+    }
+    function find(text) {
+      var q = ldNorm(text), low = String(text || '').trim().toLowerCase(), res = [];
+      if (!low) return s.items.slice();
+      if (/^\d+$/.test(q)) {
+        res = s.items.filter(function (it) { return ldCodes(it).some(function (c) { return c.slice(-q.length) === q; }); });     // 后几位
+        if (!res.length && q.length >= 3) res = s.items.filter(function (it) { return ldCodes(it).some(function (c) { return c.indexOf(q) >= 0; }); });
+      } else {
+        res = s.items.filter(function (it) { return (it.desc + ' ' + it.code + ' ' + it.bc + ' ' + it.spec).toLowerCase().indexOf(low) >= 0; });
+      }
+      return res;
+    }
+    function pick(list, title, query, scanned) {
+      stats();
+      var sortL = function (arr) { return arr.slice().sort(function (a, b) { return (a._c >= a.req) - (b._c >= b.req); }); };
+      function rows(arr) {
+        return arr.length ? sortL(arr).slice(0, 80).map(function (it) {
+          return '<button class="ldp" data-k="' + esc(it.key) + '"><span class="t"><b>' + itemName(it) + '</b><span>' + esc(it.code) + (it.bc && it.bc !== it.code ? ' · ' + esc(it.bc) : '') + ' · ' + esc(it.uom) + '</span></span>' +
+            '<span class="n">' + it._c + ' / ' + it.req + '</span></button>';
+        }).join('') + (arr.length > 80 ? '<p class="hint">还有 ' + (arr.length - 80) + ' 项，请输入更多字缩小范围</p>' : '') : '<div class="empty">没有找到。可以输入品名的一部分、Item Code 或条码后几位</div>';
+      }
+      modal('<h3 style="margin-top:0">' + esc(title) + '</h3><input id="pkQ" class="pkq" placeholder="品名 / Item Code / 条码后几位" value="' + esc(query || '') + '" autocomplete="off">' +
+        '<div id="pkL" class="pkl">' + rows(list) + '</div><div class="row"><button class="btn ghost" id="pkX">关闭</button></div>', function (m) {
+          var qEl = $('#pkQ', m), L = $('#pkL', m);
+          function bindRows() { Array.prototype.forEach.call(L.querySelectorAll('.ldp'), function (b) { b.onclick = function () { qty(byKey(b.dataset.k), scanned ? 'BARCODE' : 'SEARCH', scanned || ''); }; }); }
+          qEl.oninput = function () { L.innerHTML = rows(find(qEl.value)); bindRows(); };
+          qEl.onkeydown = function (e) { if (e.key === 'Enter') { e.preventDefault(); var r = find(qEl.value); if (r.length === 1) qty(r[0], 'SEARCH', ''); } };
+          $('#pkX', m).onclick = closeModal; bindRows();
+          if (!scanned) setTimeout(function () { qEl.focus(); }, 50);
+        });
+    }
+    // 输入本次数量 → 加到累计（不覆盖）
+    function qty(it, method, code) {
+      if (!it) return;
+      stats();
+      var rem = r3(it.req - it._c);
+      modal('<div class="ldq"><div class="ldq-h">' + itemName(it) + '</div><div class="hint">' + esc(it.code) + (it.bc && it.bc !== it.code ? ' · 条码 ' + esc(it.bc) : '') + (it.spec ? ' · ' + esc(it.spec) : '') + '</div>' +
+        '<div class="ldq-n"><div><span>需求</span><b>' + it.req + '</b></div><div><span>已点</span><b>' + it._c + '</b></div><div class="' + (rem < 0 ? 'p' : rem ? 'o' : 'g') + '"><span>' + (rem < 0 ? '已超出' : '还差') + '</span><b>' + Math.abs(rem) + '</b></div></div>' +
+        '<label class="ldq-l">这次点了多少 <b>' + esc(it.uom || '') + '</b>？</label><input id="ldQn" class="ldq-in" inputmode="decimal" autocomplete="off" maxlength="9">' +
+        '<div id="ldQm" class="ldq-m"></div><div class="row"><button class="btn ghost" id="ldQc">取消</button><button class="btn save" id="ldQo">＋ 确认累加</button></div></div>', function (m) {
+          var inp = $('#ldQn', m), out = $('#ldQm', m);
+          inp.oninput = function () {
+            var v = Number(inp.value);
+            out.className = 'ldq-m';
+            out.textContent = inp.value && v > 0 ? '累加后：' + r3(it._c + v) + ' / ' + it.req + (r3(it._c + v) > it.req ? '（超出 ' + r3(it._c + v - it.req) + '）' : '') : '';
+          };
+          var ok = function () {
+            var raw = inp.value.trim(), v = Number(raw);
+            if (/^\d{7,}$/.test(raw)) { out.className = 'ldq-m err'; out.textContent = '数量太大——是不是扫到了条码？请输入数量'; inp.value = ''; errBeep(); return; }
+            if (!(v > 0) || v > 100000) { out.className = 'ldq-m err'; out.textContent = '请输入点到的数量（大于 0）'; errBeep(); inp.focus(); return; }
+            closeModal(); add(it, v, method, code);
+          };
+          inp.onkeydown = function (e) { if (e.key === 'Enter') { e.preventDefault(); ok(); } };
+          $('#ldQo', m).onclick = ok; $('#ldQc', m).onclick = function () { closeModal(); draw(); };
+          setTimeout(function () { inp.focus(); }, 50);
+        });
+    }
+    function add(it, v, method, code) {
+      var tid = uuid(), now = new Date().toISOString();
+      s.txns[tid] = { id: tid, key: it.key, qty: v, method: method, staff: operator, time: now, rev: '', code: code || '', synced: false };
+      LDQ.push({ op: 'txn', taskId: id, txn: { txnId: tid, taskId: id, key: it.key, qty: v, method: method, code: code || '', clientTime: now } });
+      if (s.task.status === '待点货') s.task.status = '点货中';
+      Promise.all([ldPut(s), ldSaveQ()]).then(function () {
+        var c = ldCounts(s)[it.key] || 0;
+        beep();
+        msg = { cls: c > it.req ? 'bad' : 'good', text: '✓ ' + it.desc + '  +' + v + ' → 共 ' + c + ' / ' + it.req + (c > it.req ? '（超出 ' + r3(c - it.req) + '）' : c === it.req ? '（已点齐）' : '') };
+        draw(); ldFlush();
+      }, function (e) { infoBoxLd('保存失败', '保存到手机失败（' + e.message + '），请再点一次。'); });
+    }
+    function infoBoxLd(t, x) {
+      errBeep();
+      modal('<div class="tmiss"><div class="tmiss-h"><span class="tmiss-ic">!</span><div><h3>' + esc(t) + '</h3></div></div><p>' + esc(x) + '</p><div class="row"><button class="btn save" id="ibOk">知道了</button></div></div>', function (m) { $('#ibOk', m).onclick = closeModal; });
+    }
+    // 点货记录：每一笔都在，改错用“冲销”（加一笔负数），不会改原记录
+    function showHistory() {
+      var list = Object.keys(s.txns).map(function (k) { return s.txns[k]; }).sort(function (a, b) { return String(b.time).localeCompare(String(a.time)); });
+      var reversed = {}; list.forEach(function (t) { if (t.rev) reversed[t.rev] = 1; });
+      var name = function (k) { var it = byKey(k); return it ? it.desc + (it.uom ? '（' + it.uom + '）' : '') : k; };
+      modal('<h3 style="margin-top:0">点货记录（' + list.length + ' 笔）</h3><div class="pkl">' + (list.length ? list.map(function (t) {
+        var canRev = !done() && t.method !== 'REVERSAL' && !reversed[t.id];
+        return '<div class="ldh' + (reversed[t.id] ? ' gone' : '') + '"><span class="t"><b>' + esc(name(t.key)) + '</b><span>' + esc(hhmm(t.time)) + ' · ' + esc(t.staff || '') + ' · ' +
+          ({ BARCODE: '扫码', SEARCH: '搜索', MANUAL: '手输', REVERSAL: '冲销' }[t.method] || t.method) + (t.synced ? '' : ' · <span class="err">未上传</span>') + (reversed[t.id] ? ' · 已冲销' : '') + '</span></span>' +
+          '<b class="q">' + (t.qty > 0 ? '+' : '') + t.qty + '</b>' + (canRev ? '<button class="tbtn" data-rev="' + esc(t.id) + '">冲销</button>' : '') + '</div>';
+      }).join('') : '<div class="empty">还没有点货记录</div>') + '</div><div class="row"><button class="btn ghost" id="hX">关闭</button></div>', function (m) {
+        $('#hX', m).onclick = closeModal;
+        Array.prototype.forEach.call(m.querySelectorAll('[data-rev]'), function (b) {
+          b.onclick = function () {
+            var t = s.txns[b.dataset.rev];
+            confirmBox('冲销这一笔：' + name(t.key) + ' ' + (t.qty > 0 ? '+' : '') + t.qty + '？（会加一笔 ' + (-t.qty) + '，原记录保留）', '冲销', function () {
+              var it = byKey(t.key), rid = uuid(), now = new Date().toISOString();
+              s.txns[rid] = { id: rid, key: t.key, qty: -t.qty, method: 'REVERSAL', staff: operator, time: now, rev: t.id, code: '', synced: false };
+              LDQ.push({ op: 'txn', taskId: id, txn: { txnId: rid, taskId: id, key: t.key, qty: -t.qty, method: 'REVERSAL', reverses: t.id, clientTime: now } });
+              Promise.all([ldPut(s), ldSaveQ()]).then(function () { msg = { cls: 'good', text: '已冲销：' + (it ? it.desc : '') + ' ' + (-t.qty) }; draw(); ldFlush(); });
+            });
+          };
+        });
+      });
+    }
+    ldRedraw = function () { if (location.hash.indexOf('#/ld/' + encodeURIComponent(id)) === 0 && s) ldGet(id).then(function (x) { if (x) s = x; if ($('#modal').hidden) draw(); }); };
+    currentRedraw = ldRedraw;
+    ldLoadQ().then(function () { return ldGet(id); }).then(function (local) {
+      if (local) { s = local; draw(); }
+      return api({ action: 'ldTask', taskId: id }, true).then(function (d) {
+        if (d.error) { if (!s) { msg = { cls: 'bad', text: d.message }; draw(); } return; }
+        return ldGet(id).then(function (cur) { s = ldFromServer(d, cur); return ldPut(s); }).then(function () { if ($('#modal').hidden) draw(); ldFlush(); });
+      }, function (e) {
+        if (!s) { msg = { cls: 'bad', text: e.network ? '离线：这个任务还没下载到手机。第一次打开需要联网。' : e.message }; draw(); }
+      });
+    });
+    draw();
+  }
+  // 焦点不在输入框时，扫描头的按键送到点货扫描框
+  document.addEventListener('keydown', function (e) {
+    if (!/^#\/ld\/[^/]+$/.test(location.hash) || !$('#modal').hidden || camOpen) return;
+    var a = document.activeElement;
+    if (a && (a.tagName === 'INPUT' || a.tagName === 'SELECT' || a.tagName === 'TEXTAREA')) return;
+    if (e.key && e.key.length === 1 && !e.ctrlKey && !e.altKey && !e.metaKey) { var t = $('#ldIn'); if (t) t.focus(); }
+  }, true);
+
   var cam = null, camOpen = false, camState = null;
   var RETAIL_FORMATS = ['ean_13', 'ean_8', 'upc_a', 'upc_e', 'code_128', 'itf', 'code_39'];
   function checkDigitOk(v, fmt) {
