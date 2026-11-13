@@ -167,3 +167,22 @@ textarea.remark { width: 100%; font: inherit; font-size: 16px; padding: 10px; bo
 .tsub { display: flex; gap: 8px; }
 .tst { display: inline-block; padding: 1px 6px; border-radius: 8px; font-size: 12px; font-weight: 600; background: #eef1f5; color: #556; }
 .tst.t1 { background: #fff1e0; color: #b45309; } .tst.t2 { background: #fde8e7; color: #b42318; } .tst.t3 { background: #e6f4ea; color: #1a7f37; }
+.btn.save.notready { background: #8fa3bf; }
+.btn small { font-weight: 500; font-size: 14px; }
+.tstep.need { border-color: #b42318; background: #fff4f2; }
+.tstep.need .tp { color: #b42318; }
+.tmiss-h { display: flex; gap: 12px; align-items: center; }
+.tmiss-ic { width: 42px; height: 42px; border-radius: 50%; background: #fde8e7; color: #b42318; font: 800 24px/42px system-ui, sans-serif; text-align: center; flex: none; }
+.tmiss h3 { margin: 0 0 2px; font-size: 20px; }
+.tmiss-list { list-style: none; margin: 12px 0 0; padding: 0; }
+.tmiss-list li { display: flex; align-items: center; gap: 10px; padding: 12px; border-radius: 10px; margin: 6px 0; background: #f6f8fb; border: 1px solid transparent; }
+.tmiss-list .mk { width: 26px; height: 26px; border-radius: 50%; flex: none; text-align: center; font-weight: 800; line-height: 26px; font-size: 15px; }
+.tmiss-list .t { flex: 1; min-width: 0; }
+.tmiss-list .t b { display: block; font-size: 16px; }
+.tmiss-list .t span { font-size: 13px; color: var(--mute); word-break: break-all; }
+.tmiss-list li.ok .mk { background: #e6f4ea; color: #1a7f37; }
+.tmiss-list li.opt .mk { background: #eef1f5; color: #667; }
+.tmiss-list li.bad { background: #fff4f2; border-color: #f3b4ae; cursor: pointer; }
+.tmiss-list li.bad .mk { background: #b42318; color: #fff; }
+.tmiss-list li.bad b { color: #b42318; }
+.tmiss-list .go { color: #b42318; font-weight: 700; white-space: nowrap; }
