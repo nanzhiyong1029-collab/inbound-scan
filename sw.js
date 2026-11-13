@@ -1,7 +1,7 @@
 // 离线缓存 APP 外壳（不缓存 API 请求）
-var CACHE = 'inbound-scan-v1.3.7';
+var CACHE = 'inbound-scan-v1.3.8';
 var LIB = 'https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js';
-var FILES = ['./', 'index.html', 'style.css?v=1.3.7', 'app.js?v=1.3.7', 'manifest.webmanifest', 'icon.svg', 'icon-192.png', 'icon-512.png'];
+var FILES = ['./', 'index.html', 'style.css?v=1.3.8', 'app.js?v=1.3.8', 'manifest.webmanifest', 'icon.svg', 'icon-192.png', 'icon-512.png'];
 self.addEventListener('install', function (e) {
   e.waitUntil(caches.open(CACHE).then(function (c) { return c.addAll(FILES).then(function () { return c.add(LIB).catch(function () { }); }); }).then(function () { return self.skipWaiting(); }));
 });
