@@ -159,7 +159,10 @@ textarea.remark { width: 100%; font: inherit; font-size: 16px; padding: 10px; bo
 .tmsg { margin: 10px 0; padding: 12px; border-radius: 10px; font-size: 17px; font-weight: 600; }
 .tmsg.good { background: #e8f7ec; color: #1a7f37; }
 .tmsg.bad { background: #fde8e7; color: #b42318; }
-.tphotobtn { display: block; text-align: center; margin: 10px 0; padding: 18px; font-size: 20px; cursor: pointer; }
+.tphotos { display: flex; gap: 8px; margin: 10px 0; }
+.tphotobtn { flex: 2; text-align: center; padding: 18px; font-size: 20px; cursor: pointer; min-height: 64px; }
+.tphotoalt { flex: 1; font-size: 15px; min-height: 64px; }
+.vh { position: absolute; width: 1px; height: 1px; opacity: 0; overflow: hidden; clip: rect(0 0 0 0); pointer-events: none; }
 .trow { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 6px 0; border-top: 1px solid var(--line); font-size: 14px; }
 .tsub { display: flex; gap: 8px; }
 .tst { display: inline-block; padding: 1px 6px; border-radius: 8px; font-size: 12px; font-weight: 600; background: #eef1f5; color: #556; }
