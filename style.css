@@ -261,3 +261,6 @@ h3.ldpos { color: #5b21b6; }
 .upok { text-align: center; padding: 24px 12px; }
 .upok-ic { width: 64px; height: 64px; margin: 0 auto 8px; border-radius: 50%; background: #e6f4ea; color: #1a7f37; font: 800 40px/64px system-ui, sans-serif; }
 body.wide #app, body.wide .dock { max-width: 1200px; }
+.tkhead { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; } .tkhead .hint { flex: 1; }
+.tktab td { vertical-align: middle; } .tkdel { color: #b42318; border-color: #f3b4ae; }
+.ldgone { text-align: center; padding: 28px 16px; } .ldgone h2 { color: #b42318; }
