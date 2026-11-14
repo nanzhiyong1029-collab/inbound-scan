@@ -1,9 +1,9 @@
-/* 入库条码采集 + 库位转移 PWA  v1.4.2
+/* 入库条码采集 + 库位转移 PWA  v1.4.3
  * 页面：#/ 任务列表 → #/job/<JobID> 商品清单 → #/p/<JobID>/<ProductID> 条码采集
  * 原则：只采集原始资料，不做任何核对。先存手机（离线队列），再上传云端。 */
 (function () {
   'use strict';
-  var VERSION = '1.4.2';
+  var VERSION = '1.4.3';
   var $ = function (s, el) { return (el || document).querySelector(s); };
   var app = $('#app');
 
@@ -1543,7 +1543,7 @@
           });
         });
       }
-      var batch = [];
+      var batch = [], rejT = {};
       for (var i = 0; i < LDQ.length && batch.length < 40 && LDQ[i].op === 'txn'; i++) batch.push(LDQ[i]);
       return api({ action: 'ldTxns', txns: batch.map(function (o) { return o.txn; }) }, true).then(function (d) {
         var res = {}; (d.results || []).forEach(function (r) { res[r.txnId] = r; });
@@ -1551,19 +1551,28 @@
         batch.forEach(function (o) {
           var r = res[o.txn.txnId]; if (!r) return;
           LDQ.splice(LDQ.indexOf(o), 1);
-          if (r.status === 'rejected') { toast('有一笔点货被退回：' + r.message, 4000); var rj = LS.get('ldRejected', []); rj.push({ o: o, msg: r.message, at: new Date().toISOString() }); LS.set('ldRejected', rj.slice(-100)); }
+          if (r.status === 'rejected') { rejT[o.taskId] = 1; toast((/EDIT|VOID|ADJUST|REVERSAL/.test(o.txn.method) ? '修改被退回：' : '有一笔点货被退回：') + r.message, 5000); var rj = LS.get('ldRejected', []); rj.push({ o: o, msg: r.message, at: new Date().toISOString() }); LS.set('ldRejected', rj.slice(-100)); }
           ps.push(ldGet(o.taskId).then(function (s) {
             if (!s || !s.txns[o.txn.txnId]) return;
             if (r.status === 'rejected') delete s.txns[o.txn.txnId]; else s.txns[o.txn.txnId].synced = true;
             return ldPut(s);
           }));
         });
-        return Promise.all(ps).then(ldSaveQ).then(step);
+        return Promise.all(ps).then(ldSaveQ).then(function () { return ldRefetch(Object.keys(rejT)); }).then(step);
       });
     }).then(function () { ldFlushing = null; ldLastErr = ''; if (ldRedraw) ldRedraw(); }, function (e) { ldFlushing = null; ldLastErr = e.message; renderNet(); if (ldRedraw) ldRedraw(); });
     return ldFlushing;
   }
   var ldRedraw = null;
+  /** 有修改被退回（别人已经改过）→ 重新下载这个任务，手机上显示最新的数量 */
+  function ldRefetch(ids) {
+    return Promise.all(ids.map(function (tid) {
+      return api({ action: 'ldTask', taskId: tid }, true).then(function (d) {
+        if (d.error) return;
+        return ldGet(tid).then(function (cur) { return ldPut(ldFromServer(d, cur)); });
+      }).catch(function () { });
+    }));
+  }
   ldLoadQ().then(function () { if (ldPendN && sess) ldFlush(); });
 
   // ---------- PDA：任务列表 ----------
@@ -1681,12 +1690,12 @@
             };
           });
       };
-      Array.prototype.forEach.call(app.querySelectorAll('tr[data-k]'), function (r) { r.onclick = function () { if (!done()) qty(byKey(r.dataset.k), 'SEARCH', ''); }; });
+      Array.prototype.forEach.call(app.querySelectorAll('tr[data-k]'), function (r) { r.onclick = function () { detail(byKey(r.dataset.k)); }; });
     }
     function byKey(k) { return s.items.filter(function (it) { return it.key === k; })[0]; }
     function bind() {
       Array.prototype.forEach.call(app.querySelectorAll('[data-f]'), function (b) { b.onclick = function () { filter = b.dataset.f; msg = null; draw(); }; });
-      Array.prototype.forEach.call(app.querySelectorAll('.ldi'), function (b) { b.onclick = function () { if (!done()) qty(byKey(b.dataset.k), 'SEARCH', ''); }; });
+      Array.prototype.forEach.call(app.querySelectorAll('.ldi'), function (b) { b.onclick = function () { detail(byKey(b.dataset.k)); }; });
       $('#ldHist').onclick = showHistory;
       $('#ldRev').onclick = function () { location.hash = '#/ld/' + encodeURIComponent(id) + '/review'; };
       var inp = $('#ldIn');
@@ -1790,32 +1799,137 @@
       errBeep();
       modal('<div class="tmiss"><div class="tmiss-h"><span class="tmiss-ic">!</span><div><h3>' + esc(t) + '</h3></div></div><p>' + esc(x) + '</p><div class="row"><button class="btn save" id="ibOk">知道了</button></div></div>', function (m) { $('#ibOk', m).onclick = closeModal; });
     }
-    // 点货记录：每一笔都在，改错用“冲销”（加一笔负数），不会改原记录
-    function showHistory() {
-      var list = Object.keys(s.txns).map(function (k) { return s.txns[k]; }).sort(function (a, b) { return String(b.time).localeCompare(String(a.time)); });
-      var reversed = {}; list.forEach(function (t) { if (t.rev) reversed[t.rev] = 1; });
-      var name = function (k) { var it = byKey(k); return it ? it.desc + (it.uom ? '（' + it.uom + '）' : '') : k; };
-      modal('<h3 style="margin-top:0">点货记录（' + list.length + ' 笔）</h3><div class="pkl">' + (list.length ? list.map(function (t) {
-        var canRev = !done() && t.method !== 'REVERSAL' && !reversed[t.id];
-        return '<div class="ldh' + (reversed[t.id] ? ' gone' : '') + '"><span class="t"><b>' + esc(name(t.key)) + '</b><span>' + esc(hhmm(t.time)) + ' · ' + esc(t.staff || '') + ' · ' +
-          ({ BARCODE: '扫码', SEARCH: '搜索', MANUAL: '手输', REVERSAL: '冲销' }[t.method] || t.method) + (t.synced ? '' : ' · <span class="err">未上传</span>') + (reversed[t.id] ? ' · 已冲销' : '') + '</span></span>' +
-          '<b class="q">' + (t.qty > 0 ? '+' : '') + t.qty + '</b>' + (canRev ? '<button class="tbtn" data-rev="' + esc(t.id) + '">冲销</button>' : '') + '</div>';
-      }).join('') : '<div class="empty">还没有点货记录</div>') + '</div><div class="row"><button class="btn ghost" id="hX">关闭</button></div>', function (m) {
-        $('#hX', m).onclick = closeModal;
-        Array.prototype.forEach.call(m.querySelectorAll('[data-rev]'), function (b) {
-          b.onclick = function () {
-            var t = s.txns[b.dataset.rev];
-            confirmBox('冲销这一笔：' + name(t.key) + ' ' + (t.qty > 0 ? '+' : '') + t.qty + '？（会加一笔 ' + (-t.qty) + '，原记录保留）', '冲销', function () {
-              var it = byKey(t.key), rid = uuid(), now = new Date().toISOString();
-              s.txns[rid] = { id: rid, key: t.key, qty: -t.qty, method: 'REVERSAL', staff: operator, time: now, rev: t.id, code: '', synced: false };
-              LDQ.push({ op: 'txn', taskId: id, txn: { txnId: rid, taskId: id, key: t.key, qty: -t.qty, method: 'REVERSAL', reverses: t.id, clientTime: now } });
-              Promise.all([ldPut(s), ldSaveQ()]).then(function () { msg = { cls: 'good', text: '已冲销：' + (it ? it.desc : '') + ' ' + (-t.qty) }; draw(); ldFlush(); });
-            });
+    // ---------- v1.4.3 修正点货：修改 / 撤销 / 调整累计 —— 都是另加一笔，原记录永远保留 ----------
+    var ML = { BARCODE: '扫码', SEARCH: '搜索', MANUAL: '手输', REVERSAL: '撤销', VOID: '撤销', EDIT: '修改', ADJUST: '调整累计' };
+    var ORIG = ['BARCODE', 'SEARCH', 'MANUAL', 'ADJUST'];
+    function byTime(a, b) { return String(a.time).localeCompare(String(b.time)); }
+    function sg(v) { return (v > 0 ? '+' : '') + v; }
+    /** 某一笔现在的数量：原数量 + 修改差额；被撤销 = 0 */
+    function txState(tid) {
+      var o = s.txns[tid], eff = o ? Number(o.qty) : 0, voided = null, edits = [];
+      Object.keys(s.txns).forEach(function (k) {
+        var t = s.txns[k]; if (t.rev !== tid) return;
+        if (t.method === 'VOID' || t.method === 'REVERSAL') voided = t; else if (t.method === 'EDIT') { eff = r3(eff + Number(t.qty)); edits.push(t); }
+      });
+      return { eff: voided ? 0 : eff, voided: voided, edits: edits.sort(byTime) };
+    }
+    function push(it, method, delta, extra, okText) {
+      var tid = uuid(), now = new Date().toISOString();
+      var rec = Object.assign({ id: tid, key: it.key, qty: delta, method: method, staff: operator, time: now, rev: '', code: '', orig: '', to: '', reason: '', synced: false }, extra);
+      s.txns[tid] = rec;
+      LDQ.push({ op: 'txn', taskId: id, txn: { txnId: tid, taskId: id, key: it.key, qty: delta, method: method, reverses: rec.rev, orig: rec.orig, to: rec.to, reason: rec.reason, clientTime: now } });
+      if (s.task.status === '待点货') s.task.status = '点货中';
+      return Promise.all([ldPut(s), ldSaveQ()]).then(function () {
+        beep(); var c = ldCounts(s)[it.key] || 0;
+        msg = { cls: 'good', text: okText + ' → ' + it.desc + ' 现在共 ' + c + ' / ' + it.req };
+        draw(); ldFlush();
+      }, function (e) { delete s.txns[tid]; LDQ.pop(); infoBoxLd('保存失败', '保存到手机失败（' + e.message + '），请再试一次。'); throw e; });
+    }
+    function numBox(title, sub, label, val, okText, onOk, extraHtml) {
+      modal('<div class="ldq"><div class="ldq-h">' + title + '</div>' + (sub ? '<div class="hint">' + sub + '</div>' : '') +
+        '<label class="ldq-l" style="margin-top:12px">' + label + '</label><input id="nbN" class="ldq-in" inputmode="decimal" autocomplete="off" maxlength="9" value="' + esc(val) + '">' +
+        (extraHtml || '') + '<div id="nbM" class="ldq-m"></div><div class="row"><button class="btn ghost" id="nbC">取消</button><button class="btn save" id="nbO">' + okText + '</button></div></div>', function (m) {
+          var inp = $('#nbN', m), out = $('#nbM', m);
+          var ok = function () {
+            var raw = inp.value.trim(), v = Number(raw);
+            if (raw === '' || !isFinite(v) || v < 0 || v > 100000 || /^\d{7,}$/.test(raw)) { out.className = 'ldq-m err'; out.textContent = '请输入正确的数量'; errBeep(); inp.focus(); return; }
+            onOk(r3(v), m, out);
           };
+          inp.oninput = function () { out.className = 'ldq-m'; if (onOk.live) out.textContent = onOk.live(Number(inp.value), inp.value); };
+          inp.onkeydown = function (e) { if (e.key === 'Enter') { e.preventDefault(); ok(); } };
+          $('#nbO', m).onclick = ok; $('#nbC', m).onclick = function () { closeModal(); };
+          setTimeout(function () { inp.focus(); inp.select(); }, 50);
         });
+    }
+    /** 商品详情：需求 / 已点 / 还差 + 这个商品的每一笔点货（修改、撤销）+ 再点 / 调整累计 */
+    var dKey = null;      // 正在看的商品详情（后台资料更新时跟着刷新）
+    function detail(it) {
+      if (!it) return;
+      dKey = it.key;
+      stats();
+      var c = it._c, rem = r3(it.req - c), ro = done();
+      var list = Object.keys(s.txns).map(function (k) { return s.txns[k]; }).filter(function (t) { return t.key === it.key && ORIG.indexOf(t.method) >= 0; }).sort(byTime);
+      var rows = list.map(function (t, i) {
+        var st = txState(t.id), adj = t.method === 'ADJUST', v = st.voided;
+        var head = adj ? '调整累计 ' + t.orig + ' → ' + t.to : ML[t.method] || t.method;
+        var sub = [hhmm(t.time), t.staff || ''];
+        if (t.code) sub.push('码 ' + t.code);
+        if (t.reason) sub.push('原因：' + t.reason);
+        st.edits.forEach(function (e) { sub.push('改 ' + e.orig + '→' + e.to + '（' + (e.staff || '') + ' ' + hhmm(e.time) + '）'); });
+        if (v) sub.push('已撤销（' + (v.staff || '') + ' ' + hhmm(v.time) + '）');
+        if (!t.synced) sub.push('<span class="err">未上传</span>');
+        var q = adj ? sg(Number(t.qty)) : (st.edits.length && !v ? '<s>' + t.qty + '</s> ' + st.eff : String(t.qty));
+        return '<div class="ldh' + (v ? ' gone' : '') + '"><span class="t"><b>#' + (i + 1) + ' ' + esc(head) + '</b><span>' + sub.map(function (x, k) { return /^<span/.test(x) ? x : esc(x); }).join(' · ') + '</span></span>' +
+          '<b class="q">' + q + '</b>' + (!ro && !v ? '<span class="ldacts">' + (adj ? '' : '<button class="tbtn" data-ed="' + esc(t.id) + '">修改</button>') + '<button class="tbtn" data-vd="' + esc(t.id) + '">撤销</button></span>' : '') + '</div>';
+      });
+      modal('<div class="ldq"><div class="ldq-h">' + itemName(it) + '</div><div class="hint">' + esc(it.code) + (it.bc && it.bc !== it.code ? ' · 条码 ' + esc(it.bc) : '') + ' · ' + esc(it.uom || '') + (it.spec ? ' · ' + esc(it.spec) : '') + '</div>' +
+        '<div class="ldq-n"><div><span>需求</span><b>' + it.req + '</b></div><div><span>已点</span><b>' + c + '</b></div><div class="' + (rem < 0 ? 'p' : rem ? 'o' : 'g') + '"><span>' + (rem < 0 ? '超出' : '还差') + '</span><b>' + Math.abs(rem) + '</b></div></div>' +
+        '<div class="ldq-l"><b>点货记录</b>（' + list.length + ' 笔）' + (ro ? '' : '<span class="hint"> 点错了可以修改或撤销，原记录会保留</span>') + '</div>' +
+        '<div class="pkl" id="dtL">' + (rows.join('') || '<div class="empty">还没有点货记录</div>') + '</div>' +
+        (ro ? '<p class="hint">任务已完成，不能修改。需要更正请找办公室重新打开。</p><div class="row"><button class="btn ghost" id="dtX">关闭</button></div>' :
+          '<div class="row"><button class="btn ghost" id="dtX">关闭</button><button class="btn ghost" id="dtA">调整数量</button><button class="btn save" id="dtP">＋ 再点</button></div>') + '</div>', function (m) {
+          $('#dtX', m).onclick = function () { dKey = null; closeModal(); draw(); };
+          if (ro) return;
+          $('#dtP', m).onclick = function () { qty(it, 'SEARCH', ''); };
+          $('#dtA', m).onclick = function () { adjust(it); };
+          Array.prototype.forEach.call(m.querySelectorAll('[data-ed]'), function (b) { b.onclick = function () { editTxn(it, s.txns[b.dataset.ed]); }; });
+          Array.prototype.forEach.call(m.querySelectorAll('[data-vd]'), function (b) { b.onclick = function () { voidTxn(it, s.txns[b.dataset.vd]); }; });
+        });
+    }
+    function editTxn(it, t) {
+      var cur = txState(t.id).eff, total = ldCounts(s)[it.key] || 0;
+      var onOk = function (v) {
+        if (v === cur) { detail(it); return; }
+        if (v === 0) { voidTxn(it, t); return; }
+        confirmBox('确定把这一笔的数量从 ' + cur + ' 改成 ' + v + '？（累计 ' + total + ' → ' + r3(total - cur + v) + '）', '确定修改', function () {
+          push(it, 'EDIT', r3(v - cur), { rev: t.id, orig: cur, to: v }, '已修改：' + cur + ' 改成 ' + v).then(function () { detail(it); }, function () { });
+        });
+      };
+      onOk.live = function (v, raw) { return raw !== '' && v >= 0 ? '修改后累计：' + r3(total - cur + v) + ' / ' + it.req + (v === 0 ? '（改成 0 = 撤销这一笔）' : '') : ''; };
+      numBox('修改这一笔', esc(it.desc) + ' · ' + ML[t.method] + ' ' + hhmm(t.time) + ' · 现在 ' + cur, '改成多少 <b>' + esc(it.uom || '') + '</b>？', cur, '下一步', onOk);
+    }
+    function voidTxn(it, t) {
+      var cur = txState(t.id).eff, total = ldCounts(s)[it.key] || 0, adj = t.method === 'ADJUST';
+      confirmBox('撤销这一笔' + (adj ? '调整' : '') + '（' + sg(adj ? Number(t.qty) : cur) + '）？撤销后不计入累计（' + total + ' → ' + r3(total - cur) + '），原记录保留。', '确定撤销', function () {
+        push(it, 'VOID', r3(-cur), { rev: t.id, orig: cur, to: 0 }, '已撤销一笔 ' + sg(cur)).then(function () { detail(it); }, function () { });
       });
     }
-    ldRedraw = function () { if (location.hash.indexOf('#/ld/' + encodeURIComponent(id)) === 0 && s) ldGet(id).then(function (x) { if (x) s = x; if ($('#modal').hidden) draw(); }); };
+    /** 调整累计：输入正确的总数，系统加一笔差额（记录 原累计 → 调整后） */
+    function adjust(it) {
+      var cur = ldCounts(s)[it.key] || 0;
+      var onOk = function (v, m) {
+        var reason = ($('#nbR', m) || {}).value || '';
+        if (v === cur) { detail(it); return; }
+        confirmBox('确定把累计从 ' + cur + ' 改成 ' + v + '（' + sg(r3(v - cur)) + '）？', '确定调整', function () {
+          push(it, 'ADJUST', r3(v - cur), { orig: cur, to: v, reason: reason.trim().slice(0, 200) }, '已调整累计：' + cur + ' → ' + v).then(function () { detail(it); }, function () { });
+        });
+      };
+      onOk.live = function (v, raw) { return raw !== '' && v >= 0 ? (v === cur ? '没有变化' : '差额 ' + sg(r3(v - cur)) + (v > it.req ? '（超出需求 ' + r3(v - it.req) + '）' : '')) : ''; };
+      numBox('调整数量', esc(it.desc) + ' · 需求 ' + it.req + ' · 现在累计 <b>' + cur + '</b>', '正确的累计数量是多少 <b>' + esc(it.uom || '') + '</b>？', cur, '下一步', onOk,
+        '<input id="nbR" class="pkq" style="margin-top:10px" maxlength="200" placeholder="原因（可不填），例：箱子破损退回">');
+    }
+    // 整个任务的点货记录（最新在上）；点一行打开那个商品的详情去修改
+    function showHistory() {
+      var list = Object.keys(s.txns).map(function (k) { return s.txns[k]; }).sort(function (a, b) { return byTime(b, a); });
+      var voided = {}; list.forEach(function (t) { if (t.method === 'VOID' || t.method === 'REVERSAL') voided[t.rev] = 1; });
+      var name = function (k) { var it = byKey(k); return it ? it.desc + (it.uom ? '（' + it.uom + '）' : '') : k; };
+      modal('<h3 style="margin-top:0">点货记录（' + list.length + ' 笔）</h3><p class="hint" style="margin-top:-6px">点一行可以修改 / 撤销。修改、撤销、调整都会另记一笔，原记录保留。</p><div class="pkl">' + (list.length ? list.map(function (t) {
+        var d = t.method === 'EDIT' ? '把 ' + t.orig + ' 改成 ' + t.to : t.method === 'ADJUST' ? '累计 ' + t.orig + ' → ' + t.to : '';
+        return '<div class="ldh ldhc' + (voided[t.id] ? ' gone' : '') + '" data-hk="' + esc(t.key) + '"><span class="t"><b>' + esc(name(t.key)) + '</b><span>' + esc(hhmm(t.time)) + ' · ' + esc(t.staff || '') + ' · ' +
+          esc(ML[t.method] || t.method) + (d ? ' · ' + esc(d) : '') + (t.reason ? ' · ' + esc(t.reason) : '') + (t.synced ? '' : ' · <span class="err">未上传</span>') + (voided[t.id] ? ' · 已撤销' : '') + '</span></span>' +
+          '<b class="q">' + sg(Number(t.qty)) + '</b></div>';
+      }).join('') : '<div class="empty">还没有点货记录</div>') + '</div><div class="row"><button class="btn ghost" id="hX">关闭</button></div>', function (m) {
+        $('#hX', m).onclick = closeModal;
+        Array.prototype.forEach.call(m.querySelectorAll('[data-hk]'), function (r) { r.onclick = function () { detail(byKey(r.dataset.hk)); }; });
+      });
+    }
+    ldRedraw = function () {
+      if (location.hash.indexOf('#/ld/' + encodeURIComponent(id)) === 0 && s) ldGet(id).then(function (x) {
+        if (x) s = x;
+        if ($('#modal').hidden) draw();
+        else if (dKey && $('#dtL')) { draw(); detail(byKey(dKey)); }       // 详情开着：显示最新数量
+      });
+    };
     currentRedraw = ldRedraw;
     ldLoadQ().then(function () { return ldGet(id); }).then(function (local) {
       if (local) { s = local; draw(); }
