@@ -3,7 +3,7 @@
  * 原则：只采集原始资料，不做任何核对。先存手机（离线队列），再上传云端。 */
 (function () {
   'use strict';
-  var VERSION = '1.5.1';
+  var VERSION = '1.5.2';
   var $ = function (s, el) { return (el || document).querySelector(s); };
   var app = $('#app');
 
@@ -371,6 +371,7 @@
   var currentRedraw = null;
   function route() {
     stopCamera();
+    kpPage = null; kpModal = null;
     leaveGuard = null;
     currentRedraw = null;
     app.onclick = null;
@@ -1422,6 +1423,44 @@
   function ldHash(id) { return '#/' + ldModOf(id) + '/' + encodeURIComponent(id); }
   /** v1.5.1 拣货：每个任务的列表筛选状态（进出 SKU 页都保留）、进 SKU 页时的识别方式、30 秒状态检查只留一个 */
   var pkUi = {}, pkEntry = null, ldStTimer = null;
+  // v1.5.2 页面数字键盘：kpPage = SKU 页的键盘，kpModal = 修改弹窗的键盘。{ get, set, enter, scan }
+  var kpPage = null, kpModal = null, kb = { s: '', last: 0, fast: true, base: '', timer: null };
+  function kpBind(root, get, set) {
+    Array.prototype.forEach.call(root.querySelectorAll('[data-k]'), function (b) {
+      b.addEventListener('mousedown', function (e) { e.preventDefault(); });      // 不抢焦点
+      b.onclick = function () {
+        var k = b.dataset.k, v = get();
+        if (k === 'b') v = v.slice(0, -1);
+        else if (k === '.') { if (v.indexOf('.') < 0) v = (v || '0') + '.'; }
+        else { if (v === '0') v = ''; if (v.replace('.', '').length < 7) v += k; }
+        set(v);
+      };
+    });
+  }
+  /** 硬件按键（PDA 数字键 / 扫描枪）：慢慢按的数字进“本次数量”；一串很快的输入（扫描枪）当扫码；回车 = 确认 */
+  function kpKey(e) {
+    var a = document.activeElement;
+    if (a && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)) return false;
+    var K = $('#modal').hidden ? kpPage : ($('#kpMD') ? kpModal : null);
+    if (!K) return false;
+    var k = e.key, now = Date.now();
+    if (k === 'Enter') { e.preventDefault(); kpFinish(K, true); return true; }
+    if (k === 'Backspace') { e.preventDefault(); if (!kb.s) K.set(K.get().slice(0, -1)); return true; }
+    if (!k || k.length !== 1 || e.ctrlKey || e.altKey || e.metaKey) return false;
+    e.preventDefault();
+    if (!kb.s) { kb.base = K.get(); kb.fast = true; } else if (now - kb.last > 50) kb.fast = false;
+    kb.s += k; kb.last = now;
+    if (/^[0-9.]+$/.test(kb.s)) { var v = kb.base + kb.s; if ((v.match(/\./g) || []).length < 2 && v.replace('.', '').length <= 7) K.set(v); }
+    clearTimeout(kb.timer); kb.timer = setTimeout(function () { kpFinish(K, false); }, 120);
+    return true;
+  }
+  function kpFinish(K, enter) {
+    clearTimeout(kb.timer);
+    var str = kb.s, scan = str && ((kb.fast && str.length >= 4) || /[^0-9.]/.test(str));
+    kb.s = '';
+    if (scan) { K.set(kb.base); K.scan(str); return; }
+    if (enter) K.enter();
+  }
   /** 有效（没被撤销）的“确认拣完（短少）”→ { 商品键: Txn ID } */
   function ldShortOkC(s) {
     var v = {}, o = {};
@@ -1830,7 +1869,7 @@
   function viewLdTask(id, review, idx) {
     var mod = ldModOf(id), PK = mod === 'pk', modal = ldModal; LDW_MOD = mod;      // v1.5 拣货任务（PK-）用同一套画面
     var IT = PK && !review && idx != null ? idx : null;                              // v1.5.1 拣货 SKU 页（整页）
-    var U = PK ? (pkUi[id] = pkUi[id] || { filter: 'todo', pq: '', locF: '', chip: null, y: 0 }) : null;
+    var U = PK ? (pkUi[id] = pkUi[id] || { filter: 'all', pq: '', locF: '', chip: null, y: 0 }) : null;
     var ent = pkEntry; pkEntry = null;
     setBar(review ? '复核' : ldW('装车点货'), true);
     var s = null, filter = U ? U.filter : 'todo', msg = null, busy = false; var keepVal = '', keepFocus = false, pq = U ? U.pq : '', restoreY = PK && IT == null && !review;     // 装车每次打开任务都从“未点完”开始
@@ -1870,7 +1909,7 @@
       if (review) return drawReview(head, o);
       var im = prefs.pda ? 'none' : 'text', keep = $('#ldIn');
       keepVal = keep ? keep.value : ''; keepFocus = !!keep && document.activeElement === keep;   // 重画时不吞掉正在扫的条码
-      if (IT != null) return drawItem(im);
+      if (IT != null) return drawItem();
       app.innerHTML = ldW(head + (msg ? '<div class="tmsg ' + msg.cls + '">' + esc(msg.text) + '</div>' : '') +
         (done() ? '<div class="card lddone">✓ 已完成' + (s.task.submittedBy ? '（' + esc(s.task.submittedBy) + ' ' + esc(s.task.submitted) + '）' : s.localDone ? '（待上传）' : '') + '，不能再修改。需要更正请找办公室重新打开。</div>' :
           (PK ? '<div class="bcrow tscan"><input id="ldIn" inputmode="' + im + '" maxlength="64" autocomplete="off" spellcheck="false" placeholder="扫码 / 搜索商品（品名、条码后几位、批次、库位）" value="' + esc(pq) + '"><button class="btn cam" id="ldCam">📷</button></div>' :
@@ -1967,7 +2006,8 @@
         var st = txState(t.id), adj = t.method === 'ADJUST', v = st.voided;
         var head = adj ? '调整累计 ' + t.orig + ' → ' + t.to : ML[t.method] || t.method;
         var sub = [hhmm(t.time), t.staff || ''];
-        if (t.code) sub.push('码 ' + t.code);
+        if (PK) { head = hhmm(t.time); sub = [t.staff || '']; }
+        if (t.code && !PK) sub.push('码 ' + t.code);
         if (t.reason) sub.push('原因：' + t.reason);
         st.edits.forEach(function (e) { sub.push('改 ' + e.orig + '→' + e.to + '（' + (e.staff || '') + ' ' + hhmm(e.time) + '）'); });
         if (v) sub.push('已撤销（' + (v.staff || '') + ' ' + hhmm(v.time) + '）');
@@ -1976,6 +2016,7 @@
         return '<div class="ldh' + (v ? ' gone' : '') + '"><span class="t"><b>#' + (i + 1) + ' ' + esc(head) + (st.edits.length && !v ? ' <span class="ldedited">已修改</span>' : '') + '</b><span>' + sub.map(function (x) { return /^<span/.test(x) ? x : esc(x); }).join(' · ') + '</span></span>' +
           '<b class="q">' + q + '</b>' + (!ro && !v ? '<span class="ldacts">' + (adj ? '' : '<button class="tbtn" data-ed="' + esc(t.id) + '">修改</button>') + '<button class="tbtn" data-vd="' + esc(t.id) + '">撤销</button></span>' : '') + '</div>';
       });
+      if (PK) rows.reverse();          // 拣货：最新的在上
       return { n: list.length, html: rows.join('') };
     }
     function bindHist(it, m) {
@@ -1983,30 +2024,40 @@
       Array.prototype.forEach.call((m || app).querySelectorAll('[data-vd]'), function (b) { b.onclick = function () { voidTxn(it, s.txns[b.dataset.vd]); }; });
     }
     function back(it) { if (PK && IT != null) { closeModal(); draw(); } else detail(it, 0); }
-    function drawItem(im) {
+    // ---------- v1.5.2 拣货 SKU 页：固定布局 + 页面内数字键盘（不弹系统键盘，页面不跳） ----------
+    var kpv = '';          // 本次数量（还没确认）
+    function kpPad(id) {
+      return '<div class="kp" id="' + id + '">' + ['1', '2', '3', '4', '5', '6', '7', '8', '9', '.', '0', 'b'].map(function (k) {
+        return '<button type="button" tabindex="-1" data-k="' + k + '"' + (k === 'b' ? ' aria-label="退格"' : '') + '>' + (k === 'b' ? '⌫' : k) + '</button>';
+      }).join('') + '</div>';
+    }
+    function drawItem() {
       var it = s.items[IT];
       if (!it) { location.replace(ldHash(id)); return; }
       var ro = done(), rem = r3(it.req - it._c), d = r3(it._c - it.req), nx = pkNext(IT), H = histRows(it, ro);
-      var qk = $('#pkQty'), qv = qk ? qk.value : '';
+      if (ent && ent.key === it.key && ent.method === 'BARCODE' && !ent.shown && !msg) { ent.shown = true; msg = { cls: 'good', text: '✓ 扫码识别：' + it.desc + '，请输入本次数量' }; }
       setBar((it.loc || '无库位') + ' · 第 ' + (IT + 1) + ' / ' + s.items.length + ' 项', true);
-      app.innerHTML = ldW((ro ? '<div class="card lddone">✓ 任务已完成，不能再修改。需要更正请找办公室重新打开。</div>' :
-          '<div class="bcrow tscan"><input id="ldIn" inputmode="' + im + '" maxlength="64" autocomplete="off" spellcheck="false" placeholder="扫码 / 搜索商品"><button class="btn cam" id="ldCam">📷</button></div>') +
-        '<div class="card pkit' + (it.flag ? ' pkflag' : '') + '"><div class="pkit-h"><div class="pkloc big' + (it.loc ? '' : ' no') + '">' + (it.loc ? esc(it.loc) : '无库位') + '</div>' +
+      app.innerHTML = ldW('<div class="pks">' +
+        (ro ? '<div class="card lddone">✓ 任务已完成，不能再修改。需要更正请找办公室重新打开。</div>' :
+          '<div class="pks-scan"><input id="ldIn" inputmode="none" maxlength="64" autocomplete="off" spellcheck="false" placeholder="扫码 / 搜索商品"><button class="btn cam" id="ldCam" aria-label="摄像头扫码">📷</button></div>') +
+        '<div class="pks-it' + (it.flag ? ' pkflag' : '') + '"><div class="pks-top"><div class="pkloc big' + (it.loc ? '' : ' no') + '">' + (it.loc ? esc(it.loc) : '无库位') + '</div>' +
         '<div class="pkit-b"><span>批次号</span><b>' + esc(it.batch || '（没有批次号）') + '</b></div></div>' +
-        '<div class="pkit-n">' + itemName(it) + '</div><div class="hint">' + esc(ldId(it, '条码 ')) + ' · ' + esc(it.uom || '') + (it.spec ? ' · ' + esc(it.spec) : '') + '</div>' +
-        (it.flag ? '<div class="pkwarn">⚠ ' + esc(it.flag) + '</div>' : '') +
-        '<div class="ldq-n"><div><span>应拣</span><b>' + it.req + '</b></div><div><span>已拣</span><b>' + it._c + '</b></div><div class="' + (d > 0 ? 'p' : d ? 'o' : 'g') + '"><span>差异</span><b>' + (d > 0 ? '+' : '') + d + '</b></div></div></div>' +
-        (ro ? '' : '<div class="card pkqbox"><label for="pkQty">本次数量 <b>' + esc(it.uom || '') + '</b></label><input id="pkQty" class="pkqin" inputmode="decimal" autocomplete="off" maxlength="9" value="' + esc(qv) + '">' +
-          '<div id="pkQm" class="ldq-m"></div><button class="btn save pksave" id="pkSave">＋ 确认这次数量</button></div>') +
-        (msg ? '<div class="tmsg ' + msg.cls + '">' + esc(msg.text) + '</div>' : '') +
+        '<div class="pks-desc">' + itemName(it) + '</div>' +
+        '<div class="pks-code">' + esc(ldId(it, '条码 ')) + ' · ' + esc(it.uom || '') + (it.flag ? ' · <span class="pkwarn">⚠ ' + esc(it.flag) + '</span>' : '') + '</div></div>' +
+        '<div class="pks-st"><div><span>应拣</span><b>' + it.req + '</b></div><div><span>累计已拣</span><b id="pkCnt">' + it._c + '</b></div>' +
+        '<div class="' + (d > 0 ? 'p' : d ? 'o' : 'g') + '"><span>差异</span><b>' + (d > 0 ? '+' : '') + d + '</b></div></div>' +
+        (ro ? '' :
+          '<div class="pks-q"><span class="pks-ql">本次数量<small>' + esc(it.uom || '') + '</small></span><b id="kpD" class="pks-qv"></b><button type="button" tabindex="-1" id="kpC" class="pks-qc" aria-label="清空">✕</button></div>' +
+          '<div id="pkFb" class="pks-fb"></div>' + kpPad('kp') +
+          '<button type="button" tabindex="-1" class="btn save pks-ok" id="pkSave">✓ 确认本次数量</button>') +
+        '<div class="pks-nav"><button type="button" class="btn ghost" id="pkBack">‹ 返回列表</button>' +
+        (nx ? '<button type="button" class="btn ghost" id="pkNext">下一个 ' + esc(nx.loc || '无库位') + ' →</button>' : '<button type="button" class="btn ghost" id="pkRev">全部拣完 → 复核</button>') + '</div>' +
         (it._so && rem > 0 ? '<div class="card pkso"><span>已确认拣完（短少 ' + rem + '）</span>' + (ro ? '' : '<button class="tbtn" id="pkUnso">取消确认</button>') + '</div>' : '') +
-        '<div class="ldq-l"><b>拣货记录</b>（' + H.n + ' 笔，合计 ' + it._c + '）' + (ro ? '' : '<span class="hint"> 输错了可以修改或撤销，原记录会保留</span>') + '</div>' +
+        '<div class="ldq-l"><b>最近拣货记录</b>（' + H.n + ' 笔，合计 ' + it._c + '）</div>' +
         '<div id="dtL">' + (H.html || '<div class="empty">还没有拣货记录</div>') + '</div>' +
-        '<div id="dock" class="dock"><button class="btn ghost" id="pkBack" style="flex:0 0 26%">‹ 列表</button>' +
-        (!ro && rem > 0 && !it._so ? '<button class="btn ghost pkshort" id="pkShort">确认拣完<small>短少 ' + rem + '</small></button>' : '') +
-        (nx ? '<button class="btn save pknext" id="pkNext">下一个 →<small>' + esc(nx.loc || '无库位') + '</small></button>' : '<button class="btn save" id="pkRev">全部拣完 → 复核</button>') + '</div>');
+        (!ro && rem > 0 && !it._so ? '<button type="button" class="tbtn pkshort" id="pkShort">找不到更多？确认拣完（短少 ' + rem + '）</button>' : '') +
+        '</div>');
       bindHist(it);
-      var q = $('#pkQty'), out = $('#pkQm'), inp = $('#ldIn');
       $('#pkBack').onclick = function () { pkLeave(function () { location.hash = ldHash(id); }); };
       var nb = $('#pkNext'); if (nb) nb.onclick = function () { pkLeave(function () { openIt(nx, 'SEARCH', ''); }); };
       var rb = $('#pkRev'); if (rb) rb.onclick = function () { pkLeave(function () { location.hash = ldHash(id) + '/review'; }); };
@@ -2020,47 +2071,82 @@
       var un = $('#pkUnso'); if (un) un.onclick = function () {
         confirmBox('取消“确认拣完”？这个商品会回到“未拣完”。', '取消确认', function () { push(it, 'VOID', 0, { rev: it._so, orig: 0, to: 0 }, '已取消确认拣完').catch(function () { }); });
       };
-      if (q) {
-        q.oninput = function () {
-          var v = Number(q.value); out.className = 'ldq-m';
-          out.textContent = q.value && v > 0 && !/^\d{7,}$/.test(q.value) ? '保存后：' + r3(it._c + v) + ' / ' + it.req + (r3(it._c + v) > it.req ? '（超出 ' + r3(it._c + v - it.req) + '）' : r3(it._c + v) === it.req ? '（拣齐）' : '') : '';
+      if (!ro) {
+        var D = $('#kpD'), FB = $('#pkFb');
+        var show = function () {
+          D.textContent = kpv; D.classList.toggle('z', !kpv);
+          var v = Number(kpv);
+          if (kpv && v > 0) { FB.className = 'pks-fb'; FB.textContent = '确认后累计：' + r3(it._c + v) + ' / ' + it.req + (r3(it._c + v) > it.req ? '（超出 ' + r3(it._c + v - it.req) + '）' : r3(it._c + v) === it.req ? '（拣齐）' : ''); }
+          else if (msg) { FB.className = 'pks-fb ' + msg.cls; FB.textContent = ldW(msg.text); }
+          else { FB.className = 'pks-fb hint'; FB.textContent = '用下面的数字键输入本次拣到的数量'; }
         };
-        q.onkeydown = function (e) { if (e.key === 'Enter' || e.keyCode === 13) { e.preventDefault(); pkSave(); } };
+        var set = function (v) { kpv = v; if (v) msg = null; show(); };
+        kpBind($('#kp'), function () { return kpv; }, set);
+        $('#kpC').onclick = function () { set(''); };
         $('#pkSave').onclick = function () { pkSave(); };
-      }
-      if (inp) {
-        inp.addEventListener('keydown', function (e) { if (e.key === 'Enter' || e.keyCode === 13) { e.preventDefault(); var v = inp.value; inp.value = ''; pkItemScan(v); } });
+        kpPage = { get: function () { return kpv; }, set: set, enter: function () { pkSave(); }, scan: function (str) { pkItemScan(str); } };
+        show();
+      } else kpPage = null;
+      var inp = $('#ldIn');
+      if (inp) {        // 点一下扫码框才弹键盘（打字搜索）；扫描枪不需要先点
+        inp.addEventListener('keydown', function (e) { if (e.key === 'Enter' || e.keyCode === 13) { e.preventDefault(); var v = inp.value; inp.value = ''; inp.blur(); pkItemScan(v); } });
         var prev = 0, tm;
         inp.addEventListener('input', function () {
           var now = inp.value.length; clearTimeout(tm);
-          if (now - prev >= 6) tm = setTimeout(function () { if (document.activeElement === inp && inp.value) { var v = inp.value; inp.value = ''; pkItemScan(v); } }, 250);
+          if (now - prev >= 6) tm = setTimeout(function () { if (document.activeElement === inp && inp.value) { var v = inp.value; inp.value = ''; inp.blur(); pkItemScan(v); } }, 250);
           prev = now;
         });
-        if (keepVal) { inp.value = keepVal; prev = keepVal.length; keepVal = ''; }
         $('#ldCam').onclick = function () { openCamera('ld', function (code) { pkItemScan(code); }, { label: '商品条码' }); };
       }
-      if (keepFocus && inp && $('#modal').hidden) inp.focus();
-      else if (q && $('#modal').hidden) setTimeout(function () { var x = $('#pkQty'), y = $('#ldIn'); if (x && $('#modal').hidden && !(y && document.activeElement === y)) x.focus(); }, 30);
     }
     function pkSave() {
-      var it = s.items[IT], q = $('#pkQty'), out = $('#pkQm'); if (!it || !q) return false;
-      var raw = q.value.trim(), v = Number(raw);
-      if (/^\d{7,}$/.test(raw)) { q.value = ''; pkItemScan(raw); return false; }           // 扫描枪打进了数量框 → 当扫码
-      if (!(v > 0) || v > 100000) { out.className = 'ldq-m err'; out.textContent = '请输入这次拣到的数量（大于 0）'; errBeep(); q.focus(); return false; }
-      q.value = '';
+      var it = s.items[IT]; if (!it || done()) return false;
+      var raw = kpv, v = Number(raw), FB = $('#pkFb');
+      if (!(v > 0) || v > 100000) { if (FB) { FB.className = 'pks-fb err'; FB.textContent = raw ? '数量不对，请重新输入' : '请先输入本次数量'; } errBeep(); return false; }
+      kpv = '';
       var m = ent && ent.key === it.key ? ent : { method: 'SEARCH', code: '' };
       add(it, v, m.method, m.code);
       return true;
     }
-    /** SKU 页离开前：数量框里有没保存的数字 → 保存 / 放弃 / 取消 */
+    /** SKU 页离开前：本次数量还没确认 → 保存 / 放弃 / 取消 */
     function pkLeave(cb) {
-      var q = $('#pkQty'), v = q ? q.value.trim() : '';
+      var v = kpv;
       if (!v) return cb();
-      modal('<div class="tmiss"><div class="tmiss-h"><span class="tmiss-ic">!</span><div><h3>本次数量 ' + esc(v) + ' 还没保存</h3></div></div>' +
-        '<div class="row"><button class="btn ghost" id="lvX">取消</button><button class="btn ghost" id="lvD">放弃</button><button class="btn save" id="lvS">保存</button></div></div>', function (m) {
+      modal('<div class="tmiss"><div class="tmiss-h"><span class="tmiss-ic">!</span><div><h3>本次数量 ' + esc(v) + ' 还没确认</h3></div></div>' +
+        '<div class="row"><button class="btn ghost" id="lvX">取消</button><button class="btn ghost" id="lvD">放弃</button><button class="btn save" id="lvS">确认保存</button></div></div>', function (m) {
           $('#lvX', m).onclick = closeModal;
-          $('#lvD', m).onclick = function () { closeModal(); q.value = ''; cb(); };
+          $('#lvD', m).onclick = function () { closeModal(); kpv = ''; cb(); };
           $('#lvS', m).onclick = function () { closeModal(); if (pkSave()) cb(); };
+        });
+    }
+    /** 修改某一笔：弹窗里也用页面数字键盘（不弹系统键盘）；不再二次确认 */
+    function pkEditBox(it, t) {
+      var cur = txState(t.id).eff, total = ldCounts(s)[it.key] || 0, v = String(cur);
+      modal('<div class="ldq"><div class="ldq-h">修改这一笔</div><div class="hint">' + esc(it.desc) + ' · ' + hhmm(t.time) + ' · 原来 ' + cur + '</div>' +
+        '<div class="pks-q"><span class="pks-ql">改成</span><b id="kpMD" class="pks-qv"></b><button type="button" tabindex="-1" id="kpMC" class="pks-qc" aria-label="清空">✕</button></div>' +
+        '<div id="kpMF" class="pks-fb"></div>' + kpPad('kpM') +
+        '<div class="row"><button class="btn ghost" id="nbC">取消</button><button class="btn save" id="nbO">保存修改</button></div></div>', function (m) {
+          var D = $('#kpMD', m), F = $('#kpMF', m), first = true;
+          var show = function () {
+            D.textContent = v; D.classList.toggle('z', !v);
+            var n = Number(v); F.className = 'pks-fb';
+            F.textContent = v === '' ? '输入正确的数量' : n === 0 ? '改成 0 = 撤销这一笔' : '修改后累计：' + r3(total - cur + n) + ' / ' + it.req;
+          };
+          var set = function (x) { if (first) { first = false; if (x.length > v.length && x.indexOf(v) === 0) x = x.slice(v.length); } v = x; show(); };    // 第一次按数字 = 重新输入
+          var ok = function () {
+            var n = Number(v);
+            if (v === '' || !isFinite(n) || n < 0 || n > 100000) { F.className = 'pks-fb err'; F.textContent = '请输入正确的数量'; errBeep(); return; }
+            n = r3(n);
+            if (n === cur) { closeModal(); return; }
+            if (n === 0) { closeModal(); return voidTxn(it, t); }
+            closeModal();
+            push(it, 'EDIT', r3(n - cur), { rev: t.id, orig: cur, to: n }, '已修改：' + cur + ' 改成 ' + n).catch(function () { });
+          };
+          kpBind($('#kpM', m), function () { return v; }, set);
+          $('#kpMC', m).onclick = function () { first = false; v = ''; show(); };
+          $('#nbC', m).onclick = closeModal; $('#nbO', m).onclick = ok;
+          kpModal = { get: function () { return v; }, set: set, enter: ok, scan: function () { errBeep(); F.className = 'pks-fb err'; F.textContent = '这里只能输入数量'; } };
+          show();
         });
     }
     /** SKU 页的扫码 / 搜索：同一商品 = 确认条码；别的商品 = 切换；文字 = 回列表搜索 */
@@ -2069,7 +2155,7 @@
       var it = s.items[IT], q = ldNorm(raw), exact = s.items.filter(function (x) { return ldCodes(x).indexOf(q) >= 0; });
       if (exact.indexOf(it) >= 0) {
         beep(); ent = { key: it.key, method: 'BARCODE', code: raw };
-        msg = { cls: 'good', text: '✓ 条码正确：' + it.desc + (exact.length > 1 ? '（这个条码还有其它批次）' : '') }; draw(); return;
+        msg = { cls: 'good', text: '✓ 条码正确（就是这个商品）' + (exact.length > 1 ? '，这个条码还有其它批次' : '') + '，请输入本次数量' }; ent.shown = true; draw(); return;
       }
       if (exact.length) return pkLeave(function () { if (exact.length === 1) openIt(exact[0], 'BARCODE', raw); else pick(exact, '这个条码对应 ' + exact.length + ' 行（不同批次），请选择', '', raw); });
       if (/^\d{8,}$/.test(q)) return handle(raw, 'BARCODE');
@@ -2234,7 +2320,7 @@
       Promise.all([ldPut(s), ldSaveQ()]).then(function () {
         var c = ldCounts(s)[it.key] || 0;
         beep();
-        msg = { cls: c > it.req ? 'bad' : 'good', text: '✓ ' + it.desc + '  +' + v + ' → 共 ' + c + ' / ' + it.req + (c > it.req ? '（超出 ' + r3(c - it.req) + '）' : c === it.req ? '（已点齐）' : '') };
+        msg = { cls: c > it.req ? 'bad' : 'good', text: (PK && IT != null ? '✓ 已保存 +' + v + ' → 累计 ' : '✓ ' + it.desc + '  +' + v + ' → 共 ') + c + ' / ' + it.req + (c > it.req ? '（超出 ' + r3(c - it.req) + '）' : c === it.req ? '（已点齐）' : '') };
         draw(); ldFlush();
       }, function (e) { infoBoxLd('保存失败', '保存到手机失败（' + e.message + '），请再点一次。'); });
     }
@@ -2264,7 +2350,7 @@
       if (s.task.status === '待点货') s.task.status = '点货中';
       return Promise.all([ldPut(s), ldSaveQ()]).then(function () {
         beep(); var c = ldCounts(s)[it.key] || 0;
-        msg = { cls: 'good', text: okText + ' → ' + it.desc + ' 现在共 ' + c + ' / ' + it.req };
+        msg = { cls: 'good', text: okText + (PK && IT != null ? ' → 累计 ' : ' → ' + it.desc + ' 现在共 ') + c + ' / ' + it.req };
         draw(); ldFlush();
       }, function (e) { delete s.txns[tid]; LDQ.pop(); infoBoxLd('保存失败', '保存到手机失败（' + e.message + '），请再试一次。'); throw e; });
     }
@@ -2307,6 +2393,7 @@
         });
     }
     function editTxn(it, t) {
+      if (PK) return pkEditBox(it, t);
       var cur = txState(t.id).eff, total = ldCounts(s)[it.key] || 0;
       var onOk = function (v) {
         if (v === cur) { back(it); return; }
@@ -2396,6 +2483,7 @@
   }
   // 焦点不在输入框时，扫描头的按键送到点货扫描框
   document.addEventListener('keydown', function (e) {
+    if (!camOpen && /^#\/pk\/[^/]+\/i\/\d+$/.test(location.hash) && kpKey(e)) return;     // v1.5.2 拣货 SKU 页：数字键 / 扫描枪
     if (!/^#\/(ld|pk)\/[^/]+(\/i\/\d+)?$/.test(location.hash) || !$('#modal').hidden || camOpen) return;
     var a = document.activeElement;
     if (a && (a.tagName === 'INPUT' || a.tagName === 'SELECT' || a.tagName === 'TEXTAREA')) return;
