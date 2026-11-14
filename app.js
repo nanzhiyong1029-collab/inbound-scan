@@ -1,9 +1,9 @@
-/* 入库条码采集 + 库位转移 PWA  v1.4.4
+/* 入库条码采集 + 库位转移 PWA  v1.4.5
  * 页面：#/ 任务列表 → #/job/<JobID> 商品清单 → #/p/<JobID>/<ProductID> 条码采集
  * 原则：只采集原始资料，不做任何核对。先存手机（离线队列），再上传云端。 */
 (function () {
   'use strict';
-  var VERSION = '1.4.4';
+  var VERSION = '1.4.5';
   var $ = function (s, el) { return (el || document).querySelector(s); };
   var app = $('#app');
 
@@ -1379,8 +1379,52 @@
 
   // ---------- 上传电脑：上传 DO 页面 ----------
   function viewUpload() {
-    setBar('装车点货 · 上传 DO', false);
+    setBar('装车点货 · 上传 DO / 任务管理', false);
     document.body.classList.add('wide');            // 电脑屏幕：用整个宽度显示预览表
+    // v1.4.5 第二部分：装车任务列表（可删除）
+    var TK = { list: null, err: '', busy: '' };
+    function loadTasks() {
+      return api({ action: 'ldPortalTasks' }, true).then(function (d) { TK.list = d.tasks || []; TK.err = ''; draw(); },
+        function (e) { TK.err = e.network ? '网络不可用，任务列表没有更新' : e.message; draw(); });
+    }
+    setInterval(function () { if (!document.hidden && $('#modal').hidden && !st.busy && !TK.busy) loadTasks(); }, 60000);
+    function tasksHtml() {
+      var L = TK.list;
+      return '<div class="card" id="tkCard"><div class="tkhead"><h3 style="margin:0">装车任务管理</h3><span class="hint">不需要的任务可以在这里删除（删除后 PDA 不再显示）</span><button class="tbtn" id="tkR">刷新</button></div>' +
+        (TK.err ? '<p class="err">' + esc(TK.err) + '</p>' : '') +
+        (!L ? '<p class="hint">读取中…</p>' : !L.length ? '<p class="hint">现在没有装车任务。</p>' :
+          '<div class="uptabw"><table class="uptab tktab"><thead><tr><th>任务</th><th>日期</th><th class="n">DO</th><th class="n">商品</th><th class="n">需求数量</th><th class="n">已点齐商品</th><th>状态</th><th>操作</th></tr></thead><tbody>' +
+          L.map(function (t) {
+            var act = t.status === '已完成' ? '<span class="hint">已完成，只能办公室删除</span>' :
+              '<button class="tbtn tkdel" data-del="' + esc(t.id) + '"' + (TK.busy ? ' disabled' : '') + '>' + (TK.busy === t.id ? '删除中…' : '🗑 删除') + '</button>';
+            return '<tr><td><b>' + esc(t.id) + '</b><div class="hint">' + esc(t.created || '') + '</div></td><td>' + esc(t.date) + '</td><td class="n">' + t.doCount + (t.carry ? '<div class="hint">+之前 ' + t.carry + '</div>' : '') + '</td><td class="n">' + t.itemCount +
+              '</td><td class="n">' + t.required + '</td><td class="n">' + t.okItems + ' / ' + t.itemCount + '</td><td>' + ldBadge(t.status) + (t.status === '已完成' && t.submittedBy ? '<div class="hint">' + esc(t.submittedBy) + '</div>' : '') + '</td><td>' + act + '</td></tr>';
+          }).join('') + '</tbody></table></div>') + '</div>';
+    }
+    function askDelete(t, progress) {
+      var prog = progress || t.status === '点货中';
+      modal('<div class="tmiss"><div class="tmiss-h"><span class="tmiss-ic">!</span><div><h3>删除这个装车任务？</h3><div class="hint">' + esc(t.id) + ' · ' + esc(t.date) + ' · ' + esc(t.status) + '</div></div></div>' +
+        '<p>删除后 <b>PDA 上不再显示这个任务</b>，也不能再点货。DO 和已有的点货记录会保留，办公室可以在看板恢复。</p>' +
+        (prog ? '<div class="card upbad" style="margin:8px 0"><b>⚠ 这个任务正在点货</b>（已点 ' + t.counted + ' / ' + t.required + '）。删除后正在点货的 PDA 会停止，并显示“任务已被删除或取消”。' +
+          '<label style="display:block;margin-top:8px;font-weight:600"><input type="checkbox" id="tkSure"> 我确认要删除正在点货的任务</label></div>' : '') +
+        '<div class="row"><button class="btn ghost" id="tkNo">取消</button><button class="btn save" id="tkYes"' + (prog ? ' disabled' : '') + '>确认删除</button></div></div>', function (m) {
+          $('#tkNo', m).onclick = closeModal;
+          var sure = $('#tkSure', m), yes = $('#tkYes', m);
+          if (sure) sure.onchange = function () { yes.disabled = !sure.checked; };
+          yes.onclick = function () {
+            closeModal(); TK.busy = t.id; draw();
+            api({ action: 'ldPortalDelete', taskId: t.id, confirmProgress: !!prog }, true).then(function (d) {
+              TK.busy = '';
+              if (d.status === 'confirm') { draw(); t.status = '点货中'; return askDelete(t, true); }
+              if (d.status === 'deleted') { toast('已删除 ' + t.id + '（PDA 上不再显示）', 3000); return loadTasks(); }
+              draw(); infoBox('不能删除', d.message || '删除失败');
+            }, function (e) { TK.busy = ''; draw(); infoBox('删除失败', e.network ? '网络不可用，请联网后再试' : e.message); });
+          };
+        });
+    }
+    function infoBox(title, text) {
+      modal('<div class="tmiss"><div class="tmiss-h"><span class="tmiss-ic">!</span><div><h3>' + esc(title) + '</h3></div></div><p>' + esc(text) + '</p><div class="row"><button class="btn save" id="ibOk2">知道了</button></div></div>', function (m) { $('#ibOk2', m).onclick = closeModal; });
+    }
     var st = { files: [], lines: null, errors: [], warns: [], infos: [], carry: null, pick: {}, busy: false, done: null, importId: uuid(), fileName: '' };
     function readFiles(list) {
       st.done = null; st.lines = null; st.errors = []; st.warns = []; st.infos = []; st.importId = uuid();
@@ -1446,7 +1490,7 @@
         lines: st.lines.map(function (l) { return { doNo: l.doNo, doDate: l.doDate, itemCode: l.itemCode, desc: l.desc, barcode: l.barcode, qty: l.qty, uom: l.uom, spec: l.spec || '', batch: l.batch || '', fromDoc: l.fromDoc }; }) }, true)
         .then(function (d) {
           st.busy = false;
-          if (d.status === 'created' || d.status === 'duplicate') { st.done = d; beep(); return draw(); }
+          if (d.status === 'created' || d.status === 'duplicate') { st.done = d; beep(); draw(); return loadTasks(); }
           if (d.status === 'dupDO') {
             draw();
             return modal('<div class="tmiss"><div class="tmiss-h"><span class="tmiss-ic">!</span><div><h3>这些 DO 已经上传过</h3></div></div><ul class="tmiss-list">' +
@@ -1492,10 +1536,16 @@
               return '<tr><td class="hint">' + (i + 1) + '</td><td>' + esc(it.code || '—') + '</td><td>' + esc(it.bc.join(' / ')) + '</td><td>' + esc(it.desc) + '</td><td>' + esc(it.uom) + '</td><td class="hint">' + esc(it.spec) +
                 '</td><td class="n"><b>' + it.qty + '</b></td><td class="hint">' + esc(it.src.join('; ')) + '</td></tr>';
             }).join('') + '</tbody></table></div></div>';
+          h += tasksHtml();
           h += '<div id="dock" class="dock"><button class="btn save" id="upGo"' + (st.busy || !st.carry ? ' disabled' : '') + '>' + (st.busy ? '上传中…' : '⬆ 上传并建立装车任务') + '</button></div>';
         }
       }
+      if (!(st.lines && !st.errors.length && !st.done)) h += tasksHtml();
       app.innerHTML = h;
+      var tr = $('#tkR'); if (tr) tr.onclick = function () { TK.list = TK.list || null; loadTasks(); };
+      Array.prototype.forEach.call(app.querySelectorAll('[data-del]'), function (b) {
+        b.onclick = function () { var t = (TK.list || []).filter(function (x) { return x.id === b.dataset.del; })[0]; if (t) askDelete(t, false); };
+      });
       var f = $('#upF'); if (f) { f.onchange = function () { readFiles(f.files); f.value = ''; }; $('#upPick').onclick = function () { f.click(); }; }
       var n = $('#upNew'); if (n) n.onclick = function () { st = { files: [], lines: null, errors: [], warns: [], infos: [], carry: null, pick: {}, busy: false, done: null, importId: uuid(), fileName: '' }; draw(); };
       var g = $('#upGo'); if (g) g.onclick = function () { upload(false); };
@@ -1504,7 +1554,7 @@
       if (ca) ca.onclick = function () { st.carry.forEach(function (c) { st.pick[c.ref] = true; }); draw(); };
       if (cn) cn.onclick = function () { st.carry.forEach(function (c) { st.pick[c.ref] = false; }); draw(); };
     }
-    draw();
+    draw(); loadTasks();
   }
 
   // ---------- PDA：本机存储 + 离线队列 ----------
@@ -1542,6 +1592,7 @@
           return api({ action: 'ldSubmit', taskId: first.taskId, txnIds: ids }, true).then(function (d) {
             if (d.status === 'missing') throw new Error('还有点货记录没上传完');
             LDQ.shift();
+            if (d.status === 'rejected' && d.gone) return ldPurge(first.taskId).then(step);
             if (d.status === 'rejected') toast('完成提交被退回：' + (d.message || ''), 4000);
             if (s && d.task) { s.task = d.task; s.localDone = false; }
             return (s ? ldPut(s) : Promise.resolve()).then(ldSaveQ).then(step);
@@ -1569,10 +1620,19 @@
     return ldFlushing;
   }
   var ldRedraw = null;
-  /** 有修改被退回（别人已经改过）→ 重新下载这个任务，手机上显示最新的数量 */
+  var LD_GONE = '这个装车任务已被删除或取消';
+  var ldOnGone = null;      // 正在看的任务被删除时，页面要做的事
+  /** v1.4.5 任务已被删除：清掉手机上的这个任务和它还没上传的记录（其他任务不受影响） */
+  function ldPurge(tid) {
+    delete ldMem[tid]; LDQ = (LDQ || []).filter(function (o) { return o.taskId !== tid; });
+    var ts = LS.get('ldTasks', null); if (ts) LS.set('ldTasks', ts.filter(function (t) { return t.id !== tid; }));
+    return Promise.all([IDB.kdel('ld:' + tid).catch(function () { }), ldSaveQ()]).then(function () { if (ldOnGone) ldOnGone(tid); });
+  }
+  /** 有修改被退回（别人已经改过 / 任务已删除）→ 重新下载这个任务，手机上显示最新的数量 */
   function ldRefetch(ids) {
     return Promise.all(ids.map(function (tid) {
       return api({ action: 'ldTask', taskId: tid }, true).then(function (d) {
+        if (d.error === 'NOTASK') return ldPurge(tid);
         if (d.error) return;
         return ldGet(tid).then(function (cur) { return ldPut(ldFromServer(d, cur)); });
       }).catch(function () { });
@@ -1931,8 +1991,27 @@
         Array.prototype.forEach.call(m.querySelectorAll('[data-hk]'), function (r) { r.onclick = function () { detail(byKey(r.dataset.hk)); }; });
       });
     }
+    // v1.4.5 任务被删除（电脑端 / 办公室）→ 停止点货，显示提示，回到列表
+    ldOnGone = function (tid) {
+      if (tid !== id || location.hash.indexOf('#/ld/' + encodeURIComponent(id)) !== 0) return;
+      s = null; dKey = null; closeModal(); msg = { cls: 'bad', text: LD_GONE }; draw();
+      app.innerHTML = '<div class="card ldgone"><div class="upok-ic" style="background:#fde8e7;color:#b42318">✕</div><h2>' + esc(LD_GONE) + '</h2><p class="hint">任务 ' + esc(id) + ' 已不能再点货。请回到任务列表。</p><button class="btn save" id="goneBack">回到任务列表</button></div>';
+      $('#goneBack').onclick = function () { location.hash = '#/ld'; };
+      errBeep();
+    };
+    // 每 30 秒轻量检查一次这个任务的状态（被删除 / 被别人完成 / 被重新打开）
+    var stTimer = setInterval(function () {
+      if (location.hash.indexOf('#/ld/' + encodeURIComponent(id)) !== 0) { clearInterval(stTimer); return; }
+      if (document.hidden || !s || navigator.onLine === false) return;
+      api({ action: 'ldStatus', taskIds: [id] }, true).then(function (d) {
+        var v = d.status && d.status[id];
+        if (v === 'gone') return ldPurge(id);
+        if (v && s && v !== s.task.status && !s.localDone && !ldPending(id)) ldRefetch([id]).then(function () { if (ldRedraw) ldRedraw(); });
+      }, function () { });
+    }, 30000);
     ldRedraw = function () {
       if (location.hash.indexOf('#/ld/' + encodeURIComponent(id)) === 0 && s) ldGet(id).then(function (x) {
+        if (!x && !ldMem[id]) return;
         if (x) s = x;
         if ($('#modal').hidden) draw();
         else if (dKey && $('#dtL')) { draw(); detail(byKey(dKey)); }       // 详情开着：显示最新数量
@@ -1942,14 +2021,7 @@
     ldLoadQ().then(function () { return ldGet(id); }).then(function (local) {
       if (local) { s = local; draw(); }
       return api({ action: 'ldTask', taskId: id }, true).then(function (d) {
-        if (d.error === 'NOTASK') {        // v1.4.2：办公室已删除这个任务 → 清掉本机资料和待上传
-          delete ldMem[id]; LDQ = (LDQ || []).filter(function (o) { return o.taskId !== id; });
-          return Promise.all([IDB.kdel('ld:' + id).catch(function () { }), ldSaveQ()]).then(function () {
-            s = null; msg = { cls: 'bad', text: '这个装车任务已被办公室删除' }; draw();
-            toast('装车任务 ' + id + ' 已被办公室删除', 3000);
-            setTimeout(function () { if (location.hash.indexOf('#/ld/' + encodeURIComponent(id)) === 0) location.hash = '#/ld'; }, 1500);
-          });
-        }
+        if (d.error === 'NOTASK') return ldPurge(id);        // 任务已被删除 → 清掉本机资料和待上传
         if (d.error) { if (!s) { msg = { cls: 'bad', text: d.message }; draw(); } return; }
         return ldGet(id).then(function (cur) { s = ldFromServer(d, cur); return ldPut(s); }).then(function () { if ($('#modal').hidden) draw(); ldFlush(); });
       }, function (e) {
