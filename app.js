@@ -1,9 +1,9 @@
-/* 入库条码采集 + 库位转移 PWA  v1.4.6
+/* 入库条码采集 + 库位转移 PWA  v1.4.7
  * 页面：#/ 任务列表 → #/job/<JobID> 商品清单 → #/p/<JobID>/<ProductID> 条码采集
  * 原则：只采集原始资料，不做任何核对。先存手机（离线队列），再上传云端。 */
 (function () {
   'use strict';
-  var VERSION = '1.4.6';
+  var VERSION = '1.4.7';
   var $ = function (s, el) { return (el || document).querySelector(s); };
   var app = $('#app');
 
@@ -988,18 +988,26 @@
     LS.del('tphotoPending');
     var msg = (pend && Date.now() - pend < 15 * 60e3 && !st.photo) ? { cls: 'bad', text: '刚才拍照后网页被手机重新打开了（手机内存不足时会这样）。已扫的资料都还在，请再拍一次；如果还是这样，请用“🖼 从相册选”。' } : { cls: '', text: '' }, recent = LS.get('trecent', []).filter(function (r) { return r.id; }), busy = false;
     var TST = { '待上传': 't0', '待处理': 't1', '有问题': 't2', '已完成': 't3' };
-    // 最近提交以后台为准：办公室删除的记录在这里也消失，状态（已完成 / 有问题）同步；还没上传的留在最上面
-    function refreshRecent() {
+    // v1.4.7 我的移库记录：全部记录（每次 20 笔，“显示更多”继续），每笔显示完整资料；可按状态筛选。
+    // 以后台为准：办公室删除的在这里也消失，状态同步；还没上传的留在最上面
+    var RL = { status: '', shown: 20, total: null, counts: null, loading: false, err: '' };
+    function refreshRecent(more) {
       if (!cfg || !sess) return Promise.resolve();
-      return Promise.all([api({ action: 'transfers' }, true), IDB.all().catch(function () { return []; })]).then(function (x) {
+      if (more === true) RL.shown += 20;
+      RL.loading = true; paintRecent();
+      return Promise.all([api({ action: 'transfers', offset: 0, limit: RL.shown, status: RL.status }, true), IDB.all().catch(function () { return []; })]).then(function (x) {
         var server = (x[0] && x[0].list) || [], pend = {};
+        RL.total = x[0].total != null ? x[0].total : server.length; RL.counts = x[0].counts || null; RL.err = ''; RL.loading = false;
         (x[1] || []).forEach(function (q) { if (!q.rejected) pend[q.transferId] = 1; });
         var local = recent.filter(function (r) { return pend[r.id]; });
-        recent = local.concat(server.filter(function (r) { return !pend[r.id]; })).slice(0, 10);
-        LS.set('trecent', recent);
-        var box = document.getElementById('tRecent');                 // 只更新列表，不重画整页（不打断正在扫描的输入）
-        if (box && location.hash === '#/t') box.innerHTML = recentHtml();
-      }, function () { /* 离线：继续显示上次的列表 */ });
+        recent = (RL.status ? [] : local).concat(server.filter(function (r) { return !pend[r.id]; }));
+        if (!RL.status) LS.set('trecent', recent.slice(0, 20));
+        paintRecent();
+      }, function (e) { RL.loading = false; RL.err = e.network ? '离线：显示的是上次的记录' : e.message; paintRecent(); });
+    }
+    function paintRecent() {
+      var box = document.getElementById('tRecent');                 // 只更新列表，不重画整页（不打断正在扫描的输入）
+      if (box && location.hash === '#/t') box.innerHTML = recentHtml();
     }
     refreshRecentNow = refreshRecent;
     var STEPS = [['src', '1. 来源库位', '扫描原来的库位条码'], ['bc', '2. 商品箱码', '扫描箱子上的条码'], ['dst', '3. 目的库位', '扫描新的库位条码'], ['photo', '4. 拍照确认', '拍下货物在新库位的照片']];
@@ -1047,18 +1055,33 @@
       return 'submit';
     }
     function recentHtml() {
-      return (recent.length ? '<div class="card"><b>最近提交</b>' + recent.slice(0, 10).map(function (r) {
-          var can = r.status !== '已完成';
-          return '<div class="trow' + (can ? ' tedit' : '') + '" data-rid="' + esc(r.id || '') + '"><div>' + esc(r.src || '—') + ' → ' + esc(r.dst) + ' · <b>' + esc(r.item || r.bc || '') + '</b> ' + esc(r.desc || '') +
-            (r.qty !== '' && r.qty != null ? ' · 数量 <b>' + esc(r.qty) + '</b>' : '') + (r.edits ? ' <span class="hint">（改过 ' + r.edits + ' 次）</span>' : '') + '</div>' +
-            '<span class="hint">' + (r.status ? '<span class="tst ' + (TST[r.status] || '') + '">' + esc(r.status) + '</span> ' : '') + esc(r.t) + (can ? ' <span class="tedit-l">✎ 修改</span>' : '') + '</span></div>';
-        }).join('') + '<p class="hint" style="margin:6px 0 0">点一笔可以修改（办公室已完成的不能改；记录不能删除）</p></div>' : '');
+      var c = RL.counts || {};
+      var chips = [['', '全部', c.all], ['待处理', '待处理', c['待处理']], ['有问题', '有问题', c['有问题']], ['已完成', '已完成', c['已完成']]].map(function (f) {
+        return '<button class="tchip' + (RL.status === f[0] ? ' on' : '') + '" data-rf="' + f[0] + '">' + f[1] + (f[2] != null ? ' ' + f[2] : '') + '</button>';
+      }).join('');
+      var rows = recent.map(function (r) {
+        var can = r.status !== '已完成', bc = r.bc || (r.item && !r.desc ? r.item : '');
+        return '<div class="trec' + (can ? ' tedit' : '') + '" data-rid="' + esc(r.id || '') + '">' +
+          '<div class="trec-h"><span class="tst ' + (TST[r.status] || '') + '">' + esc(r.status || '') + '</span><span class="hint">' + esc(r.date || r.t || '') + '</span>' +
+            (can ? '<span class="tedit-l">✎ 修改</span>' : '<span class="hint">🔒 已处理</span>') + '</div>' +
+          '<div class="trec-loc"><span>' + esc(r.src || '—') + '</span><i>→</i><span>' + esc(r.dst || '') + '</span>' + (r.qty !== '' && r.qty != null ? '<b class="trec-q">数量 ' + esc(r.qty) + '</b>' : '') + '</div>' +
+          '<div class="trec-it">' + (r.item && r.item !== bc ? '<b>' + esc(r.item) + '</b> ' + esc(r.desc || '') + ' · ' : '') + '箱码 ' + esc(bc || '—') + (r.match === '未识别' ? ' <span class="hint">（主档没有）</span>' : '') + '</div>' +
+          ((r.note || r.by) ? '<div class="trec-n' + (r.status === '有问题' ? ' bad' : '') + '">' + (r.status === '有问题' ? '办公室：' : '备注：') + esc(r.note || '') + (r.by ? ' <span class="hint">（' + esc(r.by) + ' ' + esc(r.at || '') + '）</span>' : '') + '</div>' : '') +
+          (r.edits ? '<div class="hint">已修改 ' + r.edits + ' 次' + (r.editedAt ? '（最后 ' + esc(r.editedAt) + '）' : '') + '</div>' : '') + '</div>';
+      }).join('');
+      var more = RL.total != null && RL.total > recent.filter(function (r) { return r.status !== '待上传'; }).length;
+      return '<div class="card"><div class="trec-top"><b>我的移库记录</b>' + (RL.total != null ? '<span class="hint">共 ' + (RL.status ? RL.total : (c.all != null ? c.all : RL.total)) + ' 笔</span>' : '') + '</div>' +
+        '<div class="tchips">' + chips + '</div>' + (RL.err ? '<p class="hint err">' + esc(RL.err) + '</p>' : '') +
+        (rows || '<p class="hint">' + (RL.loading ? '读取中…' : '没有记录') + '</p>') +
+        (more ? '<button class="btn ghost tmore" data-rmore="1"' + (RL.loading ? ' disabled' : '') + '>' + (RL.loading ? '读取中…' : '显示更多（还有 ' + (RL.total - recent.filter(function (r) { return r.status !== '待上传'; }).length) + ' 笔）') + '</button>' : '') +
+        (rows ? '<p class="hint" style="margin:6px 0 0">点一笔可以修改（办公室已完成的不能改；记录不能删除）</p>' : '') + '</div>';
     }
     // 这一笔的资料在切换页面时会保留（tState），所以不需要“未保存离开”提示
     function saveDraft() { LS.set('tdraft', { src: st.src, srcSkip: !!st.srcSkip, bc: st.bc, item: st.item, desc: st.desc, match: st.match, dst: st.dst, qty: st.qty || '' }); }
     function draw() {
       saveDraft();
       var keepIn = $('#tIn'), keepVal = keepIn ? keepIn.value : '', keepStep = keepIn ? keepIn.getAttribute('data-step') : '';
+      var qOld = $('#tQty'), qFocus = !!qOld && document.activeElement === qOld, qVal = qOld ? qOld.value : null;   // 重画时数量框正在输入：保留内容和光标
       var cur = step(), im = prefs.pda ? 'none' : 'text';
       var rows = STEPS.map(function (s) {
         var k = s[0], v = st[k], val;
@@ -1092,7 +1115,10 @@
         '<div id="tRecent">' + recentHtml() + '</div>' +
         '<div id="dock" class="dock"><button class="btn ghost" id="tReset" style="flex:0 0 32%">重新开始</button><button class="btn save' + (missing().length ? ' notready' : '') + '" id="tSubmit"' + (busy ? ' disabled' : '') + '>' + (missing().length ? '提交 <small>（还差 ' + missing().length + ' 项）</small>' : '提交') + '</button></div>';
       bindModTabs();
-      bindQty($('#tQty'), function (v) { st.qty = v; saveDraft(); }, function () { var x = $('#tIn'); if (x) x.focus(); });
+      var qNew = $('#tQty');
+      if (qNew && qFocus && qVal !== null) qNew.value = qVal;
+      bindQty(qNew, function (v) { st.qty = v; saveDraft(); }, function () { var x = $('#tIn'); if (x) x.focus(); });
+      if (qNew && qFocus) { qNew.focus(); try { qNew.setSelectionRange(qNew.value.length, qNew.value.length); } catch (e) { } }
       var inp = $('#tIn');
       if (inp && keepVal && keepStep === cur) inp.value = keepVal;   // 重画时保留正在输入/扫描的内容
       if (inp) {
@@ -1105,7 +1131,7 @@
           if (now - prev >= 4) t = setTimeout(function () { if (document.activeElement === inp && inp.value) accept(inp.value); }, 250);
           prev = now;
         });
-        setTimeout(function () { var x = $('#tIn'); if (x) x.focus(); }, 30);
+        setTimeout(function () { var x = $('#tIn'); if (x && !(document.activeElement && document.activeElement.id === 'tQty')) x.focus(); }, 30);
         $('#tCam').onclick = function () {
           var k = step();
           openCamera(k, function (code) { accept(code); }, { label: STEPS.filter(function (s) { return s[0] === k; })[0][1], qr: k !== 'bc' });
@@ -1141,6 +1167,9 @@
         };
       });
       var tr = $('#tRecent'); if (tr) tr.onclick = function (e) {
+        var f = e.target.closest && e.target.closest('[data-rf]');
+        if (f) { RL.status = f.getAttribute('data-rf'); RL.shown = 20; recent = RL.status ? [] : recent; return refreshRecent(); }
+        if (e.target.closest && e.target.closest('[data-rmore]')) return refreshRecent(true);
         var row = e.target.closest && e.target.closest('.tedit'); if (!row) return;
         var r = recent.filter(function (x) { return x.id === row.getAttribute('data-rid'); })[0]; if (r) editRecent(r);
       };
@@ -1153,16 +1182,16 @@
       if (!q) return;
       var before = q.value, tm;
       var looksScan = function (v) { return /^\d{7,}$/.test(v) || /[A-Za-z\-]/.test(v); };
-      var check = function (fromEnter) {
+      var check = function (fromEnter, fromBlur) {
         var v = q.value.trim();
-        if (looksScan(v)) { q.value = before; onVal(before); accept(v); return true; }
+        if (looksScan(v)) { if (fromBlur) return false; q.value = before; onVal(before); accept(v); return true; }
         if (v && !/^\d{1,7}(\.\d{1,3})?$/.test(v)) { q.classList.add('bad'); return false; }
         q.classList.remove('bad'); before = v; onVal(v); if (fromEnter && onDone) onDone();
         return true;
       };
       q.addEventListener('keydown', function (e) { if (e.key === 'Enter' || e.keyCode === 13) { e.preventDefault(); check(true); } });
-      q.addEventListener('input', function () { clearTimeout(tm); tm = setTimeout(function () { check(false); }, 300); });
-      q.addEventListener('blur', function () { clearTimeout(tm); check(false); });
+      q.addEventListener('input', function () { clearTimeout(tm); tm = setTimeout(function () { check(false); }, 600); });
+      q.addEventListener('blur', function () { clearTimeout(tm); check(false, true); });
     }
     function fail(text) { msg = { cls: 'bad', text: text }; errBeep(); draw(); }
     function accept(raw) {
@@ -1214,7 +1243,7 @@
               var it = lookupItem(bc) || { itemCode: '', desc: '' };
               var after = function (item, desc, status) {
                 r.src = src; r.dst = dst; r.bc = bc; r.item = item || bc; r.desc = item ? desc : ''; r.qty = qty === '' ? '' : Number(qty); if (status) r.status = status; if (!pendRec) r.edits = (r.edits || 0) + 1;
-                LS.set('trecent', recent); closeModal(); beep();
+                LS.set('trecent', recent.slice(0, 20)); closeModal(); beep();
                 msg = { cls: 'good', text: '✓ 已修改：' + (r.item || bc) + '  ' + (src || '（无来源）') + ' → ' + dst + (qty ? ' · 数量 ' + qty : '') }; draw();
               };
               if (pendRec && tqFlushing) { btn.disabled = false; out.textContent = '这笔正在上传，请等几秒再改'; return; }
@@ -1253,7 +1282,7 @@
         clientTime: new Date().toISOString(), operator: operator };
       IDB.put(r).then(function () {
         recent.unshift({ id: r.transferId, src: r.source, dst: r.dest, bc: r.barcode, item: r.itemCode || r.barcode, desc: r.itemCode ? r.desc : '', qty: r.qty, t: hhmm(r.clientTime), status: '待上传' });
-        recent = recent.slice(0, 10); LS.set('trecent', recent);
+        LS.set('trecent', recent.slice(0, 20));
         beep(); toast(navigator.onLine === false ? '✓ 已保存到手机，联网后自动上传' : '✓ 已提交');
         busy = false;
         var done = '✓ 已提交：' + (r.itemCode || r.barcode) + '  ' + (r.source || '（无来源）') + ' → ' + r.dest + (r.qty ? ' · 数量 ' + r.qty : '');
