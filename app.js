@@ -3,7 +3,7 @@
  * 原则：只采集原始资料，不做任何核对。先存手机（离线队列），再上传云端。 */
 (function () {
   'use strict';
-  var VERSION = '1.5.2';
+  var VERSION = '1.5.3';
   var $ = function (s, el) { return (el || document).querySelector(s); };
   var app = $('#app');
 
@@ -170,6 +170,7 @@
     n.className = !online ? 'off' : (pend ? 'sync' : '');
     t.textContent = (!online ? '离线' : '在线') + (pend ? ' · 待上传 ' + pend : '');
   }
+  try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(function () { }); } catch (e) { }   // v1.5.3 尽量不让浏览器清掉手机里的资料
   window.addEventListener('online', function () { setOnline(true); flush(); flushTransfers(); ldFlush(); });
   window.addEventListener('offline', function () { setOnline(false); });
 
@@ -1755,7 +1756,16 @@
   }
   function ldSaveQ() { ldPendN = LDQ.length; renderNet(); return IDB.set('ld:q', LDQ); }
   function ldGet(id) { if (ldMem[id]) return Promise.resolve(ldMem[id]); return IDB.get('ld:' + id).then(function (s) { if (s) ldMem[id] = s; return s || null; }, function () { return null; }); }
-  function ldPut(s) { ldMem[s.task.id] = s; return IDB.set('ld:' + s.task.id, s); }
+  function ldPut(s) { ldMem[s.task.id] = s; pkLocalSave(s); return IDB.set('ld:' + s.task.id, s); }
+  /** v1.5.3 拣货：手机里已下载的任务摘要（任务列表断网时用，不会变空白） */
+  function pkLocalSave(s) {
+    var t = s && s.task; if (!t || !/^PK-/i.test(t.id)) return;
+    var c = ldCounts(s), cnt = 0; s.items.forEach(function (it) { cnt = r3(cnt + (c[it.key] || 0)); });
+    var all = LS.get('pkLocal', {});
+    all[t.id] = { id: t.id, date: t.date, doCount: t.doCount, itemCount: s.items.length, required: t.required, counted: cnt,
+      status: s.localDone ? '已完成' : t.status, at: new Date().toISOString() };
+    LS.set('pkLocal', all);
+  }
   function ldFromServer(d, old) {
     var items = d.items.map(function (r) { var o = {}; d.itemCols.forEach(function (c, i) { o[c] = r[i]; }); return o; });
     var txns = {};
@@ -1817,6 +1827,7 @@
   function ldPurge(tid) {
     delete ldMem[tid]; LDQ = (LDQ || []).filter(function (o) { return o.taskId !== tid; });
     ['ldTasks', 'pkTasks'].forEach(function (ck) { var ts = LS.get(ck, null); if (ts) LS.set(ck, ts.filter(function (t) { return t.id !== tid; })); });
+    var pl = LS.get('pkLocal', null); if (pl && pl[tid]) { delete pl[tid]; LS.set('pkLocal', pl); }
     return Promise.all([IDB.kdel('ld:' + tid).catch(function () { }), ldSaveQ()]).then(function () { if (ldOnGone) ldOnGone(tid); });
   }
   /** 有修改被退回（别人已经改过 / 任务已删除）→ 重新下载这个任务，手机上显示最新的数量 */
@@ -1837,7 +1848,23 @@
     mod = mod === 'pk' ? 'pk' : 'ld'; LDW_MOD = mod;
     var base = '#/' + mod, CK = mod === 'pk' ? 'pkTasks' : 'ldTasks';
     setBar(mod === 'pk' ? '仓库拣货' : '装车点货', false);
-    var cached = LS.get(CK, null), note = '';
+    var cached = LS.get(CK, null), note = '', offline = false;
+    /** v1.5.3 拣货：服务器列表 + 手机里已下载的任务；已下载的用手机上的最新数量 */
+    function merge(list, fromServer) {
+      if (mod !== 'pk') return list;
+      var loc = LS.get('pkLocal', {}), out = [], seen = {};
+      (list || []).forEach(function (t) {
+        var l = loc[t.id]; seen[t.id] = 1;
+        out.push(l ? Object.assign({}, t, { counted: l.counted, status: l.status === '已完成' ? '已完成' : t.status, local: true }) : t);
+      });
+      Object.keys(loc).sort().reverse().forEach(function (k) {
+        if (seen[k]) return;
+        if (fromServer && !ldPending(k)) return;          // 联网时服务器列表里已经没有（已删除 / 太旧）又没有待上传的 → 不显示
+        out.push(Object.assign({}, loc[k], { local: true }));
+      });
+      return out;
+    }
+    if (mod === 'pk') { var m0 = merge(cached, false); cached = m0.length || cached ? m0 : null; }
     function draw(list) {
       if (list) {        // v1.4.2：待点货 → 点货中 → 已完成（同组保持后台顺序：新的在上）
         var rank = { '待点货': 0, '点货中': 1, '已完成': 2 };
@@ -1846,10 +1873,11 @@
       }
       app.innerHTML = modTabs(mod) + ldW('<div class="topline"><span>员工：' + esc(operator) + '</span><button class="link" id="lr">刷新</button></div>' +
         (note ? '<p class="hint">' + esc(note) + '</p>' : '') +
-        (!list ? '<div class="empty">加载中…</div>' : list.length ? '' : '<div class="empty">没有装车任务。办公室上传 DO 后会出现在这里。</div>') +
+        (!list ? '<div class="empty">加载中…</div>' : list.length ? '' : '<div class="empty">' + (mod === 'pk' && offline ? '现在没有网络，手机里也还没有下载过的拣货任务。<br>联网后打开任务一次，之后断网也能继续。' : '没有装车任务。办公室上传 DO 后会出现在这里。') + '</div>') +
         (list || []).map(function (t) {
           var pct = t.required ? Math.min(100, t.counted / t.required * 100) : 0, pend = ldPending(t.id);
-          return '<button class="card job ldtask" data-id="' + esc(t.id) + '"><div class="id">' + esc(t.id) + ' ' + ldBadge(t.status) + '</div>' +
+          var dl = mod === 'pk' ? (t.local ? '<span class="pkdl">📥 已下载，可离线</span>' : offline ? '<span class="pkdl no">未下载，需联网打开一次</span>' : '') : '';
+          return '<button class="card job ldtask' + (mod === 'pk' && offline && !t.local ? ' nodl' : '') + '" data-id="' + esc(t.id) + '"><div class="id">' + esc(t.id) + ' ' + ldBadge(t.status) + dl + '</div>' +
             '<div class="meta"><span>日期</span><b>' + esc(t.date) + '</b><span>DO</span><b>' + t.doCount + ' 张' + (t.carry ? ' + 之前未装 ' + t.carry + ' 项' : '') + '</b>' +
             '<span>商品</span><b>' + t.itemCount + ' 项</b><span>数量</span><b>已点 ' + t.counted + ' / 需求 ' + t.required + '</b></div>' +
             '<div class="progress"><i class="d" style="width:' + pct + '%"></i></div>' +
@@ -1859,10 +1887,15 @@
       $('#lr').onclick = load; bindModTabs();
     }
     function load() {
-      api({ action: 'ldTasks', mod: mod }, true).then(function (d) { LS.set(CK, d.tasks); note = ''; if (location.hash === base) draw(d.tasks); },
-        function (e) { note = e.network ? '离线：显示上次的任务列表' : e.message; if (location.hash === base) draw(cached || []); });
+      api({ action: 'ldTasks', mod: mod }, true).then(function (d) { LS.set(CK, d.tasks); note = ''; offline = false; if (location.hash === base) draw(merge(d.tasks, true)); },
+        function (e) {
+          offline = !!e.network;
+          note = e.network ? (mod === 'pk' ? '没有网络：显示手机里的任务，可以继续拣货，记录联网后自动上传' : '离线：显示上次的任务列表') : e.message;
+          if (location.hash === base) draw(mod === 'pk' ? merge(LS.get(CK, null), false) : (cached || []));
+        });
     }
     draw(cached); load(); ldFlush();
+    ldLoadQ().then(function () { if (location.hash === base && ldPendN) draw(mod === 'pk' ? merge(LS.get(CK, null), false) : cached); });   // 待上传笔数读出来后再画一次
   }
 
   // ---------- PDA：点货 ----------
@@ -2611,7 +2644,7 @@
     } catch (e) { }
   }
   // ---------------- Service Worker（离线打开 APP） ----------------
-  if ('serviceWorker' in navigator && location.protocol === 'https:') {
+  if ('serviceWorker' in navigator && (location.protocol === 'https:' || /^(localhost|127\.0\.0\.1)$/.test(location.hostname))) {
     navigator.serviceWorker.register('sw.js').catch(function () { });
   }
 
