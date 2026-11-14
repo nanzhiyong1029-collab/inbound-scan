@@ -1,9 +1,9 @@
-/* 入库条码采集 + 库位转移 PWA  v1.4.5
+/* 入库条码采集 + 库位转移 PWA  v1.4.6
  * 页面：#/ 任务列表 → #/job/<JobID> 商品清单 → #/p/<JobID>/<ProductID> 条码采集
  * 原则：只采集原始资料，不做任何核对。先存手机（离线队列），再上传云端。 */
 (function () {
   'use strict';
-  var VERSION = '1.4.5';
+  var VERSION = '1.4.6';
   var $ = function (s, el) { return (el || document).querySelector(s); };
   var app = $('#app');
 
@@ -926,7 +926,7 @@
       function next(i) {
         if (i >= mine.length) return Promise.resolve();
         var r = mine[i];
-        var body = { transferId: r.transferId, source: r.source, dest: r.dest, barcode: r.barcode, photo: r.photo, clientTime: r.clientTime };
+        var body = { transferId: r.transferId, source: r.source, dest: r.dest, barcode: r.barcode, qty: r.qty || '', photo: r.photo, clientTime: r.clientTime };
         return api({ action: 'transfer', transfer: body }, true).then(function (d) {
           if (d.status === 'saved' || d.status === 'duplicate') { done++; return IDB.del(r.transferId); }
           r.rejected = d.message || '被服务器退回'; toast('有一笔库位转移被退回：' + r.rejected, 4000);
@@ -983,7 +983,7 @@
   function viewTransfer() {
     setBar('库位转移', false);
     // 草稿存手机（v1.3.8）：有些手机打开相机后内存不足会把网页重新载入，回来后已扫的资料不丢
-    var st = tState || (tState = Object.assign({ src: '', srcSkip: false, bc: '', item: '', desc: '', match: '', dst: '', photo: '', edit: '' }, LS.get('tdraft', {})));
+    var st = tState || (tState = Object.assign({ src: '', srcSkip: false, bc: '', item: '', desc: '', match: '', dst: '', qty: '', photo: '', edit: '' }, LS.get('tdraft', {})));
     var pend = LS.get('tphotoPending', 0);
     LS.del('tphotoPending');
     var msg = (pend && Date.now() - pend < 15 * 60e3 && !st.photo) ? { cls: 'bad', text: '刚才拍照后网页被手机重新打开了（手机内存不足时会这样）。已扫的资料都还在，请再拍一次；如果还是这样，请用“🖼 从相册选”。' } : { cls: '', text: '' }, recent = LS.get('trecent', []).filter(function (r) { return r.id; }), busy = false;
@@ -1019,6 +1019,7 @@
         return '<li class="' + cls + '"' + (go ? ' data-go="' + go + '"' : '') + '><span class="mk">' + mk + '</span><span class="t"><b>' + title + '</b><span>' + sub + '</span></span>' + (go ? '<span class="go">去补 ›</span>' : '') + '</li>';
       };
       var items = li(st.src ? 'ok' : 'opt', st.src ? '✓' : '–', '来源库位', st.src ? esc(st.src) : '不填（选填，可以不扫）') +
+        li(st.qty ? 'ok' : 'opt', st.qty ? '✓' : '–', '数量', st.qty ? esc(st.qty) : '不填（选填）') +
         ['bc', 'dst', 'photo'].map(function (k) {
           if (st[k]) return li('ok', '✓', NEED[k][0], k === 'photo' ? '已拍好' : esc(k === 'bc' ? (st.item ? st.item + ' · ' + st.bc : st.bc) : st[k]));
           return li('bad', '✗', NEED[k][0] + ' · ' + NEED[k][1], NEED[k][2], k);
@@ -1047,12 +1048,14 @@
     }
     function recentHtml() {
       return (recent.length ? '<div class="card"><b>最近提交</b>' + recent.slice(0, 10).map(function (r) {
-          return '<div class="trow" data-rid="' + esc(r.id || '') + '"><div>' + esc(r.src || '—') + ' → ' + esc(r.dst) + ' · <b>' + esc(r.item || r.bc || '') + '</b> ' + esc(r.desc || '') + '</div>' +
-            '<span class="hint">' + (r.status ? '<span class="tst ' + (TST[r.status] || '') + '">' + esc(r.status) + '</span> ' : '') + esc(r.t) + '</span></div>';
-        }).join('') + '</div>' : '');
+          var can = r.status !== '已完成';
+          return '<div class="trow' + (can ? ' tedit' : '') + '" data-rid="' + esc(r.id || '') + '"><div>' + esc(r.src || '—') + ' → ' + esc(r.dst) + ' · <b>' + esc(r.item || r.bc || '') + '</b> ' + esc(r.desc || '') +
+            (r.qty !== '' && r.qty != null ? ' · 数量 <b>' + esc(r.qty) + '</b>' : '') + (r.edits ? ' <span class="hint">（改过 ' + r.edits + ' 次）</span>' : '') + '</div>' +
+            '<span class="hint">' + (r.status ? '<span class="tst ' + (TST[r.status] || '') + '">' + esc(r.status) + '</span> ' : '') + esc(r.t) + (can ? ' <span class="tedit-l">✎ 修改</span>' : '') + '</span></div>';
+        }).join('') + '<p class="hint" style="margin:6px 0 0">点一笔可以修改（办公室已完成的不能改；记录不能删除）</p></div>' : '');
     }
     // 这一笔的资料在切换页面时会保留（tState），所以不需要“未保存离开”提示
-    function saveDraft() { LS.set('tdraft', { src: st.src, srcSkip: !!st.srcSkip, bc: st.bc, item: st.item, desc: st.desc, match: st.match, dst: st.dst }); }
+    function saveDraft() { LS.set('tdraft', { src: st.src, srcSkip: !!st.srcSkip, bc: st.bc, item: st.item, desc: st.desc, match: st.match, dst: st.dst, qty: st.qty || '' }); }
     function draw() {
       saveDraft();
       var keepIn = $('#tIn'), keepVal = keepIn ? keepIn.value : '', keepStep = keepIn ? keepIn.getAttribute('data-step') : '';
@@ -1070,7 +1073,9 @@
       var scanning = cur === 'src' || cur === 'bc' || cur === 'dst';
       app.innerHTML = modTabs('t') +
         '<div class="topline"><span>员工：' + esc(operator) + '</span><span class="hint">' + (masters && masters.count ? '商品主档 ' + masters.count + ' 个条码' : '') + '</span></div>' +
-        '<div class="card tcard">' + rows + '</div>' +
+        '<div class="card tcard">' + rows +
+        '<div class="tqty"><label for="tQty"><span class="tl">数量 <small>（选填：新货入库核对用；托盘转移不用填）</small></span></label>' +
+        '<input id="tQty" class="tqtyin" inputmode="decimal" autocomplete="off" maxlength="64" enterkeyhint="done" placeholder="不填" value="' + esc(st.qty || '') + '"></div></div>' +
         (msg.text ? '<div class="tmsg ' + msg.cls + '">' + esc(msg.text) + '</div>' : '') +
         (scanning ? '<div class="bcrow tscan"><input id="tIn" data-step="' + cur + '" inputmode="' + im + '" maxlength="64" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="' +
           esc(STEPS.filter(function (s) { return s[0] === cur; })[0][2]) + '，或点这里手输"><button class="btn cam" id="tCam">📷 扫描</button></div>' +
@@ -1087,6 +1092,7 @@
         '<div id="tRecent">' + recentHtml() + '</div>' +
         '<div id="dock" class="dock"><button class="btn ghost" id="tReset" style="flex:0 0 32%">重新开始</button><button class="btn save' + (missing().length ? ' notready' : '') + '" id="tSubmit"' + (busy ? ' disabled' : '') + '>' + (missing().length ? '提交 <small>（还差 ' + missing().length + ' 项）</small>' : '提交') + '</button></div>';
       bindModTabs();
+      bindQty($('#tQty'), function (v) { st.qty = v; saveDraft(); }, function () { var x = $('#tIn'); if (x) x.focus(); });
       var inp = $('#tIn');
       if (inp && keepVal && keepStep === cur) inp.value = keepVal;   // 重画时保留正在输入/扫描的内容
       if (inp) {
@@ -1134,9 +1140,29 @@
           st.edit = k; msg = { cls: '', text: (st[k] ? '重新' : '') + (k === 'photo' ? '拍照' : '扫描') + '：' + STEPS.filter(function (s) { return s[0] === k; })[0][1] }; draw();
         };
       });
+      var tr = $('#tRecent'); if (tr) tr.onclick = function (e) {
+        var row = e.target.closest && e.target.closest('.tedit'); if (!row) return;
+        var r = recent.filter(function (x) { return x.id === row.getAttribute('data-rid'); })[0]; if (r) editRecent(r);
+      };
       Array.prototype.forEach.call(app.querySelectorAll('[data-tdel]'), function (b) {
         b.onclick = function () { confirmBox('删除这笔被退回的记录？', '删除', function () { IDB.del(b.dataset.tdel).then(refreshTq).then(draw); }); };
       });
+    }
+    /** 数量框：只收数字；如果扫描枪把条码打进了数量框（7 位以上数字 / 有字母或横线），当成扫描处理，数量框保持原样 */
+    function bindQty(q, onVal, onDone) {
+      if (!q) return;
+      var before = q.value, tm;
+      var looksScan = function (v) { return /^\d{7,}$/.test(v) || /[A-Za-z\-]/.test(v); };
+      var check = function (fromEnter) {
+        var v = q.value.trim();
+        if (looksScan(v)) { q.value = before; onVal(before); accept(v); return true; }
+        if (v && !/^\d{1,7}(\.\d{1,3})?$/.test(v)) { q.classList.add('bad'); return false; }
+        q.classList.remove('bad'); before = v; onVal(v); if (fromEnter && onDone) onDone();
+        return true;
+      };
+      q.addEventListener('keydown', function (e) { if (e.key === 'Enter' || e.keyCode === 13) { e.preventDefault(); check(true); } });
+      q.addEventListener('input', function () { clearTimeout(tm); tm = setTimeout(function () { check(false); }, 300); });
+      q.addEventListener('blur', function () { clearTimeout(tm); check(false); });
     }
     function fail(text) { msg = { cls: 'bad', text: text }; errBeep(); draw(); }
     function accept(raw) {
@@ -1159,9 +1185,57 @@
       beep(); st.edit = ''; msg = { cls: 'good', text: '✓ ' + (k === 'bc' ? (st.item ? st.item + ' ' + (st.desc || '') : st.bc) : normLoc(raw)) };
       draw();
     }
+    /** v1.4.6 修改已提交的记录（不能删除）：来源 / 箱码 / 目的 / 数量。还没上传的直接改手机里的；已上传的要联网，后台记录修改前后 */
+    function editRecent(r) {
+      var pendRec = null;
+      IDB.all().catch(function () { return []; }).then(function (all) {
+        pendRec = (all || []).filter(function (q) { return q.transferId === r.id && !q.rejected; })[0] || null;
+        var cur = pendRec ? { src: pendRec.source, bc: pendRec.barcode, dst: pendRec.dest, qty: pendRec.qty || '' } : { src: r.src || '', bc: r.bc || '', dst: r.dst || '', qty: r.qty === '' || r.qty == null ? '' : String(r.qty) };
+        if (!cur.bc && !pendRec) cur.bc = r.bc || r.item || '';
+        var f = function (id, label, val, im, ph) { return '<label class="tef"><span>' + label + '</span><input id="' + id + '" inputmode="' + im + '" autocomplete="off" autocapitalize="characters" spellcheck="false" value="' + esc(val) + '" placeholder="' + ph + '"></label>'; };
+        modal('<div class="tmiss"><div class="tmiss-h"><span class="tmiss-ic" style="background:#e6eefb;color:#1f3864">✎</span><div><h3>修改这笔移库位</h3><div class="hint">' + esc(r.t || '') + ' · ' + esc(r.status || '') + (pendRec ? ' · 还没上传' : '') + '</div></div></div>' +
+          f('teSrc', '来源库位（选填）', cur.src, 'text', '不填') + f('teBc', '商品箱码', cur.bc, 'text', '扫描或输入') + f('teDst', '目的库位', cur.dst, 'text', '扫描或输入') + f('teQty', '数量（选填）', cur.qty, 'decimal', '不填') +
+          '<p class="hint">照片不变。修改会记录修改前后，记录不能删除。</p><div id="teMsg" class="err"></div>' +
+          '<div class="row"><button class="btn ghost" id="teNo">取消</button><button class="btn save" id="teOk">保存修改</button></div></div>', function (m) {
+            var ids = ['teSrc', 'teBc', 'teDst', 'teQty'];
+            ids.forEach(function (k, i) { $('#' + k, m).addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); var nx = ids[i + 1]; if (nx) $('#' + nx, m).focus(); else $('#teOk', m).click(); } }); });
+            $('#teNo', m).onclick = closeModal;
+            $('#teOk', m).onclick = function () {
+              var src = normLoc($('#teSrc', m).value), bc = normCode($('#teBc', m).value), dst = normLoc($('#teDst', m).value), qty = $('#teQty', m).value.trim(), out = $('#teMsg', m);
+              var e = [];
+              if (src && !locRe().test(src)) e.push('来源库位格式不对：' + src);
+              if (!dst || !locRe().test(dst)) e.push('目的库位格式不对：' + (dst || '空'));
+              if (src && src === dst) e.push('来源和目的库位相同');
+              if (!bc) e.push('请填商品箱码'); else if (locRe().test(bc)) e.push('箱码栏填的是库位条码');
+              if (qty && !(/^\d{1,7}(\.\d{1,3})?$/.test(qty) && Number(qty) > 0)) e.push('数量只能填大于 0 的数字，或留空');
+              if (e.length) { out.textContent = e.join('；'); errBeep(); return; }
+              if (src === cur.src && bc === normCode(cur.bc) && dst === cur.dst && qty === String(cur.qty)) { closeModal(); return; }
+              var btn = $('#teOk', m); btn.disabled = true;
+              var it = lookupItem(bc) || { itemCode: '', desc: '' };
+              var after = function (item, desc, status) {
+                r.src = src; r.dst = dst; r.bc = bc; r.item = item || bc; r.desc = item ? desc : ''; r.qty = qty === '' ? '' : Number(qty); if (status) r.status = status; if (!pendRec) r.edits = (r.edits || 0) + 1;
+                LS.set('trecent', recent); closeModal(); beep();
+                msg = { cls: 'good', text: '✓ 已修改：' + (r.item || bc) + '  ' + (src || '（无来源）') + ' → ' + dst + (qty ? ' · 数量 ' + qty : '') }; draw();
+              };
+              if (pendRec && tqFlushing) { btn.disabled = false; out.textContent = '这笔正在上传，请等几秒再改'; return; }
+              if (pendRec) {          // 还没上传：直接改手机里的这笔，上传时就是新资料
+                Object.assign(pendRec, { source: src, barcode: bc, dest: dst, qty: qty, itemCode: it.itemCode, desc: it.desc });
+                return IDB.put(pendRec).then(function () { after(it.itemCode, it.desc); }, function (x) { btn.disabled = false; out.textContent = '保存失败：' + x.message; });
+              }
+              api({ action: 'transferEdit', transfer: { transferId: r.id, source: src, barcode: bc, dest: dst, qty: qty } }, true).then(function (d) {
+                if (d.status === 'saved') { after(d.itemCode, d.description, d.recStatus); return refreshRecent(); }
+                if (d.status === 'same') { closeModal(); return; }
+                btn.disabled = false; out.textContent = d.message || '修改失败'; errBeep();
+                if (d.done || d.gone) refreshRecent();
+              }, function (x) { btn.disabled = false; out.textContent = x.network ? '需要联网才能修改已上传的记录，请联网后再试' : x.message; errBeep(); });
+            };
+            setTimeout(function () { $('#teQty', m).focus(); }, 60);
+          });
+      });
+    }
     function reset(keep) {
       var src = st.src, dst = st.dst;
-      st = tState = { src: keep ? src : '', srcSkip: false, bc: '', item: '', desc: '', match: '', dst: keep ? dst : '', photo: '', edit: '' };
+      st = tState = { src: keep ? src : '', srcSkip: false, bc: '', item: '', desc: '', match: '', dst: keep ? dst : '', qty: '', photo: '', edit: '' };
       LS.del('tdraft'); showNeed = false;
       msg = { cls: '', text: '' }; draw();
     }
@@ -1170,16 +1244,19 @@
       if (photoBusy) return infoBox('照片还在处理中', '请等一两秒，照片处理好后再点“提交”。');
       var miss = missing();
       if (miss.length) return showMissing(miss);
+      var qEl = $('#tQty'); if (qEl) st.qty = qEl.value.trim();
+      if (st.qty && !/^\d{1,7}(\.\d{1,3})?$/.test(st.qty)) return infoBox('数量不对', '数量只能填数字（例如 24 或 2.5），不需要可以留空。');
+      if (st.qty && !(Number(st.qty) > 0)) return infoBox('数量不对', '数量要大于 0；不需要数量请留空。');
       st.edit = ''; showNeed = false;                  // 正在重扫某一栏但资料都齐了：直接用现有资料提交
       busy = true;
-      var r = { transferId: uuid(), source: st.src, dest: st.dst, barcode: st.bc, itemCode: st.item, desc: st.desc, photo: st.photo,
+      var r = { transferId: uuid(), source: st.src, dest: st.dst, barcode: st.bc, itemCode: st.item, desc: st.desc, photo: st.photo, qty: st.qty || '',
         clientTime: new Date().toISOString(), operator: operator };
       IDB.put(r).then(function () {
-        recent.unshift({ id: r.transferId, src: r.source, dst: r.dest, item: r.itemCode || r.barcode, desc: r.itemCode ? r.desc : '', t: hhmm(r.clientTime), status: '待上传' });
+        recent.unshift({ id: r.transferId, src: r.source, dst: r.dest, bc: r.barcode, item: r.itemCode || r.barcode, desc: r.itemCode ? r.desc : '', qty: r.qty, t: hhmm(r.clientTime), status: '待上传' });
         recent = recent.slice(0, 10); LS.set('trecent', recent);
         beep(); toast(navigator.onLine === false ? '✓ 已保存到手机，联网后自动上传' : '✓ 已提交');
         busy = false;
-        var done = '✓ 已提交：' + (r.itemCode || r.barcode) + '  ' + (r.source || '（无来源）') + ' → ' + r.dest;
+        var done = '✓ 已提交：' + (r.itemCode || r.barcode) + '  ' + (r.source || '（无来源）') + ' → ' + r.dest + (r.qty ? ' · 数量 ' + r.qty : '');
         reset(false);
         msg = { cls: 'good', text: done }; draw();
         return refreshTq().then(flushTransfers).then(refreshRecent);
