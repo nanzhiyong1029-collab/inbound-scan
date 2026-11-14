@@ -235,6 +235,9 @@ textarea.remark { width: 100%; font: inherit; font-size: 16px; padding: 10px; bo
 .ldh .t { flex: 1; min-width: 0; } .ldh .t b { display: block; } .ldh .t span { font-size: 13px; color: var(--mute); }
 .ldh .q { font-size: 20px; white-space: nowrap; }
 .ldh.gone { opacity: .5; } .ldh.gone .q { text-decoration: line-through; }
+.ldacts { display: flex; flex-direction: column; gap: 6px; } .ldacts .tbtn { padding: 8px 12px; font-size: 15px; }
+.ldhc { cursor: pointer; } .ldh .q s { color: var(--mute); font-size: 15px; }
+#dtL { max-height: 42vh; }
 .ldrt { width: 100%; border-collapse: collapse; }
 .ldrt th { text-align: left; font-size: 13px; color: var(--mute); padding: 6px 4px; border-bottom: 2px solid var(--line); }
 .ldrt td { padding: 8px 4px; border-bottom: 1px solid var(--line); vertical-align: top; }
