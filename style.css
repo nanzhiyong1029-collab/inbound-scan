@@ -281,3 +281,21 @@ body.wide #app, body.wide .dock { max-width: 1200px; }
 .trec-loc i { font-style: normal; color: var(--mute); font-weight: 400; } .trec-q { margin-left: auto; font-size: 16px; color: #1f3864; }
 .trec-it { margin-top: 2px; word-break: break-all; } .trec-n { margin-top: 2px; } .trec-n.bad { color: #b42318; font-weight: 600; }
 .tmore { width: 100%; margin-top: 8px; }
+
+/* v1.5 仓库拣货 */
+.mods.m4 { gap: 5px; }
+.mods.m4 .mod { font-size: 14px; padding: 11px 2px; }
+@media (max-width: 400px) { .mods.m4 .mod { font-size: 12.5px; letter-spacing: -.3px; } }
+.upmods { max-width: 560px; }
+.ldi.pki { align-items: stretch; }
+.pkloc { flex: 0 0 auto; min-width: 78px; display: flex; align-items: center; justify-content: center; padding: 4px 6px; border-radius: 10px; background: #1f3864; color: #fff; font-size: 21px; font-weight: 800; line-height: 1.1; letter-spacing: .5px; white-space: nowrap; }
+.pkloc.no { background: #f59e0b; color: #3b2300; font-size: 16px; }
+.pkbatch { font: 700 15px/1.25 ui-monospace, Menlo, Consolas, monospace; color: #1f3864; word-break: break-all; margin-bottom: 2px; }
+.ldi-t .pkwarn { display: block; color: #92400e; font-weight: 600; }
+.ldi.pkflag { background: #fff7c2; border-color: #f2d04b; }
+.ldi.pkflag.s2 { background: #eef8d8; }
+.pkb { font-style: normal; font-weight: 800; background: #1f3864; color: #fff; border-radius: 6px; padding: 0 6px; }
+.pkb.no { background: #f59e0b; color: #3b2300; }
+.pkfrow { display: flex; gap: 6px; margin: 8px 0 0; }
+.pkf { flex: 1; min-width: 0; font-size: 17px; padding: 11px 12px; border: 2px solid #1f3864; border-radius: 10px; }
+.uptab tr.pkflagrow td { background: #fff7c2; }
