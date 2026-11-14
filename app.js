@@ -3,7 +3,7 @@
  * 原则：只采集原始资料，不做任何核对。先存手机（离线队列），再上传云端。 */
 (function () {
   'use strict';
-  var VERSION = '1.5.0';
+  var VERSION = '1.5.1';
   var $ = function (s, el) { return (el || document).querySelector(s); };
   var app = $('#app');
 
@@ -279,7 +279,7 @@
     var h = location.hash;
     var m = h.match(/^#\/p\/([^/]+)\//);
     if (m) return guardLeave(function () { location.hash = '#/job/' + m[1]; });
-    var l = h.match(/^#\/(ld|pk)\/([^/]+)\/review$/);
+    var l = h.match(/^#\/(ld|pk)\/([^/]+)\/(review|i\/\d+)$/);
     if (l) { location.hash = '#/' + l[1] + '/' + l[2]; return; }
     if ((l = h.match(/^#\/(ld|pk)\//))) { location.hash = '#/' + l[1]; return; }
     location.hash = '#/';
@@ -394,7 +394,7 @@
     if ((m = h.match(/^#\/p\/([^/]+)\/([^/]+)$/))) return viewCollect(decodeURIComponent(m[1]), decodeURIComponent(m[2]));
     if (h === '#/t') return viewTransfer();
     if (h === '#/ld' || h === '#/pk') return viewLdList(h.slice(2));
-    if ((m = h.match(/^#\/(ld|pk)\/([^/]+?)(\/review)?$/))) return viewLdTask(decodeURIComponent(m[2]), !!m[3]);
+    if ((m = h.match(/^#\/(ld|pk)\/([^/]+?)(\/review|\/i\/(\d+))?$/))) return viewLdTask(decodeURIComponent(m[2]), m[3] === '/review', m[1] === 'pk' && m[4] != null ? Number(m[4]) : null);
     return viewJobs();
   }
 
@@ -1420,6 +1420,15 @@
   function ldModal(h, cb) { return modal(ldW(h), cb); }
   function ldModOf(id) { return /^PK-/i.test(String(id)) ? 'pk' : 'ld'; }
   function ldHash(id) { return '#/' + ldModOf(id) + '/' + encodeURIComponent(id); }
+  /** v1.5.1 拣货：每个任务的列表筛选状态（进出 SKU 页都保留）、进 SKU 页时的识别方式、30 秒状态检查只留一个 */
+  var pkUi = {}, pkEntry = null, ldStTimer = null;
+  /** 有效（没被撤销）的“确认拣完（短少）”→ { 商品键: Txn ID } */
+  function ldShortOkC(s) {
+    var v = {}, o = {};
+    Object.keys(s.txns).forEach(function (k) { var t = s.txns[k]; if (t.method === 'VOID' || t.method === 'REVERSAL') v[t.rev] = 1; });
+    Object.keys(s.txns).forEach(function (k) { var t = s.txns[k]; if (t.method === 'SHORT_OK' && !v[t.id]) o[t.key] = t.id; });
+    return o;
+  }
   /** 商品编号显示：Item Code · 条码（没有 Item Code 时只显示条码） */
   function ldId(it, pfx) { var a = []; if (it.code) a.push(it.code); if (it.bc && it.bc !== it.code) a.push((it.code ? pfx : '') + it.bc); return a.join(' · ') || '（无条码）'; }
   var LIST_FIELDS = [['date', /^date$/i], ['doNo', /delivery\s*order\s*no|^do\s*no/i], ['itemCode', /^item\s*code/i], ['desc', /^desc/i],
@@ -1818,16 +1827,19 @@
   }
 
   // ---------- PDA：点货 ----------
-  function viewLdTask(id, review) {
+  function viewLdTask(id, review, idx) {
     var mod = ldModOf(id), PK = mod === 'pk', modal = ldModal; LDW_MOD = mod;      // v1.5 拣货任务（PK-）用同一套画面
+    var IT = PK && !review && idx != null ? idx : null;                              // v1.5.1 拣货 SKU 页（整页）
+    var U = PK ? (pkUi[id] = pkUi[id] || { filter: 'todo', pq: '', locF: '', chip: null, y: 0 }) : null;
+    var ent = pkEntry; pkEntry = null;
     setBar(review ? '复核' : ldW('装车点货'), true);
-    var s = null, filter = 'todo', msg = null, busy = false; var keepVal = '', keepFocus = false, pq = '', pqFocus = false;     // 每次打开任务都从“未点完”开始
+    var s = null, filter = U ? U.filter : 'todo', msg = null, busy = false; var keepVal = '', keepFocus = false, pq = U ? U.pq : '', restoreY = PK && IT == null && !review;     // 装车每次打开任务都从“未点完”开始
     function done() { return s && s.task.status === '已完成'; }
     function stats() {
-      var c = ldCounts(s), o = { n: s.items.length, ok: 0, todo: 0, prog: 0, over: 0, short: 0, req: 0, cnt: 0 };
+      var c = ldCounts(s), so = PK ? ldShortOkC(s) : {}, o = { n: s.items.length, ok: 0, todo: 0, prog: 0, over: 0, short: 0, req: 0, cnt: 0 };
       s.items.forEach(function (it) {
-        var v = c[it.key] || 0, st = ldItemSt(it.req, v, done());
-        it._c = v; it._st = st; o.req = r3(o.req + it.req); o.cnt = r3(o.cnt + v);
+        var v = c[it.key] || 0, st = ldItemSt(it.req, v, done() || !!so[it.key]);
+        it._c = v; it._st = st; it._so = so[it.key] || ''; o.req = r3(o.req + it.req); o.cnt = r3(o.cnt + v);
         if (st === '已点齐') o.ok++; else if (st === '超出') o.over++; else if (st === '未点') o.todo++; else if (st === '短少') o.short++; else o.prog++;
       });
       return o;
@@ -1838,9 +1850,9 @@
     function itemRow(it) {
       var diff = r3(it._c - it.req);
       if (PK) return '<button class="ldi pki ' + ({ '未点': 's0', '点货中': 's1', '已点齐': 's2', '超出': 's3', '短少': 's4' }[it._st]) + (it.flag ? ' pkflag' : '') + '" data-k="' + esc(it.key) + '">' +
-        '<div class="pkloc' + (it.loc ? '' : ' no') + '">' + (it.loc ? esc(it.loc) : '无库位') + '</div>' +
-        '<div class="ldi-t"><div class="pkbatch">' + esc(it.batch || '（没有批次号）') + '</div><b>' + itemName(it) + '</b><span>' + esc(ldId(it, '')) + (it.spec ? ' · ' + esc(it.spec) : '') + (it.flag ? '</span><span class="pkwarn">⚠ ' + esc(it.flag) : '') + '</span></div>' +
-        '<div class="ldi-n"><b>' + it._c + '<small> / ' + it.req + ' ' + esc(it.uom) + '</small></b><span>' + esc(it._st) + (diff && it._c ? '（' + (diff > 0 ? '+' : '') + diff + '）' : '') + '</span></div></button>';
+        '<div class="pkloc' + (it.loc ? '' : ' no') + '" data-fl="' + esc(it.loc) + '">' + (it.loc ? esc(it.loc) : '无库位') + '</div>' +
+        '<div class="ldi-t"><div class="pkbatch" data-fb="' + esc(it.batch) + '">' + esc(it.batch || '（没有批次号）') + '</div><b>' + itemName(it) + '</b><span>' + esc(ldId(it, '')) + (it.spec ? ' · ' + esc(it.spec) : '') + (it.flag ? '</span><span class="pkwarn">⚠ ' + esc(it.flag) : '') + '</span></div>' +
+        '<div class="ldi-n"><b>' + it._c + '<small> / ' + it.req + ' ' + esc(it.uom) + '</small></b><span>' + esc(it._so && it._c < it.req ? '已确认短少' : it._st) + (diff && it._c ? '（' + (diff > 0 ? '+' : '') + diff + '）' : '') + '</span></div></button>';
       return '<button class="ldi ' + ({ '未点': 's0', '点货中': 's1', '已点齐': 's2', '超出': 's3', '短少': 's4' }[it._st]) + '" data-k="' + esc(it.key) + '">' +
         '<div class="ldi-t"><b>' + itemName(it) + '</b><span>' + esc(ldId(it, '')) + (it.spec ? ' · ' + esc(it.spec) : '') + '</span></div>' +
         '<div class="ldi-n"><b>' + it._c + '<small> / ' + it.req + ' ' + esc(it.uom) + '</small></b><span>' + esc(it._st) + (diff && it._c ? '（' + (diff > 0 ? '+' : '') + diff + '）' : '') + '</span></div></button>';
@@ -1850,19 +1862,23 @@
       var o = stats(), pend = ldPending(id);
       setBar((review ? '复核 · ' : '') + s.task.id, true);
       var head = '<div class="card ldhead"><div class="ldhead-t"><b>' + esc(s.task.id) + '</b> ' + ldBadge(s.task.status) + '<span class="hint">' + esc(s.task.date) + ' · DO ' + s.task.doCount + ' 张</span></div>' +
+        (PK ? '<div class="ldstat"><div><b>' + o.n + '</b><span>商品</span></div><div class="g"><b>' + (o.ok + o.over + o.short) + '</b><span>拣完</span></div><div class="o"><b>' + (o.todo + o.prog) + '</b><span>未拣完</span></div><div class="p"><b>' + o.short + '</b><span>短少</span></div></div>' +
+          '<div class="progress"><i class="d" style="width:' + (o.n ? (o.ok + o.over + o.short) / o.n * 100 : 0) + '%"></i></div>' :
         '<div class="ldstat"><div><b>' + o.n + '</b><span>商品</span></div><div class="g"><b>' + (o.ok + o.over) + '</b><span>点齐</span></div><div class="o"><b>' + (o.todo + o.prog + o.short) + '</b><span>未点完</span></div><div class="p"><b>' + o.over + '</b><span>超出</span></div></div>' +
-        '<div class="progress"><i class="d" style="width:' + (o.n ? (o.ok + o.over) / o.n * 100 : 0) + '%"></i></div>' +
+        '<div class="progress"><i class="d" style="width:' + (o.n ? (o.ok + o.over) / o.n * 100 : 0) + '%"></i></div>') +
         '<div class="hint">数量：已点 <b>' + o.cnt + '</b> / 需求 ' + o.req + (pend ? ' · <span class="err">本机 ' + pend + ' 笔待上传</span>' : '') + (ldLastErr && pend ? ' · ' + esc(ldLastErr) : '') + '</div></div>';
       if (review) return drawReview(head, o);
-      var im = prefs.pda ? 'none' : 'text', keep = $('#ldIn'), pf = $('#pkF');
+      var im = prefs.pda ? 'none' : 'text', keep = $('#ldIn');
       keepVal = keep ? keep.value : ''; keepFocus = !!keep && document.activeElement === keep;   // 重画时不吞掉正在扫的条码
-      pqFocus = !!pf && document.activeElement === pf;
+      if (IT != null) return drawItem(im);
       app.innerHTML = ldW(head + (msg ? '<div class="tmsg ' + msg.cls + '">' + esc(msg.text) + '</div>' : '') +
         (done() ? '<div class="card lddone">✓ 已完成' + (s.task.submittedBy ? '（' + esc(s.task.submittedBy) + ' ' + esc(s.task.submitted) + '）' : s.localDone ? '（待上传）' : '') + '，不能再修改。需要更正请找办公室重新打开。</div>' :
+          (PK ? '<div class="bcrow tscan"><input id="ldIn" inputmode="' + im + '" maxlength="64" autocomplete="off" spellcheck="false" placeholder="扫码 / 搜索商品（品名、条码后几位、批次、库位）" value="' + esc(pq) + '"><button class="btn cam" id="ldCam">📷</button></div>' :
           '<div class="bcrow tscan"><input id="ldIn" inputmode="' + im + '" maxlength="64" autocomplete="off" spellcheck="false" placeholder="扫描条码，或点这里手输（后几位 / 品名）"><button class="btn cam" id="ldCam">📷 扫描</button></div>' +
-          (PK ? '' : '<div class="row tsub"><button class="tbtn" id="ldSearch">🔍 搜索 / 全部商品</button></div>')) +
-        (PK ? '<div class="pkfrow"><input id="pkF" class="pkf" autocomplete="off" spellcheck="false" placeholder="🔍 筛选：库位 / 批次号 / 品名 / 条码后几位" value="' + esc(pq) + '"><button class="tbtn" id="pkFx"' + (pq ? '' : ' hidden') + '>✕</button></div>' : '') +
-        '<div class="ldf">' + [['todo', '未点完 ' + (o.todo + o.prog + o.short)], ['over', '超出 ' + o.over], ['ok', '已点齐 ' + o.ok], ['all', '全部 ' + o.n]].map(function (f) {
+          '<div class="row tsub"><button class="tbtn" id="ldSearch">🔍 搜索 / 全部商品</button></div>')) +
+        (PK ? pkFilterHtml() : '') +
+        '<div class="ldf">' + (PK ? [['todo', '未拣完 ' + (o.todo + o.prog)], ['over', '超出 ' + o.over], ['ok', '已拣完 ' + (o.ok + o.short)], ['all', '全部 ' + o.n]] :
+          [['todo', '未点完 ' + (o.todo + o.prog + o.short)], ['over', '超出 ' + o.over], ['ok', '已点齐 ' + o.ok], ['all', '全部 ' + o.n]]).map(function (f) {
           return '<button data-f="' + f[0] + '" class="' + (filter === f[0] && !(PK && pq.trim()) ? 'on' : '') + '">' + f[1] + '</button>';
         }).join('') + '</div><div id="ldList">' + listHtml() + '</div>' +
         '<div id="dock" class="dock"><button class="btn ghost" id="ldHist" style="flex:0 0 36%">点货记录</button>' +
@@ -1870,8 +1886,33 @@
       bind();
     }
     /** 商品列表：装车按状态排；拣货保持后台的库位顺序（没有库位的在最后），页面上的筛选框即时过滤 */
+    /** 拣货列表的筛选区：库位（通道号）下拉 + 点批次 / 库位得到的筛选标签（和扫码 / 搜索入口分开） */
+    function pkFilterHtml() {
+      var nos = {}; s.items.forEach(function (it) { nos[it.loc ? it.loc.slice(0, 2) : '-'] = 1; });
+      var opts = Object.keys(nos).sort();
+      return '<div class="pkfil"><label class="pksel">库位 <select id="pkLoc"><option value="">全部</option>' + opts.map(function (k) {
+        return '<option value="' + k + '"' + (U.locF === k ? ' selected' : '') + '>' + (k === '-' ? '无库位' : k + ' 号') + '</option>';
+      }).join('') + '</select></label>' +
+        (U.chip ? '<span class="pkchip">' + (U.chip.t === 'b' ? '批次 ' : '库位 ') + esc(U.chip.v || '（空）') + ' <button id="pkChipX" aria-label="取消筛选">✕</button></span>' : '<span class="hint">点批次号或库位可以只看它</span>') + '</div>';
+    }
+    function pkBase() {
+      return s.items.filter(function (it) {
+        if (U.locF && (U.locF === '-' ? !!it.loc : (it.loc || '').slice(0, 2) !== U.locF)) return false;
+        if (U.chip && (U.chip.t === 'b' ? it.batch !== U.chip.v : it.loc !== U.chip.v)) return false;
+        return true;
+      });
+    }
     function listHtml() {
       var list;
+      if (PK) {
+        var base = pkBase();
+        if (pq.trim()) { var hit = find(pq); list = base.filter(function (it) { return hit.indexOf(it) >= 0; }); }
+        else list = base.filter(function (it) {
+          return filter === 'all' ? true : filter === 'todo' ? !(it._c >= it.req || it._so) : filter === 'over' ? it._c > it.req : it._c === it.req || (it._so && it._c < it.req);
+        });
+        return (pq.trim() ? '<p class="hint">搜索“' + esc(pq.trim()) + '”：' + list.length + ' 项（所有状态）</p>' : '') +
+          (list.length ? list.map(itemRow).join('') : '<div class="empty">' + (pq.trim() ? '没有找到。可以输入品名、条码后几位、批次号或库位（如 07-J）' : filter === 'todo' && base.length === s.items.length ? '全部拣完了 👍 可以点“完成拣货”复核' : '没有') + '</div>');
+      }
       if (PK && pq.trim()) list = find(pq);
       else {
         list = s.items.filter(function (it) {
@@ -1885,7 +1926,155 @@
       return (PK && pq.trim() ? '<p class="hint">筛选“' + esc(pq.trim()) + '”：' + list.length + ' 项（所有状态）</p>' : '') +
         (list.length ? list.map(itemRow).join('') : '<div class="empty">' + (PK && pq.trim() ? '没有找到。可以输入库位（如 07-J）、批次号、品名或条码后几位' : filter === 'todo' ? '全部点齐了 👍 可以点“完成点货”复核' : '没有') + '</div>');
     }
-    function bindRows() { Array.prototype.forEach.call(app.querySelectorAll('.ldi'), function (b) { b.onclick = function () { detail(byKey(b.dataset.k)); }; }); }
+    function bindRows() {
+      Array.prototype.forEach.call(app.querySelectorAll('.ldi'), function (b) {
+        b.onclick = function (e) {
+          var fb = PK && e.target.closest && e.target.closest('[data-fb]'), fl = PK && e.target.closest && e.target.closest('[data-fl]');
+          if (fb || fl) { U.chip = fb ? { t: 'b', v: fb.dataset.fb } : { t: 'l', v: fl.dataset.fl }; pq = U.pq = ''; var x = $('#ldIn'); if (x) x.value = ''; draw(); window.scrollTo(0, 0); return; }
+          if (PK) openIt(byKey(b.dataset.k), 'SEARCH', ''); else detail(byKey(b.dataset.k));
+        };
+      });
+    }
+    /** 打开商品：拣货 → SKU 整页；装车 → 原来的输入数量弹窗 */
+    function openIt(it, method, code) {
+      if (!it) return;
+      if (!PK) return qty(it, method, code);
+      closeModal();
+      pkEntry = { key: it.key, method: method || 'SEARCH', code: code || '' };
+      var url = ldHash(id) + '/i/' + s.items.indexOf(it);
+      if (IT != null) location.replace(url); else { U.y = window.scrollY || 0; location.hash = url; }
+    }
+    function pkDoneIt(it) { return it._c >= it.req || !!it._so; }
+    function pkNext(i) { var n = s.items.length; for (var k = 1; k < n; k++) { var it = s.items[(i + k) % n]; if (!pkDoneIt(it)) return it; } return null; }
+    /** 列表页：回车 / 扫描枪 → 条码对上就进 SKU 页；对不上的长数字当未知条码；文字就是搜索 */
+    function pkEnter(raw) {
+      raw = String(raw || '').trim(); var inp = $('#ldIn');
+      if (!raw) return;
+      var q = ldNorm(raw), exact = s.items.filter(function (it) { return ldCodes(it).indexOf(q) >= 0; });
+      if (exact.length || /^\d{8,}$/.test(q)) { if (inp) inp.value = ''; pq = U.pq = ''; }
+      if (exact.length === 1) return openIt(exact[0], 'BARCODE', raw);
+      if (exact.length > 1) { draw(); return pick(exact, '这个条码对应 ' + exact.length + ' 行（不同批次），请选择', '', raw); }
+      if (/^\d{8,}$/.test(q)) { draw(); return handle(raw, 'BARCODE'); }
+      pq = U.pq = raw;
+      var hit = find(raw), base = pkBase(), r = base.filter(function (it) { return hit.indexOf(it) >= 0; });
+      if (r.length === 1) return openIt(r[0], 'SEARCH', '');
+      draw();
+    }
+    // ---------- v1.5.1 拣货 SKU 页（整页）：大库位 / 批次、应拣 / 已拣 / 差异、页面内数量框、这个商品的记录 ----------
+    function histRows(it, ro) {
+      var list = Object.keys(s.txns).map(function (k) { return s.txns[k]; }).filter(function (t) { return t.key === it.key && ORIG.indexOf(t.method) >= 0 && !(PK && t.method === 'ADJUST' && false); }).sort(byTime);
+      var rows = list.map(function (t, i) {
+        var st = txState(t.id), adj = t.method === 'ADJUST', v = st.voided;
+        var head = adj ? '调整累计 ' + t.orig + ' → ' + t.to : ML[t.method] || t.method;
+        var sub = [hhmm(t.time), t.staff || ''];
+        if (t.code) sub.push('码 ' + t.code);
+        if (t.reason) sub.push('原因：' + t.reason);
+        st.edits.forEach(function (e) { sub.push('改 ' + e.orig + '→' + e.to + '（' + (e.staff || '') + ' ' + hhmm(e.time) + '）'); });
+        if (v) sub.push('已撤销（' + (v.staff || '') + ' ' + hhmm(v.time) + '）');
+        if (!t.synced) sub.push('<span class="err">未上传</span>');
+        var q = adj ? sg(Number(t.qty)) : (st.edits.length && !v ? '<s>' + t.qty + '</s> ' + st.eff : String(t.qty));
+        return '<div class="ldh' + (v ? ' gone' : '') + '"><span class="t"><b>#' + (i + 1) + ' ' + esc(head) + (st.edits.length && !v ? ' <span class="ldedited">已修改</span>' : '') + '</b><span>' + sub.map(function (x) { return /^<span/.test(x) ? x : esc(x); }).join(' · ') + '</span></span>' +
+          '<b class="q">' + q + '</b>' + (!ro && !v ? '<span class="ldacts">' + (adj ? '' : '<button class="tbtn" data-ed="' + esc(t.id) + '">修改</button>') + '<button class="tbtn" data-vd="' + esc(t.id) + '">撤销</button></span>' : '') + '</div>';
+      });
+      return { n: list.length, html: rows.join('') };
+    }
+    function bindHist(it, m) {
+      Array.prototype.forEach.call((m || app).querySelectorAll('[data-ed]'), function (b) { b.onclick = function () { editTxn(it, s.txns[b.dataset.ed]); }; });
+      Array.prototype.forEach.call((m || app).querySelectorAll('[data-vd]'), function (b) { b.onclick = function () { voidTxn(it, s.txns[b.dataset.vd]); }; });
+    }
+    function back(it) { if (PK && IT != null) { closeModal(); draw(); } else detail(it, 0); }
+    function drawItem(im) {
+      var it = s.items[IT];
+      if (!it) { location.replace(ldHash(id)); return; }
+      var ro = done(), rem = r3(it.req - it._c), d = r3(it._c - it.req), nx = pkNext(IT), H = histRows(it, ro);
+      var qk = $('#pkQty'), qv = qk ? qk.value : '';
+      setBar((it.loc || '无库位') + ' · 第 ' + (IT + 1) + ' / ' + s.items.length + ' 项', true);
+      app.innerHTML = ldW((ro ? '<div class="card lddone">✓ 任务已完成，不能再修改。需要更正请找办公室重新打开。</div>' :
+          '<div class="bcrow tscan"><input id="ldIn" inputmode="' + im + '" maxlength="64" autocomplete="off" spellcheck="false" placeholder="扫码 / 搜索商品"><button class="btn cam" id="ldCam">📷</button></div>') +
+        '<div class="card pkit' + (it.flag ? ' pkflag' : '') + '"><div class="pkit-h"><div class="pkloc big' + (it.loc ? '' : ' no') + '">' + (it.loc ? esc(it.loc) : '无库位') + '</div>' +
+        '<div class="pkit-b"><span>批次号</span><b>' + esc(it.batch || '（没有批次号）') + '</b></div></div>' +
+        '<div class="pkit-n">' + itemName(it) + '</div><div class="hint">' + esc(ldId(it, '条码 ')) + ' · ' + esc(it.uom || '') + (it.spec ? ' · ' + esc(it.spec) : '') + '</div>' +
+        (it.flag ? '<div class="pkwarn">⚠ ' + esc(it.flag) + '</div>' : '') +
+        '<div class="ldq-n"><div><span>应拣</span><b>' + it.req + '</b></div><div><span>已拣</span><b>' + it._c + '</b></div><div class="' + (d > 0 ? 'p' : d ? 'o' : 'g') + '"><span>差异</span><b>' + (d > 0 ? '+' : '') + d + '</b></div></div></div>' +
+        (ro ? '' : '<div class="card pkqbox"><label for="pkQty">本次数量 <b>' + esc(it.uom || '') + '</b></label><input id="pkQty" class="pkqin" inputmode="decimal" autocomplete="off" maxlength="9" value="' + esc(qv) + '">' +
+          '<div id="pkQm" class="ldq-m"></div><button class="btn save pksave" id="pkSave">＋ 确认这次数量</button></div>') +
+        (msg ? '<div class="tmsg ' + msg.cls + '">' + esc(msg.text) + '</div>' : '') +
+        (it._so && rem > 0 ? '<div class="card pkso"><span>已确认拣完（短少 ' + rem + '）</span>' + (ro ? '' : '<button class="tbtn" id="pkUnso">取消确认</button>') + '</div>' : '') +
+        '<div class="ldq-l"><b>拣货记录</b>（' + H.n + ' 笔，合计 ' + it._c + '）' + (ro ? '' : '<span class="hint"> 输错了可以修改或撤销，原记录会保留</span>') + '</div>' +
+        '<div id="dtL">' + (H.html || '<div class="empty">还没有拣货记录</div>') + '</div>' +
+        '<div id="dock" class="dock"><button class="btn ghost" id="pkBack" style="flex:0 0 26%">‹ 列表</button>' +
+        (!ro && rem > 0 && !it._so ? '<button class="btn ghost pkshort" id="pkShort">确认拣完<small>短少 ' + rem + '</small></button>' : '') +
+        (nx ? '<button class="btn save pknext" id="pkNext">下一个 →<small>' + esc(nx.loc || '无库位') + '</small></button>' : '<button class="btn save" id="pkRev">全部拣完 → 复核</button>') + '</div>');
+      bindHist(it);
+      var q = $('#pkQty'), out = $('#pkQm'), inp = $('#ldIn');
+      $('#pkBack').onclick = function () { pkLeave(function () { location.hash = ldHash(id); }); };
+      var nb = $('#pkNext'); if (nb) nb.onclick = function () { pkLeave(function () { openIt(nx, 'SEARCH', ''); }); };
+      var rb = $('#pkRev'); if (rb) rb.onclick = function () { pkLeave(function () { location.hash = ldHash(id) + '/review'; }); };
+      var sh = $('#pkShort'); if (sh) sh.onclick = function () {
+        pkLeave(function () {
+          confirmBox('确认“' + it.desc + '”拣完了？已拣 ' + it._c + ' / 应拣 ' + it.req + '，短少 ' + rem + '。之后还可以继续加数量，或取消确认。', '确认拣完', function () {
+            push(it, 'SHORT_OK', 0, {}, '已确认拣完（短少 ' + rem + '）').catch(function () { });
+          });
+        });
+      };
+      var un = $('#pkUnso'); if (un) un.onclick = function () {
+        confirmBox('取消“确认拣完”？这个商品会回到“未拣完”。', '取消确认', function () { push(it, 'VOID', 0, { rev: it._so, orig: 0, to: 0 }, '已取消确认拣完').catch(function () { }); });
+      };
+      if (q) {
+        q.oninput = function () {
+          var v = Number(q.value); out.className = 'ldq-m';
+          out.textContent = q.value && v > 0 && !/^\d{7,}$/.test(q.value) ? '保存后：' + r3(it._c + v) + ' / ' + it.req + (r3(it._c + v) > it.req ? '（超出 ' + r3(it._c + v - it.req) + '）' : r3(it._c + v) === it.req ? '（拣齐）' : '') : '';
+        };
+        q.onkeydown = function (e) { if (e.key === 'Enter' || e.keyCode === 13) { e.preventDefault(); pkSave(); } };
+        $('#pkSave').onclick = function () { pkSave(); };
+      }
+      if (inp) {
+        inp.addEventListener('keydown', function (e) { if (e.key === 'Enter' || e.keyCode === 13) { e.preventDefault(); var v = inp.value; inp.value = ''; pkItemScan(v); } });
+        var prev = 0, tm;
+        inp.addEventListener('input', function () {
+          var now = inp.value.length; clearTimeout(tm);
+          if (now - prev >= 6) tm = setTimeout(function () { if (document.activeElement === inp && inp.value) { var v = inp.value; inp.value = ''; pkItemScan(v); } }, 250);
+          prev = now;
+        });
+        if (keepVal) { inp.value = keepVal; prev = keepVal.length; keepVal = ''; }
+        $('#ldCam').onclick = function () { openCamera('ld', function (code) { pkItemScan(code); }, { label: '商品条码' }); };
+      }
+      if (keepFocus && inp && $('#modal').hidden) inp.focus();
+      else if (q && $('#modal').hidden) setTimeout(function () { var x = $('#pkQty'), y = $('#ldIn'); if (x && $('#modal').hidden && !(y && document.activeElement === y)) x.focus(); }, 30);
+    }
+    function pkSave() {
+      var it = s.items[IT], q = $('#pkQty'), out = $('#pkQm'); if (!it || !q) return false;
+      var raw = q.value.trim(), v = Number(raw);
+      if (/^\d{7,}$/.test(raw)) { q.value = ''; pkItemScan(raw); return false; }           // 扫描枪打进了数量框 → 当扫码
+      if (!(v > 0) || v > 100000) { out.className = 'ldq-m err'; out.textContent = '请输入这次拣到的数量（大于 0）'; errBeep(); q.focus(); return false; }
+      q.value = '';
+      var m = ent && ent.key === it.key ? ent : { method: 'SEARCH', code: '' };
+      add(it, v, m.method, m.code);
+      return true;
+    }
+    /** SKU 页离开前：数量框里有没保存的数字 → 保存 / 放弃 / 取消 */
+    function pkLeave(cb) {
+      var q = $('#pkQty'), v = q ? q.value.trim() : '';
+      if (!v) return cb();
+      modal('<div class="tmiss"><div class="tmiss-h"><span class="tmiss-ic">!</span><div><h3>本次数量 ' + esc(v) + ' 还没保存</h3></div></div>' +
+        '<div class="row"><button class="btn ghost" id="lvX">取消</button><button class="btn ghost" id="lvD">放弃</button><button class="btn save" id="lvS">保存</button></div></div>', function (m) {
+          $('#lvX', m).onclick = closeModal;
+          $('#lvD', m).onclick = function () { closeModal(); q.value = ''; cb(); };
+          $('#lvS', m).onclick = function () { closeModal(); if (pkSave()) cb(); };
+        });
+    }
+    /** SKU 页的扫码 / 搜索：同一商品 = 确认条码；别的商品 = 切换；文字 = 回列表搜索 */
+    function pkItemScan(raw) {
+      raw = String(raw || '').trim(); if (!raw || !s) return;
+      var it = s.items[IT], q = ldNorm(raw), exact = s.items.filter(function (x) { return ldCodes(x).indexOf(q) >= 0; });
+      if (exact.indexOf(it) >= 0) {
+        beep(); ent = { key: it.key, method: 'BARCODE', code: raw };
+        msg = { cls: 'good', text: '✓ 条码正确：' + it.desc + (exact.length > 1 ? '（这个条码还有其它批次）' : '') }; draw(); return;
+      }
+      if (exact.length) return pkLeave(function () { if (exact.length === 1) openIt(exact[0], 'BARCODE', raw); else pick(exact, '这个条码对应 ' + exact.length + ' 行（不同批次），请选择', '', raw); });
+      if (/^\d{8,}$/.test(q)) return handle(raw, 'BARCODE');
+      pkLeave(function () { U.pq = raw; U.chip = null; location.hash = ldHash(id); });
+    }
     function drawReview(head, o) {
       var bad = s.items.filter(function (it) { return it._c < it.req; }), over = s.items.filter(function (it) { return it._c > it.req; }), ok = s.items.filter(function (it) { return it._c === it.req; });
       var tr = function (it) {
@@ -1925,23 +2114,33 @@
     }
     function byKey(k) { return s.items.filter(function (it) { return it.key === k; })[0]; }
     function bind() {
-      Array.prototype.forEach.call(app.querySelectorAll('[data-f]'), function (b) { b.onclick = function () { filter = b.dataset.f; pq = ''; msg = null; draw(); }; });
+      Array.prototype.forEach.call(app.querySelectorAll('[data-f]'), function (b) { b.onclick = function () { filter = b.dataset.f; pq = ''; if (U) { U.filter = filter; U.pq = ''; var x = $('#ldIn'); if (x) x.value = ''; } msg = null; draw(); }; });
       bindRows();
-      var pf = $('#pkF');
-      if (pf) {
-        pf.oninput = function () {
-          pq = pf.value; stats(); $('#pkFx').hidden = !pq;
-          $('#ldList').innerHTML = ldW(listHtml()); bindRows();
-          Array.prototype.forEach.call(app.querySelectorAll('[data-f]'), function (b) { b.classList.toggle('on', !pq.trim() && b.dataset.f === filter); });
-        };
-        pf.onkeydown = function (e) { if (e.key === 'Enter') { e.preventDefault(); var r = pq.trim() ? find(pq) : []; if (r.length === 1 && !done()) qty(r[0], 'SEARCH', ''); } };
-        $('#pkFx').onclick = function () { pq = ''; draw(); };
-        if (pqFocus) { pf.focus(); try { pf.setSelectionRange(pf.value.length, pf.value.length); } catch (e) { } }
+      if (PK) {
+        var sl = $('#pkLoc'); if (sl) sl.onchange = function () { U.locF = sl.value; draw(); };
+        var cx = $('#pkChipX'); if (cx) cx.onclick = function () { U.chip = null; draw(); };
+        if (restoreY && s) { restoreY = false; var y = U.y; if (y) setTimeout(function () { window.scrollTo(0, y); }, 0); }
       }
       $('#ldHist').onclick = showHistory;
       $('#ldRev').onclick = function () { location.hash = ldHash(id) + '/review'; };
       var inp = $('#ldIn');
       if (!inp) return;
+      if (PK) {        // v1.5.1 拣货：一个入口 —— 扫码进商品，打字即时搜索
+        inp.addEventListener('keydown', function (e) { if (e.key === 'Enter' || e.keyCode === 13) { e.preventDefault(); pkEnter(inp.value); } });
+        var pv = 0, pt;
+        inp.addEventListener('input', function () {
+          var now = inp.value.length; clearTimeout(pt);
+          if (now - pv >= 6) pt = setTimeout(function () { if (document.activeElement === inp && inp.value) pkEnter(inp.value); }, 250);
+          pv = now;
+          pq = U.pq = inp.value; stats(); $('#ldList').innerHTML = ldW(listHtml()); bindRows();
+          Array.prototype.forEach.call(app.querySelectorAll('[data-f]'), function (b) { b.classList.toggle('on', !pq.trim() && b.dataset.f === filter); });
+        });
+        if (keepVal) { inp.value = keepVal; pv = keepVal.length; keepVal = ''; }
+        if (keepFocus && $('#modal').hidden) inp.focus();
+        setTimeout(function () { var x = $('#ldIn'); if (x && $('#modal').hidden && document.activeElement !== x && !/^(INPUT|SELECT)$/.test((document.activeElement || {}).tagName || '')) x.focus(); }, 30);
+        $('#ldCam').onclick = function () { openCamera('ld', function (code) { pkEnter(code); }, { label: '商品条码' }); };
+        return;
+      }
       inp.addEventListener('keydown', function (e) { if (e.key === 'Enter' || e.keyCode === 13) { e.preventDefault(); var v = inp.value; inp.value = ''; handle(v, 'BARCODE'); } });
       var prev = 0, t;
       inp.addEventListener('input', function () {      // PDA “直接填充”模式（没有回车）
@@ -1951,7 +2150,7 @@
       });
       if (keepVal) { inp.value = keepVal; prev = keepVal.length; keepVal = ''; }
       if (keepFocus && $('#modal').hidden) inp.focus();
-      if (!pqFocus) setTimeout(function () { var x = $('#ldIn'), f = $('#pkF'); if (x && $('#modal').hidden && !(f && document.activeElement === f)) x.focus(); }, 30);
+      setTimeout(function () { var x = $('#ldIn'); if (x && $('#modal').hidden) x.focus(); }, 30);
       $('#ldCam').onclick = function () { openCamera('ld', function (code) { handle(code, 'BARCODE'); }, { label: '商品条码' }); };
       var sb = $('#ldSearch'); if (sb) sb.onclick = function () { pick(s.items, '搜索商品', ''); };
     }
@@ -1959,10 +2158,10 @@
     function handle(raw, method) {
       raw = String(raw || '').trim(); if (!raw || !s || done()) return;
       var q = ldNorm(raw), exact = s.items.filter(function (it) { return ldCodes(it).indexOf(q) >= 0; });
-      if (exact.length === 1) return qty(exact[0], method, raw);
+      if (exact.length === 1) return openIt(exact[0], method, raw);
       if (exact.length > 1) return pick(exact, '这个条码对应 ' + exact.length + ' 行，请选择', '', raw);
       var found = find(raw);
-      if (found.length) { if (found.length === 1 && /^\d{4,}$/.test(q) && q.length < 8) return qty(found[0], 'SEARCH', raw); return pick(found, '找到 ' + found.length + ' 个可能的商品', raw); }
+      if (found.length) { if (found.length === 1 && /^\d{4,}$/.test(q) && q.length < 8) return openIt(found[0], 'SEARCH', raw); return pick(found, '找到 ' + found.length + ' 个可能的商品', raw); }
       errBeep();
       if (/^\d{8,}$/.test(q)) { LDQ.push({ op: 'txn', taskId: id, txn: { txnId: uuid(), taskId: id, method: 'UNKNOWN', code: raw, clientTime: new Date().toISOString() } }); ldSaveQ().then(ldFlush); }
       modal('<div class="tmiss"><div class="tmiss-h"><span class="tmiss-ic">?</span><div><h3>条码不在本次装车单里</h3><div class="hint">' + esc(raw) + '</div></div></div>' +
@@ -1994,9 +2193,9 @@
       modal('<h3 style="margin-top:0">' + esc(title) + '</h3><input id="pkQ" class="pkq" placeholder="品名 / Item Code / 条码后几位" value="' + esc(query || '') + '" autocomplete="off">' +
         '<div id="pkL" class="pkl">' + rows(list) + '</div><div class="row"><button class="btn ghost" id="pkX">关闭</button></div>', function (m) {
           var qEl = $('#pkQ', m), L = $('#pkL', m);
-          function bindRows() { Array.prototype.forEach.call(L.querySelectorAll('.ldp'), function (b) { b.onclick = function () { qty(byKey(b.dataset.k), scanned ? 'BARCODE' : 'SEARCH', scanned || ''); }; }); }
+          function bindRows() { Array.prototype.forEach.call(L.querySelectorAll('.ldp'), function (b) { b.onclick = function () { openIt(byKey(b.dataset.k), scanned ? 'BARCODE' : 'SEARCH', scanned || ''); }; }); }
           qEl.oninput = function () { L.innerHTML = rows(find(qEl.value)); bindRows(); };
-          qEl.onkeydown = function (e) { if (e.key === 'Enter') { e.preventDefault(); var r = find(qEl.value); if (r.length === 1) qty(r[0], 'SEARCH', ''); } };
+          qEl.onkeydown = function (e) { if (e.key === 'Enter') { e.preventDefault(); var r = find(qEl.value); if (r.length === 1) openIt(r[0], 'SEARCH', ''); } };
           $('#pkX', m).onclick = closeModal; bindRows();
           if (!scanned) setTimeout(function () { qEl.focus(); }, 50);
         });
@@ -2044,7 +2243,7 @@
       modal('<div class="tmiss"><div class="tmiss-h"><span class="tmiss-ic">!</span><div><h3>' + esc(t) + '</h3></div></div><p>' + esc(x) + '</p><div class="row"><button class="btn save" id="ibOk">知道了</button></div></div>', function (m) { $('#ibOk', m).onclick = closeModal; });
     }
     // ---------- v1.4.3 修正点货：修改 / 撤销 / 调整累计 —— 都是另加一笔，原记录永远保留 ----------
-    var ML = { BARCODE: '扫码', SEARCH: '搜索', MANUAL: '手输', REVERSAL: '撤销', VOID: '撤销', EDIT: '修改', ADJUST: '调整累计' };
+    var ML = { BARCODE: '扫码', SEARCH: '搜索', MANUAL: '手输', REVERSAL: '撤销', VOID: '撤销', EDIT: '修改', ADJUST: '调整累计', SHORT_OK: '确认拣完（短少）' };
     var ORIG = ['BARCODE', 'SEARCH', 'MANUAL', 'ADJUST'];
     function byTime(a, b) { return String(a.time).localeCompare(String(b.time)); }
     function sg(v) { return (v > 0 ? '+' : '') + v; }
@@ -2089,23 +2288,11 @@
     var dKey = null;      // 正在看的商品详情（后台资料更新时跟着刷新）
     function detail(it) {
       if (!it) return;
+      if (PK) return openIt(it, 'SEARCH', '');
       dKey = it.key;
       stats();
       var c = it._c, rem = r3(it.req - c), ro = done();
-      var list = Object.keys(s.txns).map(function (k) { return s.txns[k]; }).filter(function (t) { return t.key === it.key && ORIG.indexOf(t.method) >= 0; }).sort(byTime);
-      var rows = list.map(function (t, i) {
-        var st = txState(t.id), adj = t.method === 'ADJUST', v = st.voided;
-        var head = adj ? '调整累计 ' + t.orig + ' → ' + t.to : ML[t.method] || t.method;
-        var sub = [hhmm(t.time), t.staff || ''];
-        if (t.code) sub.push('码 ' + t.code);
-        if (t.reason) sub.push('原因：' + t.reason);
-        st.edits.forEach(function (e) { sub.push('改 ' + e.orig + '→' + e.to + '（' + (e.staff || '') + ' ' + hhmm(e.time) + '）'); });
-        if (v) sub.push('已撤销（' + (v.staff || '') + ' ' + hhmm(v.time) + '）');
-        if (!t.synced) sub.push('<span class="err">未上传</span>');
-        var q = adj ? sg(Number(t.qty)) : (st.edits.length && !v ? '<s>' + t.qty + '</s> ' + st.eff : String(t.qty));
-        return '<div class="ldh' + (v ? ' gone' : '') + '"><span class="t"><b>#' + (i + 1) + ' ' + esc(head) + '</b><span>' + sub.map(function (x, k) { return /^<span/.test(x) ? x : esc(x); }).join(' · ') + '</span></span>' +
-          '<b class="q">' + q + '</b>' + (!ro && !v ? '<span class="ldacts">' + (adj ? '' : '<button class="tbtn" data-ed="' + esc(t.id) + '">修改</button>') + '<button class="tbtn" data-vd="' + esc(t.id) + '">撤销</button></span>' : '') + '</div>';
-      });
+      var H = histRows(it, ro), list = { length: H.n }, rows = [H.html];
       modal('<div class="ldq"><div class="ldq-h">' + itemName(it) + '</div><div class="hint">' + pkTag(it) + esc(ldId(it, '条码 ')) + ' · ' + esc(it.uom || '') + (it.spec ? ' · ' + esc(it.spec) : '') + '</div>' +
         '<div class="ldq-n"><div><span>需求</span><b>' + it.req + '</b></div><div><span>已点</span><b>' + c + '</b></div><div class="' + (rem < 0 ? 'p' : rem ? 'o' : 'g') + '"><span>' + (rem < 0 ? '超出' : '还差') + '</span><b>' + Math.abs(rem) + '</b></div></div>' +
         '<div class="ldq-l"><b>点货记录</b>（' + list.length + ' 笔）' + (ro ? '' : '<span class="hint"> 点错了可以修改或撤销，原记录会保留</span>') + '</div>' +
@@ -2116,17 +2303,16 @@
           if (ro) return;
           $('#dtP', m).onclick = function () { qty(it, 'SEARCH', ''); };
           $('#dtA', m).onclick = function () { adjust(it); };
-          Array.prototype.forEach.call(m.querySelectorAll('[data-ed]'), function (b) { b.onclick = function () { editTxn(it, s.txns[b.dataset.ed]); }; });
-          Array.prototype.forEach.call(m.querySelectorAll('[data-vd]'), function (b) { b.onclick = function () { voidTxn(it, s.txns[b.dataset.vd]); }; });
+          bindHist(it, m);
         });
     }
     function editTxn(it, t) {
       var cur = txState(t.id).eff, total = ldCounts(s)[it.key] || 0;
       var onOk = function (v) {
-        if (v === cur) { detail(it); return; }
+        if (v === cur) { back(it); return; }
         if (v === 0) { voidTxn(it, t); return; }
         confirmBox('确定把这一笔的数量从 ' + cur + ' 改成 ' + v + '？（累计 ' + total + ' → ' + r3(total - cur + v) + '）', '确定修改', function () {
-          push(it, 'EDIT', r3(v - cur), { rev: t.id, orig: cur, to: v }, '已修改：' + cur + ' 改成 ' + v).then(function () { detail(it); }, function () { });
+          push(it, 'EDIT', r3(v - cur), { rev: t.id, orig: cur, to: v }, '已修改：' + cur + ' 改成 ' + v).then(function () { back(it); }, function () { });
         });
       };
       onOk.live = function (v, raw) { return raw !== '' && v >= 0 ? '修改后累计：' + r3(total - cur + v) + ' / ' + it.req + (v === 0 ? '（改成 0 = 撤销这一笔）' : '') : ''; };
@@ -2135,7 +2321,7 @@
     function voidTxn(it, t) {
       var cur = txState(t.id).eff, total = ldCounts(s)[it.key] || 0, adj = t.method === 'ADJUST';
       confirmBox('撤销这一笔' + (adj ? '调整' : '') + '（' + sg(adj ? Number(t.qty) : cur) + '）？撤销后不计入累计（' + total + ' → ' + r3(total - cur) + '），原记录保留。', '确定撤销', function () {
-        push(it, 'VOID', r3(-cur), { rev: t.id, orig: cur, to: 0 }, '已撤销一笔 ' + sg(cur)).then(function () { detail(it); }, function () { });
+        push(it, 'VOID', r3(-cur), { rev: t.id, orig: cur, to: 0 }, '已撤销一笔 ' + sg(cur)).then(function () { back(it); }, function () { });
       });
     }
     /** 调整累计：输入正确的总数，系统加一笔差额（记录 原累计 → 调整后） */
@@ -2143,9 +2329,9 @@
       var cur = ldCounts(s)[it.key] || 0;
       var onOk = function (v, m) {
         var reason = ($('#nbR', m) || {}).value || '';
-        if (v === cur) { detail(it); return; }
+        if (v === cur) { back(it); return; }
         confirmBox('确定把累计从 ' + cur + ' 改成 ' + v + '（' + sg(r3(v - cur)) + '）？', '确定调整', function () {
-          push(it, 'ADJUST', r3(v - cur), { orig: cur, to: v, reason: reason.trim().slice(0, 200) }, '已调整累计：' + cur + ' → ' + v).then(function () { detail(it); }, function () { });
+          push(it, 'ADJUST', r3(v - cur), { orig: cur, to: v, reason: reason.trim().slice(0, 200) }, '已调整累计：' + cur + ' → ' + v).then(function () { back(it); }, function () { });
         });
       };
       onOk.live = function (v, raw) { return raw !== '' && v >= 0 ? (v === cur ? '没有变化' : '差额 ' + sg(r3(v - cur)) + (v > it.req ? '（超出需求 ' + r3(v - it.req) + '）' : '')) : ''; };
@@ -2176,7 +2362,8 @@
       errBeep();
     };
     // 每 30 秒轻量检查一次这个任务的状态（被删除 / 被别人完成 / 被重新打开）
-    var stTimer = setInterval(function () {
+    if (ldStTimer) clearInterval(ldStTimer);
+    var stTimer = ldStTimer = setInterval(function () {
       if (location.hash.indexOf(ldHash(id)) !== 0) { clearInterval(stTimer); return; }
       if (document.hidden || !s || navigator.onLine === false) return;
       api({ action: 'ldStatus', taskIds: [id] }, true).then(function (d) {
@@ -2196,6 +2383,7 @@
     currentRedraw = ldRedraw;
     ldLoadQ().then(function () { return ldGet(id); }).then(function (local) {
       if (local) { s = local; draw(); }
+      if (local && IT != null && Date.now() - Date.parse(local.fetched || 0) < 120000) { ldFlush(); return; }   // SKU 页之间切换：刚下载过就不重复下载
       return api({ action: 'ldTask', taskId: id }, true).then(function (d) {
         if (d.error === 'NOTASK') return ldPurge(id);        // 任务已被删除 → 清掉本机资料和待上传
         if (d.error) { if (!s) { msg = { cls: 'bad', text: d.message }; draw(); } return; }
@@ -2208,7 +2396,7 @@
   }
   // 焦点不在输入框时，扫描头的按键送到点货扫描框
   document.addEventListener('keydown', function (e) {
-    if (!/^#\/(ld|pk)\/[^/]+$/.test(location.hash) || !$('#modal').hidden || camOpen) return;
+    if (!/^#\/(ld|pk)\/[^/]+(\/i\/\d+)?$/.test(location.hash) || !$('#modal').hidden || camOpen) return;
     var a = document.activeElement;
     if (a && (a.tagName === 'INPUT' || a.tagName === 'SELECT' || a.tagName === 'TEXTAREA')) return;
     if (e.key && e.key.length === 1 && !e.ctrlKey && !e.altKey && !e.metaKey) { var t = $('#ldIn'); if (t) t.focus(); }
