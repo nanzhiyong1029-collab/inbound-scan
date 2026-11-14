@@ -363,3 +363,7 @@ body.wide #app, body.wide .dock { max-width: 1200px; }
 .tbtn.pkshort { margin: 6px 0 0; width: 100%; padding: 10px; color: #b42318; }
 .modal .kp button, #modal .kp button { height: 46px; }
 #modal .pks-q { margin-top: 10px; }
+/* v1.5.3 拣货任务列表：离线标记 */
+.pkdl { display: inline-block; margin-left: 6px; font-size: 12px; font-weight: 700; color: #1a7f37; background: #e6f4ea; border-radius: 8px; padding: 1px 7px; vertical-align: middle; }
+.pkdl.no { color: #6b7280; background: #eef1f5; }
+.ldtask.nodl { opacity: .55; }
