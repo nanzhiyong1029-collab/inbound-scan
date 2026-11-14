@@ -1,9 +1,9 @@
-/* 入库条码采集 + 库位转移 PWA  v1.4.1
+/* 入库条码采集 + 库位转移 PWA  v1.4.2
  * 页面：#/ 任务列表 → #/job/<JobID> 商品清单 → #/p/<JobID>/<ProductID> 条码采集
  * 原则：只采集原始资料，不做任何核对。先存手机（离线队列），再上传云端。 */
 (function () {
   'use strict';
-  var VERSION = '1.4.1';
+  var VERSION = '1.4.2';
   var $ = function (s, el) { return (el || document).querySelector(s); };
   var app = $('#app');
 
@@ -861,7 +861,8 @@
       set: function (k, v) { return tx('kv', 'readwrite', function (s) { return s.put(v, k); }); },
       all: function () { return tx('tq', 'readonly', function (s) { return s.getAll(); }); },
       put: function (r) { return tx('tq', 'readwrite', function (s) { return s.put(r); }); },
-      del: function (id) { return tx('tq', 'readwrite', function (s) { return s.delete(id); }); }
+      del: function (id) { return tx('tq', 'readwrite', function (s) { return s.delete(id); }); },
+      kdel: function (k) { return tx('kv', 'readwrite', function (s) { return s.delete(k); }); }
     };
   })();
 
@@ -1571,6 +1572,11 @@
     setBar('装车点货', false);
     var cached = LS.get('ldTasks', null), note = '';
     function draw(list) {
+      if (list) {        // v1.4.2：待点货 → 点货中 → 已完成（同组保持后台顺序：新的在上）
+        var rank = { '待点货': 0, '点货中': 1, '已完成': 2 };
+        list = list.map(function (t, i) { var st = ldMem[t.id] && ldMem[t.id].localDone ? '已完成' : t.status; return { t: t, i: i, r: rank[st] == null ? 1 : rank[st] }; })
+          .sort(function (a, b) { return (a.r - b.r) || (a.i - b.i); }).map(function (x) { return x.t; });
+      }
       app.innerHTML = modTabs('ld') + '<div class="topline"><span>员工：' + esc(operator) + '</span><button class="link" id="lr">刷新</button></div>' +
         (note ? '<p class="hint">' + esc(note) + '</p>' : '') +
         (!list ? '<div class="empty">加载中…</div>' : list.length ? '' : '<div class="empty">没有装车任务。办公室上传 DO 后会出现在这里。</div>') +
@@ -1814,6 +1820,14 @@
     ldLoadQ().then(function () { return ldGet(id); }).then(function (local) {
       if (local) { s = local; draw(); }
       return api({ action: 'ldTask', taskId: id }, true).then(function (d) {
+        if (d.error === 'NOTASK') {        // v1.4.2：办公室已删除这个任务 → 清掉本机资料和待上传
+          delete ldMem[id]; LDQ = (LDQ || []).filter(function (o) { return o.taskId !== id; });
+          return Promise.all([IDB.kdel('ld:' + id).catch(function () { }), ldSaveQ()]).then(function () {
+            s = null; msg = { cls: 'bad', text: '这个装车任务已被办公室删除' }; draw();
+            toast('装车任务 ' + id + ' 已被办公室删除', 3000);
+            setTimeout(function () { if (location.hash.indexOf('#/ld/' + encodeURIComponent(id)) === 0) location.hash = '#/ld'; }, 1500);
+          });
+        }
         if (d.error) { if (!s) { msg = { cls: 'bad', text: d.message }; draw(); } return; }
         return ldGet(id).then(function (cur) { s = ldFromServer(d, cur); return ldPut(s); }).then(function () { if ($('#modal').hidden) draw(); ldFlush(); });
       }, function (e) {
