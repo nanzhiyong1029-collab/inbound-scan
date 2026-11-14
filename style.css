@@ -264,3 +264,10 @@ body.wide #app, body.wide .dock { max-width: 1200px; }
 .tkhead { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; } .tkhead .hint { flex: 1; }
 .tktab td { vertical-align: middle; } .tkdel { color: #b42318; border-color: #f3b4ae; }
 .ldgone { text-align: center; padding: 28px 16px; } .ldgone h2 { color: #b42318; }
+.tqty { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-top: 1px solid var(--line); }
+.tqty label { flex: 1; } .tqty small { color: var(--mute); font-weight: 400; }
+.tqtyin { width: 120px; font: 700 22px/1.2 inherit; text-align: center; padding: 8px; border: 2px solid var(--line); border-radius: 10px; }
+.tqtyin.bad { border-color: #b42318; background: #fff4f2; }
+.trow.tedit { cursor: pointer; } .tedit-l { color: #1f3864; font-weight: 600; margin-left: 6px; }
+.tef { display: block; margin: 8px 0; } .tef span { display: block; font-size: 14px; color: var(--mute); margin-bottom: 3px; }
+.tef input { width: 100%; box-sizing: border-box; font: 600 18px/1.2 inherit; padding: 10px; border: 2px solid var(--line); border-radius: 10px; }
