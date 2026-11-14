@@ -271,3 +271,13 @@ body.wide #app, body.wide .dock { max-width: 1200px; }
 .trow.tedit { cursor: pointer; } .tedit-l { color: #1f3864; font-weight: 600; margin-left: 6px; }
 .tef { display: block; margin: 8px 0; } .tef span { display: block; font-size: 14px; color: var(--mute); margin-bottom: 3px; }
 .tef input { width: 100%; box-sizing: border-box; font: 600 18px/1.2 inherit; padding: 10px; border: 2px solid var(--line); border-radius: 10px; }
+.trec-top { display: flex; justify-content: space-between; align-items: baseline; }
+.tchips { display: flex; gap: 6px; margin: 8px 0 4px; overflow-x: auto; }
+.tchip { flex: 0 0 auto; padding: 6px 12px; border-radius: 16px; border: 1px solid var(--line); background: #fff; font: 600 14px/1.2 inherit; color: inherit; }
+.tchip.on { background: #1f3864; border-color: #1f3864; color: #fff; }
+.trec { padding: 10px 0; border-top: 1px solid var(--line); font-size: 14px; }
+.trec-h { display: flex; gap: 8px; align-items: center; } .trec-h .tedit-l, .trec-h .hint:last-child { margin-left: auto; }
+.trec-loc { display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline; margin-top: 4px; font: 800 19px/1.2 inherit; letter-spacing: .5px; }
+.trec-loc i { font-style: normal; color: var(--mute); font-weight: 400; } .trec-q { margin-left: auto; font-size: 16px; color: #1f3864; }
+.trec-it { margin-top: 2px; word-break: break-all; } .trec-n { margin-top: 2px; } .trec-n.bad { color: #b42318; font-weight: 600; }
+.tmore { width: 100%; margin-top: 8px; }
