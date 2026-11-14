@@ -296,6 +296,30 @@ body.wide #app, body.wide .dock { max-width: 1200px; }
 .ldi.pkflag.s2 { background: #eef8d8; }
 .pkb { font-style: normal; font-weight: 800; background: #1f3864; color: #fff; border-radius: 6px; padding: 0 6px; }
 .pkb.no { background: #f59e0b; color: #3b2300; }
-.pkfrow { display: flex; gap: 6px; margin: 8px 0 0; }
-.pkf { flex: 1; min-width: 0; font-size: 17px; padding: 11px 12px; border: 2px solid #1f3864; border-radius: 10px; }
 .uptab tr.pkflagrow td { background: #fff7c2; }
+
+/* v1.5.1 拣货：筛选区 + SKU 整页 */
+.pkfil { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 8px 0 0; }
+.pksel { display: flex; align-items: center; gap: 6px; font-weight: 600; }
+.pksel select { font-size: 16px; padding: 8px 10px; border: 2px solid var(--line); border-radius: 10px; background: #fff; min-width: 96px; }
+.pkchip { display: inline-flex; align-items: center; gap: 6px; background: #1f3864; color: #fff; border-radius: 999px; padding: 5px 6px 5px 12px; font-weight: 700; font-size: 14px; max-width: 100%; word-break: break-all; }
+.pkchip button { border: 0; background: rgba(255,255,255,.2); color: #fff; border-radius: 50%; width: 28px; height: 28px; font-size: 15px; flex: 0 0 auto; }
+.pkbatch[data-fb], .pkloc[data-fl] { cursor: pointer; }
+.pkit-h { display: flex; gap: 12px; align-items: stretch; }
+.pkloc.big { min-width: 120px; font-size: 30px; padding: 10px 8px; }
+.pkloc.big.no { font-size: 20px; }
+.pkit-b { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: center; }
+.pkit-b span { font-size: 13px; color: var(--mute); font-weight: 600; }
+.pkit-b b { font: 800 20px/1.2 ui-monospace, Menlo, Consolas, monospace; color: #1f3864; word-break: break-all; }
+.pkit-n { font-size: 19px; font-weight: 700; margin: 10px 0 2px; }
+.pkit .pkwarn { color: #92400e; font-weight: 600; margin-top: 4px; }
+.card.pkit.pkflag { background: #fff7c2; border-color: #f2d04b; }
+.pkqbox label { display: block; font-size: 16px; font-weight: 600; margin-bottom: 6px; }
+.pkqin { width: 100%; box-sizing: border-box; font-size: 34px; font-weight: 800; text-align: center; padding: 10px; border: 3px solid #1f3864; border-radius: 12px; }
+.pksave { width: 100%; margin-top: 10px; font-size: 20px; padding: 16px; }
+.pkso { display: flex; align-items: center; justify-content: space-between; gap: 8px; background: #fde8e7; border-color: #f5b5ae; color: #b42318; font-weight: 700; }
+.pkshort { line-height: 1.15; }
+.pkshort small { display: block; font-size: 12px; font-weight: 600; color: #b42318; }
+.ldedited { font-size: 12px; font-weight: 700; color: #b45309; background: #fff1e0; border-radius: 6px; padding: 0 5px; }
+.pknext { line-height: 1.15; }
+.pknext small { display: block; font-size: 13px; font-weight: 600; opacity: .9; }
