@@ -1,9 +1,9 @@
-/* 入库条码采集 + 库位转移 PWA  v1.4.0
+/* 入库条码采集 + 库位转移 PWA  v1.4.1
  * 页面：#/ 任务列表 → #/job/<JobID> 商品清单 → #/p/<JobID>/<ProductID> 条码采集
  * 原则：只采集原始资料，不做任何核对。先存手机（离线队列），再上传云端。 */
 (function () {
   'use strict';
-  var VERSION = '1.4.0';
+  var VERSION = '1.4.1';
   var $ = function (s, el) { return (el || document).querySelector(s); };
   var app = $('#app');
 
@@ -113,10 +113,12 @@
       setOnline(true);
       if (!d.ok) {
         var e = new Error(d.message || d.error || '服务器错误'); e.server = true; e.code = d.error;
+        if (d.mods) updateMods(d.mods);
         if (d.error === 'DEVICE') authLost('device', e.message);
         else if (d.error === 'SESSION') authLost('session', e.message);
         throw e;
       }
+      if (d.mods) updateMods(d.mods);
       return d;
     }, function (err) {
       clearTimeout(timer);
@@ -126,6 +128,31 @@
   }
 
   function setSession(s) { sess = s; operator = s ? s.name : ''; if (s) LS.set('sess', s); else LS.del('sess'); }
+  // ---------- 手输（v1.4.1）：PDA 模式下扫描框平时不弹键盘；用手点一下输入框就弹出键盘，离开后恢复 ----------
+  function kbdTap(e) {
+    var t = e.target;
+    if (!t || t.tagName !== 'INPUT' || t.getAttribute('inputmode') !== 'none') return;
+    t.setAttribute('inputmode', 'text'); t.setAttribute('data-im', 'none');
+    if (document.activeElement === t) { t.blur(); setTimeout(function () { t.focus(); }, 30); }   // 已经有光标：重新聚焦才会弹键盘
+  }
+  document.addEventListener('pointerdown', kbdTap, true);
+  document.addEventListener('touchstart', kbdTap, { capture: true, passive: true });
+  document.addEventListener('focusout', function (e) {
+    var t = e.target;
+    if (!t || !t.getAttribute || t.getAttribute('data-im') !== 'none') return;
+    setTimeout(function () { if (document.activeElement !== t) { t.setAttribute('inputmode', 'none'); t.removeAttribute('data-im'); } }, 150);
+  }, true);
+
+  // ---------- 员工可用模块（v1.4.1，办公室在【员工 / PIN 管理】打勾） ----------
+  var ALL_MODS = [['in', '#/'], ['t', '#/t'], ['ld', '#/ld']];
+  function myMods() { return sess && Array.isArray(sess.mods) ? sess.mods : ['in', 't', 'ld']; }
+  function hashMod(h) { h = h || '#/'; return h === '#/t' ? 't' : /^#\/ld(\/|$)/.test(h) ? 'ld' : 'in'; }
+  function modHome() { var m = myMods(); return (ALL_MODS.filter(function (x) { return m.indexOf(x[0]) >= 0; })[0] || [])[1] || ''; }
+  function updateMods(mods) {
+    if (!sess || !Array.isArray(mods) || mods.join() === myMods().join()) return;
+    sess.mods = mods; LS.set('sess', sess);
+    if (myMods().indexOf(hashMod(location.hash)) < 0 && !(leaveGuard && leaveGuard())) setTimeout(route, 0);
+  }
   /** 后台说设备被撤销 / 登录失效：清掉凭据，回到设置或登录页（未上传的资料保留在本机） */
   function authLost(kind, msg) {
     if (kind === 'device') { cfg = null; LS.del('cfg'); authMsg = msg + '（未上传的资料仍保存在本机）'; }
@@ -353,6 +380,16 @@
     if (!sess) return viewLogin();
     var h = location.hash || '#/';
     var m;
+    if (myMods().indexOf(hashMod(h)) < 0) {          // 没有这个模块的权限 → 去第一个能用的模块
+      var home = modHome();
+      if (home) { location.hash = home; return; }
+      else {
+        setBar('没有可用的模块', false);
+        app.innerHTML = '<div class="empty">员工 ' + esc(operator) + ' 目前没有可用的模块。<br>请找办公室在【员工 / PIN 管理】里打勾开通。<br><br><button class="btn ghost" id="noModOut">退出登录</button></div>';
+        $('#noModOut').onclick = function () { api({ action: 'logout' }).catch(function () { }); setSession(null); route(); };
+        return;
+      }
+    }
     if ((m = h.match(/^#\/job\/([^/]+)$/))) return viewProducts(decodeURIComponent(m[1]));
     if ((m = h.match(/^#\/p\/([^/]+)\/([^/]+)$/))) return viewCollect(decodeURIComponent(m[1]), decodeURIComponent(m[2]));
     if (h === '#/t') return viewTransfer();
@@ -404,7 +441,7 @@
         $('#lgo').disabled = true;
         api({ action: 'login', name: chosen.name, pin: pin }).then(function (d) {
           if (!d.login) { $('#lmsg').innerHTML = '<span class="err">' + esc(d.message) + '</span>'; $('#lgo').disabled = false; $('#pin').value = ''; return; }
-          authMsg = ''; setSession({ t: d.session, name: d.name, dev: d.device });
+          authMsg = ''; setSession({ t: d.session, name: d.name, dev: d.device, mods: Array.isArray(d.mods) ? d.mods : null });
           location.hash = '#/'; route(); flush();
         }, function (e) {
           if (e.code === 'DEVICE') return;
@@ -568,8 +605,8 @@
       (p.op ? '<div class="hint" style="margin-top:4px">上次：' + esc(p.op) + ' ' + esc(p.time) + '</div>' : '') + '</div>' +
       BC.map(function (b, i) {
         return '<div class="bc" id="w_' + b[0] + '"><label><span>' + (i + 1) + '. ' + b[2] + ' <small id="t_' + b[0] + '">' + b[1] + '</small></span>' +
-          '<span class="tools"><button class="tbtn" data-kbd="' + b[0] + '">⌨ 手输</button><button class="tbtn" data-clr="' + b[0] + '">✕ 清除</button></span></label>' +
-          '<div class="bcrow"><input id="f_' + b[0] + '" data-k="' + b[0] + '" inputmode="' + im + '" maxlength="64" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="next" value="' + esc(orig[b[0]]) + '" placeholder="扫描或输入">' +
+          '<span class="tools"><button class="tbtn" data-clr="' + b[0] + '">✕ 清除</button></span></label>' +
+          '<div class="bcrow"><input id="f_' + b[0] + '" data-k="' + b[0] + '" inputmode="' + im + '" maxlength="64" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="next" value="' + esc(orig[b[0]]) + '" placeholder="扫描，或点这里手输">' +
           '<button class="btn cam" data-cam="' + b[0] + '">📷 扫描</button></div></div>';
       }).join('') +
       '<div class="bc" id="w_qty"><label><span>4. 实收数量 <small>按供应商单位（' + esc(unit) + '）清点' + (p.expQty ? ' · 应收 ' + esc(p.expQty) : '') + '</small></span></label>' +
@@ -747,7 +784,6 @@
       var t = e.target;
       if (t.dataset.step) { var n = Number(F.qty.value) || 0; n = Math.max(0, n + Number(t.dataset.step)); F.qty.value = String(n); onEdit(); return; }
       if (t.dataset.clr) { F[t.dataset.clr].value = ''; scanTimes[t.dataset.clr] = new Date().toISOString(); $('#t_' + t.dataset.clr).textContent = '已清除'; onEdit(); F[t.dataset.clr].focus(); }
-      if (t.dataset.kbd) { var f = F[t.dataset.kbd]; f.setAttribute('inputmode', 'text'); f.blur(); setTimeout(function () { f.focus(); }, 30); }
       if (t.dataset.cam) openCamera(t.dataset.cam, function (code) {
         var k = t.dataset.cam; F[k].value = code; scanTimes[k] = new Date().toISOString();
         $('#t_' + k).textContent = '📷 扫描 ' + hhmm(scanTimes[k]); onEdit();
@@ -782,9 +818,9 @@
   // 商品条码主档下载到本机（IndexedDB），离线也能识别；提交先存本机队列（含照片），联网自动上传
   // =====================================================================
   function modTabs(active) {
-    return '<div class="mods"><button class="mod' + (active === 'in' ? ' on' : '') + '" data-mod="in">📦 入库</button>' +
-      '<button class="mod' + (active === 't' ? ' on' : '') + '" data-mod="t">🔁 库位转移</button>' +
-      '<button class="mod' + (active === 'ld' ? ' on' : '') + '" data-mod="ld">🚚 装车点货</button></div>';
+    var my = myMods(), tabs = [['in', '📦 入库'], ['t', '🔁 库位转移'], ['ld', '🚚 装车点货']].filter(function (x) { return my.indexOf(x[0]) >= 0; });
+    if (tabs.length < 2) return '';                 // 只有一个模块就不显示切换标签
+    return '<div class="mods">' + tabs.map(function (x) { return '<button class="mod' + (active === x[0] ? ' on' : '') + '" data-mod="' + x[0] + '">' + x[1] + '</button>'; }).join('') + '</div>';
   }
   function bindModTabs() {
     Array.prototype.forEach.call(app.querySelectorAll('[data-mod]'), function (b) {
@@ -1036,9 +1072,9 @@
         '<div class="card tcard">' + rows + '</div>' +
         (msg.text ? '<div class="tmsg ' + msg.cls + '">' + esc(msg.text) + '</div>' : '') +
         (scanning ? '<div class="bcrow tscan"><input id="tIn" data-step="' + cur + '" inputmode="' + im + '" maxlength="64" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="' +
-          esc(STEPS.filter(function (s) { return s[0] === cur; })[0][2]) + '"><button class="btn cam" id="tCam">📷 扫描</button></div>' +
-          '<div class="row tsub"><button class="tbtn" id="tKbd">⌨ 手输</button>' + (cur === 'src' && !st.src ? '<button class="tbtn" id="tSkipSrc">跳过来源库位 →</button>' : '') +
-          (st.edit ? '<button class="tbtn" id="tCancelEdit">取消修改</button>' : '') + '</div>' : '') +
+          esc(STEPS.filter(function (s) { return s[0] === cur; })[0][2]) + '，或点这里手输"><button class="btn cam" id="tCam">📷 扫描</button></div>' +
+          ((cur === 'src' && !st.src) || st.edit ? '<div class="row tsub">' + (cur === 'src' && !st.src ? '<button class="tbtn" id="tSkipSrc">跳过来源库位 →</button>' : '') +
+          (st.edit ? '<button class="tbtn" id="tCancelEdit">取消修改</button>' : '') + '</div>' : '') : '') +
         // 拍照按钮（v1.3.8）：用真正的按钮 + 不用 display:none 的文件框（部分安卓浏览器点 label 打不开隐藏的文件框）；另给“从相册选”备用
         (cur === 'photo' ? '<div class="tphotos"><button class="btn save tphotobtn" id="tPhotoBtn">📸 拍照</button><button class="btn ghost tphotoalt" id="tPhotoAltBtn">🖼 从相册选</button></div>' +
           '<input id="tPhoto" class="vh" type="file" accept="image/*" capture="environment" tabindex="-1" aria-hidden="true">' +
@@ -1067,7 +1103,6 @@
           var k = step();
           openCamera(k, function (code) { accept(code); }, { label: STEPS.filter(function (s) { return s[0] === k; })[0][1], qr: k !== 'bc' });
         };
-        $('#tKbd').onclick = function () { inp.setAttribute('inputmode', 'text'); inp.blur(); setTimeout(function () { inp.focus(); }, 30); };
         var ce = $('#tCancelEdit'); if (ce) ce.onclick = function () { st.edit = ''; msg = { cls: '', text: '' }; draw(); };
         var sk = $('#tSkipSrc'); if (sk) sk.onclick = function () { st.srcSkip = true; st.src = ''; st.edit = ''; msg = { cls: '', text: '来源库位不填，直接扫商品箱码' }; draw(); };
       }
@@ -1595,8 +1630,8 @@
       var im = prefs.pda ? 'none' : 'text';
       app.innerHTML = head + (msg ? '<div class="tmsg ' + msg.cls + '">' + esc(msg.text) + '</div>' : '') +
         (done() ? '<div class="card lddone">✓ 已完成' + (s.task.submittedBy ? '（' + esc(s.task.submittedBy) + ' ' + esc(s.task.submitted) + '）' : s.localDone ? '（待上传）' : '') + '，不能再修改。需要更正请找办公室重新打开。</div>' :
-          '<div class="bcrow tscan"><input id="ldIn" inputmode="' + im + '" maxlength="64" autocomplete="off" spellcheck="false" placeholder="扫描条码，或输入条码后几位 / 品名"><button class="btn cam" id="ldCam">📷 扫描</button></div>' +
-          '<div class="row tsub"><button class="tbtn" id="ldKbd">⌨ 手输</button><button class="tbtn" id="ldSearch">🔍 搜索 / 全部商品</button></div>') +
+          '<div class="bcrow tscan"><input id="ldIn" inputmode="' + im + '" maxlength="64" autocomplete="off" spellcheck="false" placeholder="扫描条码，或点这里手输（后几位 / 品名）"><button class="btn cam" id="ldCam">📷 扫描</button></div>' +
+          '<div class="row tsub"><button class="tbtn" id="ldSearch">🔍 搜索 / 全部商品</button></div>') +
         '<div class="ldf">' + [['todo', '未点完 ' + (o.todo + o.prog + o.short)], ['over', '超出 ' + o.over], ['ok', '已点齐 ' + o.ok], ['all', '全部 ' + o.n]].map(function (f) {
           return '<button data-f="' + f[0] + '" class="' + (filter === f[0] ? 'on' : '') + '">' + f[1] + '</button>';
         }).join('') + '</div>' +
@@ -1659,7 +1694,6 @@
       });
       setTimeout(function () { var x = $('#ldIn'); if (x && $('#modal').hidden) x.focus(); }, 30);
       $('#ldCam').onclick = function () { openCamera('ld', function (code) { handle(code, 'BARCODE'); }, { label: '商品条码' }); };
-      $('#ldKbd').onclick = function () { inp.setAttribute('inputmode', 'text'); inp.blur(); setTimeout(function () { inp.focus(); }, 30); };
       $('#ldSearch').onclick = function () { pick(s.items, '搜索商品', ''); };
     }
     // 扫码 / 输入：先精确比对条码和 Item Code；没有就按“后几位”或品名找
