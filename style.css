@@ -368,13 +368,17 @@ body.wide #app, body.wide .dock { max-width: 1200px; }
 .pkdl.no { color: #6b7280; background: #eef1f5; }
 .ldtask.nodl { opacity: .55; }
 /* v1.6 拣货：实际取货库位 */
-.pks-al { display: flex; align-items: center; gap: 8px; height: 30px; margin-top: 6px; padding: 0 4px 0 8px; border-radius: 8px; background: #eef1f5; font-size: 13px; white-space: nowrap; overflow: hidden; cursor: pointer; }
-.pks-al span { color: var(--mute); font-weight: 600; }
-.pks-al b { font-size: 16px; font-weight: 800; color: #1f3864; }
-.pks-al i { flex: 1; min-width: 0; font-style: normal; color: var(--mute); overflow: hidden; text-overflow: ellipsis; }
-.pks-al.ok { background: #e6f4ea; } .pks-al.ok i { color: #1a7f37; font-weight: 700; }
-.pks-al.diff { background: #fde8e7; } .pks-al.diff i { color: #b42318; font-weight: 700; }
-.pks-al button { flex: 0 0 26px; height: 26px; border: 0; border-radius: 6px; background: rgba(0,0,0,.08); font-size: 13px; }
+.pks-al { display: block; width: 100%; height: 40px; margin-top: 4px; padding: 3px 8px; border: 1.5px dashed #9aa6b8; border-radius: 8px; background: #f6f8fb; font: inherit; color: inherit; text-align: left; cursor: pointer; overflow: hidden; }
+.pks-al .al-t { display: flex; justify-content: space-between; font-size: 11px; line-height: 14px; font-weight: 700; color: #1f3864; white-space: nowrap; }
+.pks-al .al-t u { text-decoration: none; color: #1f6feb; font-weight: 700; }
+.pks-al .al-v { display: flex; align-items: baseline; gap: 8px; height: 18px; line-height: 18px; white-space: nowrap; overflow: hidden; }
+.pks-al .al-v em { font-style: normal; font-size: 13px; color: var(--mute); overflow: hidden; text-overflow: ellipsis; }
+.pks-al .al-v b { font-size: 16px; font-weight: 800; }
+.pks-al .al-v i { flex: 1; min-width: 0; font-style: normal; font-size: 12px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; }
+.pks-al.ok { border: 1.5px solid #1a7f37; background: #e6f4ea; } .pks-al.ok .al-v b, .pks-al.ok .al-v i { color: #1a7f37; }
+.pks-al.diff { border: 1.5px solid #b42318; background: #fde8e7; } .pks-al.diff .al-v b { color: #1f3864; } .pks-al.diff .al-v i { color: #b42318; }
+.pkshort2 { display: block; width: 100%; margin: 8px 0 0; padding: 8px 10px; border: 1.5px solid #d4471f; border-radius: 10px; background: #fff3ef; color: #c2410c; font: 700 15px/1.2 inherit; cursor: pointer; }
+.pkshort2 small { display: block; margin-top: 2px; font-size: 12px; font-weight: 600; color: #b42318; }
 /* v1.6：加了“实际库位”一行，压缩间距让一屏仍放得下（360×640） */
 .pks { gap: 5px; }
 .pks-top { height: 42px; }
@@ -384,7 +388,6 @@ body.wide #app, body.wide .dock { max-width: 1200px; }
 .pks-st b { font-size: 20px; }
 .kp { gap: 5px; }
 .kp button { height: clamp(36px, 5.9vh, 58px); }
-.pks-al { margin-top: 5px; }
 /* v1.6 缅甸语（拣货）：随 APP 带 Unicode 缅甸文字体（Noto Sans Myanmar，离线由 Service Worker 缓存），不依赖 PDA 系统字体（避免 Zawgyi 乱码） */
 @font-face { font-family: 'Noto Sans Myanmar'; font-weight: 400; font-display: swap; src: url('https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-myanmar@5.2.5/files/noto-sans-myanmar-myanmar-400-normal.woff2') format('woff2'); unicode-range: U+1000-109F, U+A9E0-A9FF, U+AA60-AA7F, U+200C-200D, U+25CC; }
 @font-face { font-family: 'Noto Sans Myanmar'; font-weight: 700; font-display: swap; src: url('https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-myanmar@5.2.5/files/noto-sans-myanmar-myanmar-700-normal.woff2') format('woff2'); unicode-range: U+1000-109F, U+A9E0-A9FF, U+AA60-AA7F, U+200C-200D, U+25CC; }
