@@ -3,7 +3,7 @@
  * 原则：只采集原始资料，不做任何核对。先存手机（离线队列），再上传云端。 */
 (function () {
   'use strict';
-  var VERSION = '1.6.1';
+  var VERSION = '1.6.2';
   var $ = function (s, el) { return (el || document).querySelector(s); };
   var app = $('#app');
 
@@ -18,6 +18,46 @@
   var cfg = LS.get('cfg', null);               // {u: WebApp URL, d: 设备凭据}
   var authMsg = '';
   if (cfg && !(cfg.u && TOKEN_RE.test(cfg.d || ''))) { cfg = null; LS.del('cfg'); authMsg = '系统已升级：请找办公室要本设备的新设置链接（旧链接已停用）。未上传的资料仍保存在本机。'; }
+  // v1.6.2 设备钥匙存 3 份（localStorage + IndexedDB + Cache Storage），任一份还在就自动补回其他两份；
+  //        只有后台确认“已撤销”才删除。浏览器“清除网站数据”会把 3 份一起删掉，这种情况只能重新发链接
+  var KEEP = 'inbound-scan-keep', KEEP_URL = './__device-key__';
+  var cfgHold = false;                          // 后台暂时不认这把钥匙（但没确认撤销）：保留钥匙，显示设置页 + 重试
+  var keepIdb = function (mode, fn) {
+    return new Promise(function (res, rej) {
+      if (!window.indexedDB) return rej(new Error('no idb'));
+      var r = indexedDB.open(KEEP, 1);
+      r.onupgradeneeded = function () { r.result.createObjectStore('kv'); };
+      r.onerror = function () { rej(r.error); };
+      r.onsuccess = function () {
+        try { var t = r.result.transaction('kv', mode), st = t.objectStore('kv'), q = fn(st); t.oncomplete = function () { res(q && q.result); r.result.close(); }; t.onerror = function () { rej(t.error); }; }
+        catch (e) { rej(e); }
+      };
+    });
+  };
+  var CFGK = {
+    save: function (c) {
+      LS.set('cfg', c);
+      var j = JSON.stringify(c);
+      keepIdb('readwrite', function (st) { return st.put(j, 'cfg'); }).catch(function () { });
+      try { if (window.caches) caches.open(KEEP).then(function (k) { return k.put(KEEP_URL, new Response(j, { headers: { 'Content-Type': 'application/json' } })); }).catch(function () { }); } catch (e) { }
+    },
+    clear: function () {
+      LS.del('cfg');
+      keepIdb('readwrite', function (st) { return st.delete('cfg'); }).catch(function () { });
+      try { if (window.caches) caches.open(KEEP).then(function (k) { return k.delete(KEEP_URL); }).catch(function () { }); } catch (e) { }
+    },
+    /** 读另外两份：IndexedDB 优先，再看 Cache Storage */
+    restore: function () {
+      var ok = function (j) { try { var c = typeof j === 'string' ? JSON.parse(j) : j; return c && c.u && TOKEN_RE.test(c.d || '') ? c : null; } catch (e) { return null; } };
+      var fromCache = function () {
+        try { if (!window.caches) return Promise.resolve(null); } catch (e) { return Promise.resolve(null); }
+        return caches.open(KEEP).then(function (k) { return k.match(KEEP_URL); }).then(function (r) { return r ? r.text() : null; }).then(ok, function () { return null; });
+      };
+      var t = new Promise(function (res) { setTimeout(function () { res(null); }, 1500); });
+      return Promise.race([keepIdb('readonly', function (st) { return st.get('cfg'); }).then(ok, function () { return null; }).then(function (c) { return c || fromCache(); }), t]);
+    }
+  };
+  if (cfg) CFGK.save(cfg);                      // 每次打开都把 3 份补齐
   var sess = LS.get('sess', null);             // {t: 会话, name: 员工, dev: 设备编号}
   if (sess && !(sess.t && sess.name)) sess = null;
   var operator = sess ? sess.name : '';
@@ -90,7 +130,8 @@
       var json = decodeURIComponent(Array.prototype.map.call(atob(b), function (c) { return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2); }).join(''));
       var o = JSON.parse(json);
       if (o.u && TOKEN_RE.test(o.d || '')) {
-        cfg = { u: o.u, d: o.d, r: o.r === 'up' || o.r === 'rc' ? o.r : '' }; LS.set('cfg', cfg); authMsg = '';
+        cfg = { u: o.u, d: o.d, r: o.r === 'up' || o.r === 'rc' ? o.r : '' }; CFGK.save(cfg); authMsg = ''; cfgHold = false;
+        if (inAppBrowser()) setTimeout(function () { modal('<h3>请用 Chrome 打开</h3><p>现在是在聊天软件（WhatsApp / 微信等）里面打开的。设置只保存在这里，以后从桌面图标或 Chrome 打开会找不到。</p><p>请点右上角 <b>⋮</b> →「<b>在 Chrome 中打开</b>」（或复制链接到 Chrome 打开）。</p><div class="row"><button class="btn save" id="iaOk">知道了</button></div>', function (m) { $('#iaOk', m).onclick = closeModal; }); }, 300);
         setSession(null); toast(cfg.r === 'up' ? '设置已保存：这台电脑用来上传 DO' : cfg.r === 'rc' ? '设置已保存：这台电脑用来查看库位记录' : '设置已保存，请登录');
       } else if (o.k) { authMsg = '这是旧版设置链接，已停用。请找办公室在【PDA 设备管理】生成本设备的新链接。'; toast('旧版链接已停用', 3000); }
       else toast('设置链接无效');
@@ -101,6 +142,19 @@
   readSetupLink();
 
   // ---------------- 网络 ----------------
+  /** v1.6.2 后台回 DEVICE：2 秒后再问一次（ping），两次都说“已撤销”才删钥匙 */
+  function devCheck(e) {
+    if (devCheck.busy) throw e;
+    devCheck.busy = true;
+    return new Promise(function (r) { setTimeout(r, 2000); }).then(function () {
+      return fetch(cfg.u, { method: 'POST', body: JSON.stringify({ action: 'ping', dev: cfg.d }), headers: { 'Content-Type': 'text/plain;charset=utf-8' }, redirect: 'follow' }).then(function (r) { return r.json(); });
+    }).then(function (d) {
+      devCheck.busy = false;
+      if (d.ok) throw Object.assign(new Error('网络不稳定，请再试一次'), { server: true });    // 第二次又好了：不动钥匙
+      authLost('device', d.message || e.message, e.revoked && !!d.revoked);
+      throw e;
+    }, function (x) { devCheck.busy = false; if (x === e || x.server) throw x; throw e; });
+  }
   function api(params, post) {
     if (!cfg) return Promise.reject(new Error('NOCFG'));
     var ctl = window.AbortController ? new AbortController() : null;
@@ -114,7 +168,7 @@
       if (!d.ok) {
         var e = new Error(d.message || d.error || '服务器错误'); e.server = true; e.code = d.error;
         if (d.mods) updateMods(d.mods);
-        if (d.error === 'DEVICE') authLost('device', e.message);
+        if (d.error === 'DEVICE') { e.revoked = !!d.revoked; return devCheck(e); }
         else if (d.error === 'SESSION') authLost('session', e.message);
         throw e;
       }
@@ -153,9 +207,14 @@
     sess.mods = mods; LS.set('sess', sess);
     if (myMods().indexOf(hashMod(location.hash)) < 0 && !(leaveGuard && leaveGuard())) setTimeout(route, 0);
   }
-  /** 后台说设备被撤销 / 登录失效：清掉凭据，回到设置或登录页（未上传的资料保留在本机） */
-  function authLost(kind, msg) {
-    if (kind === 'device') { cfg = null; LS.del('cfg'); authMsg = msg + '（未上传的资料仍保存在本机）'; }
+  /** 在聊天软件内置浏览器 / Android WebView 里打开 */
+  function inAppBrowser() { return /WhatsApp|MicroMessenger|WeChat|FBAN|FBAV|Instagram|Line\/|Telegram|; wv\)/i.test(navigator.userAgent || ''); }
+  /** 后台说设备被撤销 / 登录失效。v1.6.2：只有后台明确说“已撤销”（再问一次确认）才删钥匙；否则保留钥匙，显示设置页 + 重试 */
+  function authLost(kind, msg, revoked) {
+    if (kind === 'device') {
+      if (revoked) { cfg = null; CFGK.clear(); authMsg = msg + '（未上传的资料仍保存在本机）'; }
+      else { cfgHold = true; authMsg = '暂时连不上设备授权：' + msg + '。设置已保留在本机，可以点“重试连接”；如果办公室已经重新生成了链接，请打开新链接。'; }
+    }
     else authMsg = msg;
     setSession(null);
     if (!(leaveGuard && leaveGuard())) setTimeout(route, 0); else toast(msg, 3000);
@@ -170,7 +229,10 @@
     n.className = !online ? 'off' : (pend ? 'sync' : '');
     t.textContent = (!online ? '离线' : '在线') + (pend ? ' · 待上传 ' + pend : '');
   }
-  try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(function () { }); } catch (e) { }   // v1.5.3 尽量不让浏览器清掉手机里的资料
+  var persisted = null;   // v1.6.2 菜单里显示是否批准长期保存
+  try {
+    if (navigator.storage && navigator.storage.persist) navigator.storage.persisted().then(function (p) { return p || navigator.storage.persist(); }).then(function (p) { persisted = !!p; }).catch(function () { });   // v1.5.3 尽量不让浏览器清掉手机里的资料
+  } catch (e) { }
   window.addEventListener('online', function () { setOnline(true); flush(); flushTransfers(); ldFlush(); });
   window.addEventListener('offline', function () { setOnline(false); });
 
@@ -375,6 +437,7 @@
     "商品条码 / 货架库位码": "ပစ္စည်းဘားကုဒ် / စင်နေရာကုဒ်",
     "（选填）": " (မဖြစ်မနေ မဟုတ်)",
     "扫箱码 / 扫库位码 / 搜索商品": "သေတ္တာကုဒ် / စင်ကုဒ် စကင်ဖတ် / ပစ္စည်းရှာ",
+    "有新版本，点这里更新": "ဗားရှင်းအသစ် ရှိသည် — အပ်ဒိတ်လုပ်ရန် ဤနေရာနှိပ်ပါ",
     "确认缺货并完成": "ပစ္စည်းပြတ်ကြောင်း အတည်ပြုပြီး ပြီးဆုံး",
     "剩余短少：": "ကျန်လိုနေ: ",
     "清除": "ရှင်း",
@@ -619,6 +682,7 @@
   function openMenu() {
     modal('<div class="menu">' +
       '<div class="hint">员工：<b>' + esc(operator || '未登录') + '</b> · 设备 ' + esc((sess && sess.dev) || device) + ' · v' + VERSION + '</div>' +
+      '<div class="hint">本机长期保存：' + (persisted === true ? '<b style="color:#1a7f37">已批准</b>（清理缓存不会掉线）' : persisted === false ? '<b style="color:#b45309">未批准</b>（建议把 APP 添加到主屏幕）' : '不支持') + '</div>' +
       '<button id="mSync">立即上传（待上传 ' + (outbox.length + tqCount + ldPendN) + '）</button>' +
       othersNote() +
       '<button id="mOp">退出 / 切换员工</button>' +
@@ -696,7 +760,7 @@
     currentRedraw = null;
     app.onclick = null;
     curHash = location.hash;
-    if (!cfg) return viewSetup(false);
+    if (!cfg || cfgHold) return viewSetup(false);
     if (cfg.r === 'up') return viewUpload();          // 装车点货：办公室上传电脑，不用员工登录
     if (cfg.r === 'rc') return viewRecords();         // v1.6 库位记录后台电脑
     if (!sess) return viewLogin();
@@ -727,11 +791,18 @@
       '<p>请用办公室发来的<b>本设备专用设置链接</b>打开本页面（会自动完成设置）。每台设备的链接不同，不要转发给别人。也可以手动填写：</p>' +
       '<div class="field"><label>服务器网址 (Web App URL)</label><input id="sU" value="' + esc(cfg ? cfg.u : '') + '"></div>' +
       '<div class="field"><label>设备凭据</label><input id="sK" type="password" autocomplete="off" value="' + esc(cfg ? cfg.d : '') + '"></div>' +
+      (cfgHold ? '<button class="btn save" id="sRetry" style="width:100%;margin-bottom:8px">↻ 重试连接</button>' : '') +
+      (inAppBrowser() ? '<p class="err">现在是在聊天软件里打开的，设置会只保存在这里。请点右上角 ⋮ →「在 Chrome 中打开」。</p>' : '') +
       '<button class="btn save" id="sSave" style="width:100%">保存并测试连接</button><p id="sMsg" class="hint"></p></div>';
+    var rt = $('#sRetry'); if (rt) rt.onclick = function () {
+      $('#sMsg').textContent = '连接中…'; cfgHold = false;
+      api({ action: 'ping' }).then(function () { authMsg = ''; toast('连接成功'); location.hash = '#/'; route(); },
+        function (e) { cfgHold = cfgHold || e.code === 'DEVICE'; if (e.code === 'DEVICE') return; cfgHold = true; $('#sMsg').innerHTML = '<span class="err">连接失败：' + esc(e.message) + '</span>'; });
+    };
     $('#sSave').onclick = function () {
       var u = $('#sU').value.trim(), k = $('#sK').value.trim();
       if (!/^https:\/\//.test(u) || !TOKEN_RE.test(k)) { $('#sMsg').textContent = '网址必须以 https:// 开头，设备凭据格式不对'; return; }
-      cfg = { u: u, d: k }; LS.set('cfg', cfg); setSession(null); authMsg = '';
+      cfg = { u: u, d: k }; CFGK.save(cfg); setSession(null); authMsg = ''; cfgHold = false;
       $('#sMsg').textContent = '测试中…';
       api({ action: 'ping' }).then(function () { toast('连接成功'); location.hash = '#/'; route(); },
         function (e) { if (e.code === 'DEVICE') return; $('#sMsg').innerHTML = '<span class="err">连接失败：' + esc(e.message) + '</span>（已保存，可稍后再试）'; });
@@ -3245,11 +3316,31 @@
   }
   // ---------------- Service Worker（离线打开 APP） ----------------
   if ('serviceWorker' in navigator && (location.protocol === 'https:' || /^(localhost|127\.0\.0\.1)$/.test(location.hostname))) {
-    navigator.serviceWorker.register('sw.js').catch(function () { });
+    var hadCtl = !!navigator.serviceWorker.controller;
+    navigator.serviceWorker.register('sw.js').then(function (reg) {
+      // v1.6.2 回到 APP 时 / 每 30 分钟检查新版本
+      var chk = function () { try { reg.update().catch(function () { }); } catch (e) { } };
+      document.addEventListener('visibilitychange', function () { if (!document.hidden) chk(); });
+      setInterval(chk, 30 * 60e3);
+    }).catch(function () { });
+    navigator.serviceWorker.addEventListener('controllerchange', function () { if (hadCtl) showUpdateBar(); hadCtl = true; });
+  }
+  /** v1.6.2 有新版本：顶部一条“点这里更新”（不用清浏览器数据，也不会丢资料） */
+  function showUpdateBar() {
+    if ($('#updBar')) return;
+    var b = document.createElement('button'); b.id = 'updBar'; b.className = 'updbar'; b.textContent = '有新版本，点这里更新';
+    b.onclick = function () {
+      if (leaveGuard && leaveGuard()) return toast('请先确认或清空本次数量，再点更新', 3000);
+      b.textContent = '更新中…'; location.reload();
+    };
+    document.body.appendChild(b);
   }
 
   renderNet();
-  route();
+  (cfg ? Promise.resolve(null) : CFGK.restore()).then(function (c) {
+    if (c && !cfg) { cfg = c; CFGK.save(c); toast('已从本机备份找回设备设置', 2500); }
+    route();
+  });
   if (outbox.length) flush();
   window.__app = { flush: flush, outbox: function () { return outbox; }, version: VERSION };
 })();
