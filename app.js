@@ -3,7 +3,7 @@
  * 原则：只采集原始资料，不做任何核对。先存手机（离线队列），再上传云端。 */
 (function () {
   'use strict';
-  var VERSION = '1.6.0';
+  var VERSION = '1.6.1';
   var $ = function (s, el) { return (el || document).querySelector(s); };
   var app = $('#app');
 
@@ -365,7 +365,19 @@
     "修改被退回：": "ပြင်ဆင်ချက် ပြန်ပယ်ခံရသည်: ",
     "和系统不一样": "စနစ်နှင့် မတူ",
     "回到任务列表": "လုပ်ငန်းစာရင်းသို့ ပြန်",
-    "实际取货库位": "တကယ်ထုတ်သော စင်နေရာ",
+    "实际取货库位": "တကယ့်စင်နေရာ",
+    "尚未记录 · 扫描货架码即可自动记录": "မမှတ်ရသေး · စင်ကုဒ် စကင်ဖတ်လျှင် အလိုအလျောက် မှတ်မည်",
+    "已记录实际取货位置": "တကယ်ထုတ်သော နေရာ မှတ်ပြီး",
+    "已经记录过了（没有变化）": "မှတ်ပြီးသား (မပြောင်းလဲ)",
+    "把实际取货库位从": "တကယ့်စင်နေရာကို ပြောင်းမလား —",
+    "（不是商品条码，也不是库位码）": " (ပစ္စည်းဘားကုဒ် မဟုတ်၊ စင်နေရာကုဒ် မဟုတ်)",
+    "无法识别：": "မသိနိုင်ပါ: ",
+    "商品条码 / 货架库位码": "ပစ္စည်းဘားကုဒ် / စင်နေရာကုဒ်",
+    "（选填）": " (မဖြစ်မနေ မဟုတ်)",
+    "扫箱码 / 扫库位码 / 搜索商品": "သေတ္တာကုဒ် / စင်ကုဒ် စကင်ဖတ် / ပစ္စည်းရှာ",
+    "确认缺货并完成": "ပစ္စည်းပြတ်ကြောင်း အတည်ပြုပြီး ပြီးဆုံး",
+    "剩余短少：": "ကျန်လိုနေ: ",
+    "清除": "ရှင်း",
     "已调整累计：": "စုစုပေါင်း ညှိပြီး: ",
     "或条码后几位": "သို့မဟုတ် ဘားကုဒ်နောက်ဂဏန်း",
     "撤销这一笔）": "ဤမှတ်တမ်းကို ပယ်ဖျက်)",
@@ -2611,7 +2623,12 @@
     var kpv = '';          // 本次数量（还没确认）
     var aloc = '';         // v1.6 这个商品页扫到的实际取货库位（可不扫；换商品清空）
     function pkLocCode(raw) { var c = normLoc(raw); return c && locRe().test(c) ? c : ''; }
-    function pkSetLoc(c, it) {
+    function pkSetLoc(c, it, manual) {
+      if (!manual && aloc && c === aloc) { beep(); msg = { cls: 'good', text: '库位 ' + c + ' 已经记录过了（没有变化）' }; return draw(); }
+      if (!manual && aloc && c !== aloc) {
+        errBeep();
+        return confirmBox('把实际取货库位从 ' + aloc + ' 改成 ' + c + '？', '改成 ' + c, function () { pkSetLoc(c, it, true); });
+      }
       aloc = c; beep();
       msg = { cls: !it.loc || c === it.loc ? 'good' : 'bad', text: '实际库位 ' + c + (!it.loc ? '（系统没有库位）' : c === it.loc ? ' ✓ 和系统库位一致' : ' ⚠ 和系统库位 ' + it.loc + ' 不一样') };
       draw();
@@ -2619,11 +2636,12 @@
     function pkLocInput(it) {
       modal('<div class="ldq"><div class="ldq-h">实际取货库位</div><p class="hint">扫货架上的库位码；标签坏了可以在这里输入，例如 07-J-01</p>' +
         '<input id="alIn" class="pkq" maxlength="20" autocomplete="off" autocapitalize="characters" placeholder="07-J-01" value="' + esc(aloc) + '"><div id="alM" class="ldq-m"></div>' +
-        '<div class="row"><button class="btn ghost" id="alC">取消</button><button class="btn save" id="alO">确定</button></div></div>', function (m) {
+        '<div class="row"><button class="btn ghost" id="alC">取消</button>' + (aloc ? '<button class="btn ghost" id="alX">清除</button>' : '') + '<button class="btn save" id="alO">确定</button></div></div>', function (m) {
+          var ax = $('#alX', m); if (ax) ax.onclick = function () { closeModal(); aloc = ''; msg = null; draw(); };
           var inp = $('#alIn', m), ok = function () {
             var c = pkLocCode(inp.value);
             if (!c) { $('#alM', m).className = 'ldq-m err'; $('#alM', m).textContent = '库位格式不对，例如 07-J-01'; errBeep(); return; }
-            closeModal(); pkSetLoc(c, it);
+            closeModal(); pkSetLoc(c, it, true);
           };
           inp.onkeydown = function (e) { if (e.key === 'Enter') { e.preventDefault(); ok(); } };
           $('#alO', m).onclick = ok; $('#alC', m).onclick = closeModal;
@@ -2643,12 +2661,12 @@
       setBar((it.loc || '无库位') + ' · 第 ' + (IT + 1) + ' / ' + s.items.length + ' 项', true);
       app.innerHTML = ldW('<div class="pks">' +
         (ro ? '<div class="card lddone">✓ 任务已完成，不能再修改。需要更正请找办公室重新打开。</div>' :
-          '<div class="pks-scan"><input id="ldIn" inputmode="none" maxlength="64" autocomplete="off" spellcheck="false" placeholder="扫码 / 搜索商品"><button class="btn cam" id="ldCam" aria-label="摄像头扫码">📷</button></div>') +
+          '<div class="pks-scan"><input id="ldIn" inputmode="none" maxlength="64" autocomplete="off" spellcheck="false" placeholder="扫箱码 / 扫库位码 / 搜索商品"><button class="btn cam" id="ldCam" aria-label="摄像头扫码">📷</button></div>') +
         '<div class="pks-it' + (it.flag ? ' pkflag' : '') + '"><div class="pks-top"><div class="pkloc big' + (it.loc ? '' : ' no') + '">' + (it.loc ? esc(it.loc) : '无库位') + '</div>' +
         '<div class="pkit-b"><span>批次号</span><b' + (it.batch ? ' data-nt' : '') + '>' + esc(it.batch || '（没有批次号）') + '</b></div></div>' +
-        (ro ? '' : '<div class="pks-al' + (aloc ? (!it.loc || aloc === it.loc ? ' ok' : ' diff') : '') + '" id="pkAl"><span>实际库位</span><b>' + (aloc ? esc(aloc) : '—') + '</b>' +
-          '<i>' + (aloc ? (!it.loc ? '系统没有库位' : aloc === it.loc ? '✓ 一致' : '⚠ 和系统不一样') : '扫货架库位码可记录（可不扫）') + '</i>' +
-          (aloc ? '<button type="button" tabindex="-1" id="pkAlX" aria-label="清除实际库位">✕</button>' : '') + '</div>') +
+        (ro ? '' : '<button type="button" tabindex="-1" class="pks-al' + (aloc ? (!it.loc || aloc === it.loc ? ' ok' : ' diff') : '') + '" id="pkAl">' +
+          '<span class="al-t"><span>实际取货库位' + (aloc ? '' : '（选填）') + '</span><u>' + (aloc ? '✎ 修改' : '✎ 手输') + '</u></span>' +
+          '<span class="al-v">' + (aloc ? '<b data-nt>' + esc(aloc) + ' ✓</b><i>' + (!it.loc || aloc === it.loc ? '已记录实际取货位置' : '⚠ 和系统库位 ' + esc(it.loc) + ' 不一样') + '</i>' : '<em>尚未记录 · 扫描货架码即可自动记录</em>') + '</span></button>') +
         '<div class="pks-desc">' + itemName(it) + '</div>' +
         '<div class="pks-code">' + esc(ldId(it, '条码 ')) + ' · ' + esc(it.uom || '') + (it.flag ? ' · <span class="pkwarn">⚠ ' + esc(it.flag) + '</span>' : '') + '</div></div>' +
         '<div class="pks-st"><div><span>应拣</span><b>' + it.req + '</b></div><div><span>累计已拣</span><b id="pkCnt">' + it._c + '</b></div>' +
@@ -2662,10 +2680,10 @@
         (it._so && rem > 0 ? '<div class="card pkso"><span>已确认拣完（短少 ' + rem + '）</span>' + (ro ? '' : '<button class="tbtn" id="pkUnso">取消确认</button>') + '</div>' : '') +
         '<div class="ldq-l"><b>最近拣货记录</b>（' + H.n + ' 笔，合计 ' + it._c + '）</div>' +
         '<div id="dtL">' + (H.html || '<div class="empty">还没有拣货记录</div>') + '</div>' +
-        (!ro && rem > 0 && !it._so ? '<button type="button" class="tbtn pkshort" id="pkShort">找不到更多？确认拣完（短少 ' + rem + '）</button>' : '') +
+        (!ro && rem > 0 && !it._so ? '<button type="button" class="pkshort2" id="pkShort">确认缺货并完成<small>剩余短少：' + rem + ' ' + esc(it.uom || '') + '</small></button>' : '') +
         '</div>');
       bindHist(it);
-      var al = $('#pkAl'); if (al) al.onclick = function (e) { if (e.target.id === 'pkAlX') { aloc = ''; msg = null; draw(); return; } pkLocInput(it); };
+      var al = $('#pkAl'); if (al) al.onclick = function () { pkLocInput(it); };
       $('#pkBack').onclick = function () { pkLeave(function () { location.hash = ldHash(id); }); };
       var nb = $('#pkNext'); if (nb) nb.onclick = function () { pkLeave(function () { openIt(nx, 'SEARCH', ''); }); };
       var rb = $('#pkRev'); if (rb) rb.onclick = function () { pkLeave(function () { location.hash = ldHash(id) + '/review'; }); };
@@ -2704,7 +2722,7 @@
           if (now - prev >= 6) tm = setTimeout(function () { if (document.activeElement === inp && inp.value) { var v = inp.value; inp.value = ''; inp.blur(); pkItemScan(v); } }, 250);
           prev = now;
         });
-        $('#ldCam').onclick = function () { openCamera('ld', function (code) { pkItemScan(code); }, { label: '商品条码' }); };
+        $('#ldCam').onclick = function () { openCamera('ld', function (code) { pkItemScan(code); }, { label: '商品条码 / 货架库位码', qr: true }); };
       }
     }
     function pkSave() {
@@ -2769,6 +2787,9 @@
       }
       if (exact.length) return pkLeave(function () { if (exact.length === 1) openIt(exact[0], 'BARCODE', raw); else pick(exact, '这个条码对应 ' + exact.length + ' 行（不同批次），请选择', '', raw); });
       if (/^\d{8,}$/.test(q)) return handle(raw, 'BARCODE');
+      if (/^[A-Za-z0-9-]+$/.test(raw) && /[A-Za-z]/.test(raw) && /\d/.test(raw) && !s.items.some(function (x) { return (String(x.batch || '') + ' ' + String(x.loc || '')).toUpperCase().indexOf(raw.toUpperCase()) >= 0; })) {
+        errBeep(); msg = { cls: 'bad', text: '无法识别：' + raw + '（不是商品条码，也不是库位码）' }; return draw();   // v1.6.1 不填任何字段，已记录的库位不变
+      }
       pkLeave(function () { U.pq = raw; U.chip = null; location.hash = ldHash(id); });
     }
     function drawReview(head, o) {
