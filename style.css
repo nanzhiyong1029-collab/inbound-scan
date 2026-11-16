@@ -439,3 +439,14 @@ body.lang-my .pkfil .hint { font-size: 12px; }
 .rkv { width: 100%; border-collapse: collapse; font-size: 14px; } .rkv th { text-align: left; color: var(--mute); padding: 4px 10px 4px 0; white-space: nowrap; font-weight: 600; } .rkv td { padding: 4px 0; word-break: break-all; }
 /* v1.6.2 有新版本提示条 */
 .updbar { position: fixed; left: 50%; top: 58px; transform: translateX(-50%); z-index: 60; max-width: 92vw; padding: 10px 18px; border: 0; border-radius: 22px; background: #1a7f37; color: #fff; font: 700 15px/1.2 inherit; box-shadow: 0 4px 14px rgba(0,0,0,.25); cursor: pointer; }
+/* v1.7 拣货任务分配（上传电脑） */
+.asov { margin: 6px 0 10px; max-width: 640px; } .asov .asun td { background: #fff7c2; }
+.asbar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 6px 0 8px; }
+.asbar .tbtn.on { background: #1f3864; color: #fff; border-color: #1f3864; }
+.asbar .asgap { flex: 1; } .asbar select { font-size: 15px; padding: 7px 8px; border-radius: 8px; border: 1px solid var(--line); min-width: 150px; }
+.asbar .btn { min-height: 0; padding: 9px 14px; font-size: 15px; width: auto; }
+.astab tr.asnone td { background: #fffbe6; }
+.asst { display: inline-block; padding: 2px 9px; border-radius: 9px; font-size: 13px; font-weight: 700; white-space: nowrap; }
+.as-u { background: #fff1e0; color: #b45309; } .as-a { background: #e8eefb; color: #1f3864; } .as-p { background: #e0f2fe; color: #0369a1; } .as-d { background: #e6f4ea; color: #1a7f37; }
+.fixtab input { font: inherit; padding: 5px 6px; border: 1px solid var(--line); border-radius: 6px; }
+.fixtab tr.fixbad td { background: #fde8e7; } .fixtab tr.fixwarn td { background: #fffbe6; }
