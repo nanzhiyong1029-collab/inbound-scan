@@ -3,7 +3,7 @@
  * 原则：只采集原始资料，不做任何核对。先存手机（离线队列），再上传云端。 */
 (function () {
   'use strict';
-  var VERSION = '1.6.2';
+  var VERSION = '1.7.0';
   var $ = function (s, el) { return (el || document).querySelector(s); };
   var app = $('#app');
 
@@ -438,6 +438,12 @@
     "（选填）": " (မဖြစ်မနေ မဟုတ်)",
     "扫箱码 / 扫库位码 / 搜索商品": "သေတ္တာကုဒ် / စင်ကုဒ် စကင်ဖတ် / ပစ္စည်းရှာ",
     "有新版本，点这里更新": "ဗားရှင်းအသစ် ရှိသည် — အပ်ဒိတ်လုပ်ရန် ဤနေရာနှိပ်ပါ",
+    "这个拣货任务已改派给别人（或取消了分配），不能再在这台 PDA 上拣": "ဤပစ္စည်းထုတ်လုပ်ငန်းကို အခြားသူထံ လွှဲပြီး (သို့မဟုတ် ခွဲဝေမှု ပယ်ပြီး)၊ ဤ PDA တွင် ဆက်ထုတ်၍ မရပါ",
+    "这个拣货任务已分配给": "ဤပစ္စည်းထုတ်လုပ်ငန်းကို ခွဲဝေထားသူ:",
+    "，不是你的任务": " — သင့်လုပ်ငန်း မဟုတ်ပါ",
+    "这个拣货任务还没有分配给你": "ဤပစ္စည်းထုတ်လုပ်ငန်းကို သင့်ထံ မခွဲဝေရသေးပါ",
+    "客户": "ဖောက်သည်",
+    "没有分配给你的拣货任务。办公室在上传电脑分配后会出现在这里。": "သင့်ထံ ခွဲဝေထားသော ပစ္စည်းထုတ်လုပ်ငန်း မရှိပါ။ ရုံးခန်းမှ ခွဲဝေပြီးလျှင် ဤနေရာတွင် ပေါ်လာမည်။",
     "确认缺货并完成": "ပစ္စည်းပြတ်ကြောင်း အတည်ပြုပြီး ပြီးဆုံး",
     "剩余短少：": "ကျန်လိုနေ: ",
     "清除": "ရှင်း",
@@ -648,6 +654,7 @@
   }).observe(document.body, { childList: true, subtree: true, characterData: true });
   function langApply() {
     var on = myOn(); document.body.classList.toggle('lang-my', on);
+    document.documentElement.lang = on ? 'my' : 'zh-CN';   // v1.6.3 配合 translate=no：浏览器自动翻译不再插手（APP 自己翻缅甸语）
     var b = $('#langBtn'); if (b) { b.hidden = !(cfg && !cfg.r && sess && /^#\/pk(\/|$)/.test(location.hash || '')); b.textContent = LANG === 'my' ? '中文' : 'မြန်မာ'; }
     if (on) { myFix(document.body); }
   }
@@ -1890,6 +1897,91 @@
     return null;
   }
   var PRINT_FIELDS = [['seq', /^序号$/], ['batch', /^批次号$/], ['barcode', /^条码$/], ['desc', /^商品名称$/], ['qty', /^数量$/], ['spec', /^规格$/], ['uom', /^单位$/]];
+  // ---------- v1.7 送货单 PDF（用「打印 → Microsoft Print to PDF」转的，文字可以选中）：pdf.js 读文字和位置 → 和 Excel 送货单一样的结构 ----------
+  var PDFJS_V = '6.2.108', PDFJS = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@' + PDFJS_V + '/legacy/build/';
+  var PDFJS_SHA = { 'pdf.min.mjs': 'YzR7Q88uWohu1vX4vuDiPCeT46Pk8qPXuDLcDO7a/LOb6syUvYvYYcQclRT2VSPT', 'pdf.worker.min.mjs': 'xmo046yHKZIFB8fX6VJCV8nUAOARH/5lJdjB/bgsbvRwnVXay7R4ebX/EkVjhHoT' };
+  var pdfLibP = null;
+  /** 下载 pdf.js，核对 SHA-384（防止 CDN 文件被换掉）后再用 */
+  function pdfLib() {
+    if (pdfLibP) return pdfLibP;
+    var get = function (f) {
+      return fetch(PDFJS + f).then(function (r) { if (!r.ok) throw new Error('下载 PDF 读取组件失败（' + r.status + '）'); return r.arrayBuffer(); }).then(function (b) {
+        return crypto.subtle.digest('SHA-384', b).then(function (h) {
+          var x = btoa(String.fromCharCode.apply(null, new Uint8Array(h)));
+          if (x !== PDFJS_SHA[f]) throw new Error('PDF 读取组件校验不通过，没有使用');
+          return URL.createObjectURL(new Blob([b], { type: 'text/javascript' }));
+        });
+      });
+    };
+    pdfLibP = Promise.all([get('pdf.min.mjs'), get('pdf.worker.min.mjs')]).then(function (u) {
+      return import(u[0]).then(function (lib) { lib.GlobalWorkerOptions.workerPort = new Worker(u[1], { type: 'module' }); return lib; });
+    });
+    pdfLibP.catch(function () { pdfLibP = null; });
+    return pdfLibP;
+  }
+  /** 一份送货单 PDF → { kind:'printed', blocks:[{doNo, doDate, customer, lines}] }；没有中文（直接导出的那种）→ noChinese */
+  function parsePdf(buf) {
+    return pdfLib().then(function (lib) { return lib.getDocument({ data: new Uint8Array(buf), isEvalSupported: false }).promise; }).then(function (doc) {
+      var pages = []; for (var i = 1; i <= doc.numPages; i++) pages.push(i);
+      return Promise.all(pages.map(function (n) { return doc.getPage(n).then(function (pg) { return pg.getTextContent(); }); }));
+    }).then(function (contents) {
+      var blk = { doNo: '', doDate: '', customer: '', lines: [] }, any = '', seq = 0;
+      contents.forEach(function (tc) {
+        // 文字块 → 按 y 分行（同一行 y 相差 ≤ 3）
+        var its = tc.items.filter(function (t) { return String(t.str).trim(); }).map(function (t) { return { s: String(t.str).trim(), x: t.transform[4], y: t.transform[5], w: t.width || 0 }; });
+        its.sort(function (a, b) { return b.y - a.y || a.x - b.x; });
+        var rows = [];
+        its.forEach(function (t) { var r = rows[rows.length - 1]; if (r && Math.abs(r.y - t.y) <= 3) r.items.push(t); else rows.push({ y: t.y, items: [t] }); });
+        rows.forEach(function (r) {
+          r.items.sort(function (a, b) { return a.x - b.x; });
+          // 打印转 PDF 常把一个词拆成几块（“条”“码”、“小”“龙”“坎酸辣粉”）：紧挨着的拼回去
+          var m = [];
+          r.items.forEach(function (t) { var p = m[m.length - 1]; if (p && t.x - (p.x + p.w) < 1.5) { p.s += t.s; p.w = t.x + t.w - p.x; } else m.push({ s: t.s, x: t.x, y: t.y, w: t.w }); });
+          r.items = m; r.text = m.map(function (t) { return t.s; }).join(' '); any += r.text;
+        });
+        var hi = rows.findIndex(function (r) { return /序号/.test(r.text) && /条码/.test(r.text) && /商品名称/.test(r.text); });
+        // 表头上面：DO 号、日期、客户（客户 = DO 号那一行左边的文字）
+        rows.slice(0, hi < 0 ? rows.length : hi).forEach(function (r) {
+          var dn = r.text.match(/\b[A-Z]{1,6}DO-\d{4,}\b/);
+          if (dn && !blk.doNo) {
+            blk.doNo = dn[0];
+            var colon = r.items.filter(function (t) { return /^[:：]/.test(t.s) || t.s.indexOf(dn[0]) >= 0; })[0];
+            var left = r.items.filter(function (t) { return colon && t.x < colon.x - 20 && !/单据编号/.test(t.s); }).map(function (t) { return t.s; }).join(' ').trim();
+            if (left && !blk.customer) blk.customer = left;
+          }
+          var dm = /日期/.test(r.text) && r.text.match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+          if (dm && !blk.doDate) blk.doDate = dm[3] + '-' + ('0' + dm[2]).slice(-2) + '-' + ('0' + dm[1]).slice(-2);
+        });
+        if (hi < 0) return;
+        // 列：用表头文字的中心点分界
+        var H = [['seq', /^序号$/], ['batch', /^批次号$/], ['barcode', /^条码$/], ['desc', /^商品名称$/], ['qty', /^数量$/], ['spec', /^规格$/], ['uom', /^单位$/]];
+        var cols = [];
+        rows[hi].items.forEach(function (t) { var f = H.filter(function (h) { return h[1].test(t.s); })[0]; if (f) cols.push({ f: f[0], c: t.x + t.w / 2 }); });
+        cols.sort(function (a, b) { return a.c - b.c; });
+        var colOf = function (t) {
+          var c = t.x + t.w / 2, best = cols[0];
+          for (var k = 1; k < cols.length; k++) if (c >= (cols[k - 1].c + cols[k].c) / 2) best = cols[k];
+          return best ? best.f : '';
+        };
+        var cur = null, gap = 0;
+        rows.slice(hi + 1).forEach(function (r) {
+          var o = {}; r.items.forEach(function (t) { var f = colOf(t); o[f] = (o[f] ? o[f] + ' ' : '') + t.s; });
+          if (/^\d+\.?$/.test(o.seq || '')) {
+            seq++;
+            cur = { row: seq, batch: o.batch || '', barcode: (o.barcode || '').replace(/\s+/g, ''), desc: o.desc || '', qtyRaw: o.qty || '', spec: o.spec || '', uom: o.uom || '', y: r.y };
+            cur.qty = Number(String(cur.qtyRaw).replace(/,/g, ''));
+            blk.lines.push(cur); gap = 0; return;
+          }
+          // 折行：品名 / 规格 / 单位太长换到下一行（紧挨着上一行），拼回去
+          if (cur && !o.seq && !o.batch && !o.barcode && !o.qty && (o.desc || o.spec || o.uom) && cur.y - r.y < 40) {
+            if (o.desc) cur.desc += o.desc; if (o.spec) cur.spec += o.spec; if (o.uom) cur.uom += o.uom; cur.y = r.y;
+          }
+        });
+      });
+      blk.lines.forEach(function (l) { delete l.y; });
+      return { kind: 'printed', pdf: true, noChinese: !/[\u4e00-\u9fff]/.test(any), blocks: [blk] };
+    });
+  }
   /** AutoCount「送货单」打印版式：用来补单位、规格、批次号 */
   function parsePrinted(sh) {
     var heads = [], hr = 0;
@@ -1904,17 +1996,19 @@
         if (f && !heads.some(function (h) { return h.f === f[0]; })) heads.push({ f: f[0], c1: x.c1, c2: x.c2 });
       });
     });
-    var blocks = [], cur = null, docNo = '', docDate = '';
+    var blocks = [], cur = null, docNo = '', docDate = '', cust = '', afterTitle = false;
     for (var rr = 1; rr <= sh.maxRow; rr++) {
       var cs = rowCells(sh, rr), texts = cs.map(function (x) { return cellText(x.v); });
+      // v1.7 客户名：标题“送货单”下面第一行的文字
+      if (!cur && rr < hr) { var tx = texts.filter(String); if (afterTitle && tx.length && !cust) cust = tx[0]; if (tx.length === 1 && /^送货单$/.test(tx[0])) { afterTitle = true; cust = ''; } }
       var dn = texts.join(' ').match(/\b[A-Z]{1,6}DO-\d{4,}\b/); if (dn && rr < hr || dn && !cur) docNo = dn[0];
       var di = texts.indexOf('日期');                      // v1.6 送货单日期（“日期 : 2026-11-12”）
       if (di >= 0 && !cur) { for (var k = di + 1; k < cs.length; k++) { var dv = xlDate(cs[k].v); if (dv) { docDate = dv; break; } } }
-      if (texts.some(function (t) { return /拣货人签字/.test(t); })) { if (cur) blocks.push(cur); cur = null; docNo = ''; continue; }
+      if (texts.some(function (t) { return /拣货人签字/.test(t); })) { if (cur) blocks.push(cur); cur = null; docNo = ''; cust = ''; afterTitle = false; continue; }
       if (rr <= hr + 1) continue;
       var o = assignCols(heads, cs);
       if (!/^\d+\.?$/.test(cellText(o.seq))) continue;
-      if (!cur) cur = { doNo: docNo, doDate: docDate, lines: [] };
+      if (!cur) cur = { doNo: docNo, doDate: docDate, customer: cust, lines: [] };
       cur.lines.push({ row: rr, barcode: cellText(o.barcode), desc: cellText(o.desc), qty: typeof o.qty === 'number' ? o.qty : Number(cellText(o.qty).replace(/,/g, '')), qtyRaw: cellText(o.qty), spec: cellText(o.spec), uom: cellText(o.uom), batch: cellText(o.batch) });
     }
     if (cur) blocks.push(cur);
@@ -1948,14 +2042,65 @@
     // v1.5 两个模块：🚚 司机装车点货 / 📋 仓库拣货（各自上传、各自任务列表，资料分开）
     var UPM = LS.get('upMod', 'ld') === 'pk' ? 'pk' : 'ld', PKU = function () { return UPM === 'pk'; }, upW = function (h) { return ldW(h, UPM); };
     // v1.4.5 第二部分：任务列表（可删除）
-    var TK = { list: null, err: '', busy: '' };
+    var TK = { list: null, err: '', busy: '', staff: [], sel: {}, who: LS.get('pkWho', ''), f: 'all' };
     function loadTasks() {
       var m = UPM;
+      if (m === 'pk') return api({ action: 'pkAssignInfo' }, true).then(function (d) {      // v1.7 拣货：分配页
+        if (m !== UPM) return; TK.list = d.tasks || []; TK.staff = d.staff || []; TK.err = '';
+        var ok = {}; TK.list.forEach(function (t) { ok[t.id] = 1; }); Object.keys(TK.sel).forEach(function (k) { if (!ok[k]) delete TK.sel[k]; });
+        draw();
+      }, function (e) { if (m !== UPM) return; TK.err = e.network ? '网络不可用，任务列表没有更新' : e.message; draw(); });
       return api({ action: 'ldPortalTasks', mod: m }, true).then(function (d) { if (m !== UPM) return; TK.list = d.tasks || []; TK.err = ''; draw(); },
         function (e) { if (m !== UPM) return; TK.err = e.network ? '网络不可用，任务列表没有更新' : e.message; draw(); });
     }
     setInterval(function () { if (!document.hidden && $('#modal').hidden && !st.busy && !TK.busy) loadTasks(); }, 60000);
+    /** v1.7 拣货：PDA 任务分配（每个任务 = 一张 DO；只给分配到的员工看） */
+    function assignHtml() {
+      var L = TK.list || [], ast = function (t) { return t.status === '已完成' ? '已完成' : !t.assignedTo ? '未分配' : t.status === '点货中' ? '拣货中' : '已分配'; };
+      var ov = {}; TK.staff.forEach(function (n) { ov[n] = { a: 0, p: 0, d: 0 }; });
+      var un = 0; L.forEach(function (t) { var a = ast(t); if (a === '未分配') { un++; return; } var o = ov[t.assignedTo] || (ov[t.assignedTo] = { a: 0, p: 0, d: 0 }); if (a === '已完成') o.d++; else if (a === '拣货中') o.p++; else o.a++; });
+      var shown = L.filter(function (t) { return TK.f === 'all' || ast(t) === TK.f; }).sort(function (a, b) { return (ast(a) === '未分配' ? 0 : 1) - (ast(b) === '未分配' ? 0 : 1); });
+      var nSel = Object.keys(TK.sel).length;
+      return upW('<div class="card" id="tkCard"><div class="tkhead"><h3 style="margin:0">PDA 任务分配</h3><span class="hint">每个任务 = 一张 DO。只有分配到的员工在 PDA 上看得到；没分配的谁都看不到。</span><button class="tbtn" id="tkR">刷新</button></div>' +
+        (TK.err ? '<p class="err">' + esc(TK.err) + '</p>' : '') +
+        (!TK.list ? '<p class="hint">读取中…</p>' :
+          '<div class="asov"><table class="uptab tktab"><thead><tr><th>员工（PDA 账户）</th><th class="n">已分配未开始</th><th class="n">拣货中</th><th class="n">已完成（14 天）</th></tr></thead><tbody>' +
+          Object.keys(ov).map(function (n) { var o = ov[n]; return '<tr><td><b>' + esc(n) + '</b>' + (TK.staff.indexOf(n) < 0 ? ' <span class="hint">（已停用 / 没有拣货权限）</span>' : '') + '</td><td class="n">' + o.a + '</td><td class="n">' + o.p + '</td><td class="n">' + o.d + '</td></tr>'; }).join('') +
+          '<tr class="asun"><td><b>未分配</b></td><td class="n" colspan="3"><b>' + un + '</b> 个任务</td></tr></tbody></table></div>' +
+          '<div class="asbar"><span>筛选</span>' + [['all', '全部'], ['未分配', '未分配'], ['已分配', '已分配'], ['拣货中', '拣货中'], ['已完成', '已完成']].map(function (x) { return '<button class="tbtn' + (TK.f === x[0] ? ' on' : '') + '" data-af="' + x[0] + '">' + x[1] + '</button>'; }).join('') +
+          '<span class="asgap"></span><span>已选 <b>' + nSel + '</b> 个</span><select id="asWho"><option value="">— 选择员工 —</option>' + TK.staff.map(function (n) { return '<option' + (n === TK.who ? ' selected' : '') + '>' + esc(n) + '</option>'; }).join('') + '</select>' +
+          '<button class="btn save" id="asGo"' + (!nSel || TK.busy ? ' disabled' : '') + '>分配给所选员工</button><button class="tbtn" id="asUn"' + (!nSel || TK.busy ? ' disabled' : '') + '>取消分配</button></div>' +
+          (!shown.length ? '<p class="hint">没有任务。</p>' :
+          '<div class="uptabw"><table class="uptab tktab astab"><thead><tr><th><input type="checkbox" id="asAll"' + (shown.some(function (t) { return t.status !== '已完成'; }) && shown.every(function (t) { return t.status === '已完成' || TK.sel[t.id]; }) ? ' checked' : '') + '></th><th>任务</th><th>DO</th><th>客户</th><th class="n">商品</th><th class="n">数量</th><th>状态</th><th>负责人</th><th></th></tr></thead><tbody>' +
+          shown.map(function (t) {
+            var a = ast(t), dis = t.status === '已完成';
+            return '<tr class="' + (a === '未分配' ? 'asnone' : '') + '"><td>' + (dis ? '' : '<input type="checkbox" data-as="' + esc(t.id) + '"' + (TK.sel[t.id] ? ' checked' : '') + '>') + '</td><td><b>' + esc(t.id) + '</b><div class="hint">' + esc(t.created || t.date) + '</div></td><td>' + esc(t.dos) + '</td><td>' + esc(t.customer || '—') +
+              '</td><td class="n">' + t.itemCount + '</td><td class="n">' + t.counted + ' / ' + t.required + '</td><td><span class="asst as-' + ({ '未分配': 'u', '已分配': 'a', '拣货中': 'p', '已完成': 'd' }[a]) + '">' + a + '</span></td><td>' + (t.assignedTo ? '<b>' + esc(t.assignedTo) + '</b><div class="hint">' + esc(t.assignedAt) + '</div>' : '<span class="hint">—</span>') +
+              '</td><td>' + (dis ? '' : '<button class="tbtn tkdel" data-del="' + esc(t.id) + '"' + (TK.busy ? ' disabled' : '') + '>🗑</button>') + '</td></tr>';
+          }).join('') + '</tbody></table></div>')) + '</div>');
+    }
+    function doAssign(who, confirm) {
+      var ids = Object.keys(TK.sel); if (!ids.length) return;
+      TK.busy = 'assign'; draw();
+      api({ action: 'pkAssign', taskIds: ids, staff: who, confirm: !!confirm }, true).then(function (d) {
+        TK.busy = '';
+        if (d.status === 'confirm') {
+          draw();
+          return modal(upW('<div class="tmiss"><div class="tmiss-h"><span class="tmiss-ic">!</span><div><h3>这些任务正在拣货</h3></div></div><ul class="tmiss-list">' +
+            d.tasks.map(function (x) { return '<li class="bad"><span class="mk">!</span><span class="t"><b>' + esc(x.id) + '</b><span>' + esc(x.from) + ' 正在拣（已拣 ' + x.counted + ' / ' + x.required + '）</span></span></li>'; }).join('') +
+            '</ul><p>' + (who ? '改派给 <b>' + esc(who) + '</b>' : '取消分配') + '后：已拣数量和记录<b>全部保留</b>，' + (who ? '新负责人接着拣' : '') + '；原来那台 PDA 不能再拣这个任务，它在改派前已经拣好、还没上传的记录照样会收下。<b>请先告诉原来的员工停下。</b></p>' +
+            '<label style="display:block;margin:8px 0;font-weight:600"><input type="checkbox" id="asSure"> 我确认' + (who ? '改派' : '取消分配') + '</label><div class="row"><button class="btn ghost" id="asNo">取消</button><button class="btn save" id="asYes" disabled>确认</button></div></div>'), function (m) {
+              var sure = $('#asSure', m), yes = $('#asYes', m);
+              sure.onchange = function () { yes.disabled = !sure.checked; };
+              $('#asNo', m).onclick = closeModal; yes.onclick = function () { closeModal(); doAssign(who, true); };
+            });
+        }
+        if (d.status === 'ok') { TK.sel = {}; toast((who ? '已分配给 ' + who : '已取消分配') + '：' + d.changed + ' 个任务', 2500); if (d.skipped && d.skipped.length) infoBox('有些任务没有改', d.skipped.join('\n')); return loadTasks(); }
+        draw(); infoBox('不能分配', d.message || '分配失败');
+      }, function (e) { TK.busy = ''; draw(); infoBox('分配失败', e.network ? '网络不可用，请联网后再试' : e.message); });
+    }
     function tasksHtml() {
+      if (PKU()) return assignHtml();
       var L = TK.list;
       return upW('<div class="card" id="tkCard"><div class="tkhead"><h3 style="margin:0">装车任务管理</h3><span class="hint">不需要的任务可以在这里删除（删除后 PDA 不再显示）</span><button class="tbtn" id="tkR">刷新</button></div>' +
         (TK.err ? '<p class="err">' + esc(TK.err) + '</p>' : '') +
@@ -2002,6 +2147,10 @@
       draw('读取中…');
       Promise.all(arr.map(function (f) {
         if (/\.xls$/i.test(f.name)) return Promise.reject(new Error(f.name + '：是旧版 .xls，请在 AutoCount 导出为 .xlsx'));
+        if (/\.pdf$/i.test(f.name)) {          // v1.7 送货单 PDF（只用于仓库拣货）
+          if (!PKU()) return Promise.reject(new Error(f.name + '：装车点货请上传 Excel（Delivery Order Detail Listing）'));
+          return f.arrayBuffer().then(parsePdf).then(function (pr) { return { name: f.name, listing: null, printed: pr }; }, function (e) { throw new Error(f.name + '：读不了这个 PDF（' + e.message + '）'); });
+        }
         return f.arrayBuffer().then(xlsxRead).then(function (sh) { return { name: f.name, listing: parseListing(sh), printed: parsePrinted(sh) }; });
       })).then(function (res) {
         var L = res.filter(function (x) { return x.listing; }), P = res.filter(function (x) { return !x.listing && x.printed; });
@@ -2053,7 +2202,9 @@
         if (x.listing.extra.length) st.infos.push(x.name + ' 没用到的列：' + x.listing.extra.join('、'));
         x.listing.lines.forEach(function (l) { l.file = x.name; lines.push(l); });
       });
+      st.customers = {};
       P.forEach(function (x) {
+        if (x.printed.noChinese) { st.errors.push(x.name + '：这个 PDF 里没有中文（品名、单位都读不到）。请在 AutoCount 用「打印 → Microsoft Print to PDF」另存为 PDF 再上传。'); return; }
         var bl = x.printed.blocks.filter(function (b) { return b.lines.length; });
         if (!bl.length) { st.errors.push(x.name + '：送货单里没有商品行'); return; }
         if (bl.length > 1) st.warns.push(x.name + '：一个文件里有 ' + bl.length + ' 张 DO，只有第一张印了单号。建议每张 DO 单独导出一个文件。');
@@ -2062,29 +2213,55 @@
           if (!b.doNo && !bi) { st.errors.push(x.name + '：认不出 DO 单号（单据编号）'); return; }
           if (dosSeen[doNo]) st.warns.push('DO ' + doNo + ' 在 ' + dosSeen[doNo] + ' 和 ' + x.name + ' 里都有，会相加，请确认不是重复的文件');
           dosSeen[doNo] = x.name;
-          b.lines.forEach(function (l) { lines.push({ row: l.row, file: x.name, doNo: doNo, doDate: b.doDate || '', itemCode: '', desc: l.desc, barcode: l.barcode, qty: l.qty, qtyRaw: l.qtyRaw, uom: l.uom, spec: l.spec, batch: l.batch }); });
+          if (b.customer) st.customers[doNo] = b.customer;
+          b.lines.forEach(function (l) { lines.push({ row: l.row, file: x.name, doNo: doNo, doDate: b.doDate || '', itemCode: '', desc: l.desc, barcode: l.barcode, qty: l.qty, qtyRaw: l.qtyRaw, uom: l.uom, spec: l.spec, batch: l.batch, pdf: !!x.printed.pdf }); });
         });
         names[x.name] = 1;
       });
       if (!L.length && !P.length && !st.errors.length) st.errors.push('需要 AutoCount 送货单（每张 DO 一个 Excel，可以一次选多个），或带 Batch No. 的 Delivery Order Detail Listing');
       if (st.errors.length) return draw();
-      if (P.length) st.infos.push('送货单 ' + P.length + ' 个文件');
+      if (P.length) st.infos.push('送货单 ' + P.length + ' 个文件' + (P.some(function (x) { return x.printed.pdf; }) ? '（含 PDF）' : ''));
+      if (!lines.length) { st.errors.push('文件里没有商品行'); return draw(); }
+      st.multi = res.length > 1; st.baseWarns = st.warns.slice(); st.lines = lines; st.carry = [];
+      pkCheck(); draw();
+    }
+    /** v1.7 拣货：逐行检查（上传前可以在“需要确认 / 修正的行”里改，改完重新检查） */
+    function pkCheck() {
+      var lines = st.lines || [], warns = (st.baseWarns || []).slice(), errs = [];
+      var at = function (l) { return (st.multi ? l.file + ' ' : (l.pdf ? 'PDF ' : 'Excel ')) + '第 ' + l.row + ' 行'; };
       var noUom = lines.filter(function (l) { return !l.uom; }).length;
-      if (noUom) st.warns.push(noUom + ' 行没有单位（UOM）');
+      if (noUom) warns.push(noUom + ' 行没有单位（UOM）');
+      var seen = {};
       lines.forEach(function (l) {
-        var e = [], at = (res.length > 1 ? l.file + ' ' : 'Excel ') + '第 ' + l.row + ' 行';
+        var e = [], w = [];
         if (!l.doNo) e.push('缺 DO 号'); if (!l.barcode && !l.desc) e.push('缺条码 / 品名');
         if (!(l.qty > 0)) e.push('数量不对（' + (l.qtyRaw || '空') + '）');
-        if (e.length) st.errors.push(at + '：' + e.join('，'));
-        if (!l.barcode && l.desc) st.warns.push(at + ' 没有条码（' + l.doNo + ' ' + l.desc + ' ×' + l.qty + '），PDA 上只能按品名搜索');
+        if (l.barcode && !/^\d{6,14}$/.test(l.barcode)) w.push('条码不是 6–14 位数字');
+        if (!l.barcode && l.desc) w.push('没有条码，PDA 上只能按品名搜索');
+        if (!l.uom) w.push('没有单位');
+        var k = [l.doNo, l.barcode, l.batch, l.qty, l.uom].join('|');
+        if (seen[k]) w.push('和第 ' + seen[k] + ' 行完全一样，会相加'); else seen[k] = l.row;
+        l._e = e; l._w = w;
+        if (e.length) errs.push(at(l) + '：' + e.join('，'));
+        w.forEach(function (x) { if (x !== '没有单位') warns.push(at(l) + '（' + l.doNo + ' ' + l.desc + '）' + x); });
       });
-      if (!lines.length) st.errors.push('文件里没有商品行');
       var noB = [], noL = [];
-      lines.forEach(function (l) { var x = pkLoc(l.batch); if (x.flag) (l.batch ? noL : noB).push((res.length > 1 ? l.file + ' ' : '') + '第 ' + l.row + ' 行 ' + l.desc + (l.batch ? '（' + l.batch + '：' + x.flag + '）' : '')); });
-      if (noB.length) st.warns.push(noB.length + ' 行没有批次号，PDA 上会排在最后（标黄）：' + noB.join('；'));
-      if (noL.length) st.warns.push(noL.length + ' 行批次号读不出库位，PDA 上会标黄：' + noL.join('；'));
-      st.lines = lines; st.carry = [];
-      draw();
+      lines.forEach(function (l) { var x = pkLoc(l.batch); if (x.flag) (l.batch ? noL : noB).push((st.multi ? l.file + ' ' : '') + '第 ' + l.row + ' 行 ' + l.desc + (l.batch ? '（' + l.batch + '：' + x.flag + '）' : '')); });
+      if (noB.length) warns.push(noB.length + ' 行没有批次号，PDA 上会排在最后（标黄）：' + noB.join('；'));
+      if (noL.length) warns.push(noL.length + ' 行批次号读不出库位，PDA 上会标黄：' + noL.join('；'));
+      st.lineErrs = errs; st.warns = warns;
+    }
+    /** 需要确认 / 修正的行（PDF 或 Excel）：条码、品名、数量、单位可以直接改 */
+    function fixHtml() {
+      var bad = (st.lines || []).map(function (l, i) { return { l: l, i: i }; }).filter(function (x) { return (x.l._e && x.l._e.length) || (x.l._w && x.l._w.length); });
+      if (!bad.length) return '';
+      return '<div class="card upwarn" id="fixCard"><h3 style="margin-top:0">需要确认 / 修正的行（' + bad.length + '）</h3><p class="hint">红色的必须改好才能上传；黄色的请核对。改完点别处会自动重新检查。</p>' +
+        '<div class="uptabw"><table class="uptab fixtab"><thead><tr><th>行</th><th>DO</th><th>条码</th><th>品名</th><th class="n">数量</th><th>单位</th><th>问题</th></tr></thead><tbody>' +
+        bad.map(function (x) {
+          var l = x.l, inp = function (k, v, w) { return '<input data-fix="' + x.i + '" data-k="' + k + '" value="' + esc(v == null ? '' : v) + '" style="width:' + w + '">'; };
+          return '<tr class="' + (l._e.length ? 'fixbad' : 'fixwarn') + '"><td class="hint">' + esc((st.multi ? l.file + ' ' : '') + l.row) + '</td><td>' + esc(l.doNo) + '</td><td>' + inp('barcode', l.barcode, '130px') + '</td><td>' + inp('desc', l.desc, '220px') +
+            '</td><td class="n">' + inp('qty', l.qty > 0 ? l.qty : l.qtyRaw, '60px') + '</td><td>' + inp('uom', l.uom, '50px') + '</td><td class="hint">' + esc(l._e.concat(l._w).join('；')) + '</td></tr>';
+        }).join('') + '</tbody></table></div></div>';
     }
     function loadCarry() {
       if (PKU()) { st.carry = []; return draw(); }       // 拣货没有“之前未装”
@@ -2094,7 +2271,7 @@
     function merged() {
       var m = {}, order = [];
       (st.lines || []).forEach(function (l) {
-        var k = ldLineKey(l, PKU());
+        var k = (PKU() ? l.doNo + '#' : '') + ldLineKey(l, PKU());        // v1.7 拣货每张 DO 一个任务：只在同一张 DO 里合并
         if (!m[k]) { m[k] = { code: l.itemCode, desc: l.desc, uom: l.uom, spec: l.spec || '', batch: l.batch || '', bc: [], qty: 0, src: [], i: order.length }; order.push(k); }
         var it = m[k]; it.qty = Math.round((it.qty + l.qty) * 1000) / 1000; it.src.push(l.doNo + '×' + l.qty);
         if (l.barcode && it.bc.indexOf(l.barcode) < 0) it.bc.push(l.barcode);
@@ -2108,7 +2285,7 @@
       if (st.busy) return;
       st.busy = true; draw();
       var refs = Object.keys(st.pick).filter(function (k) { return st.pick[k] && (st.carry || []).some(function (c) { return c.ref === k; }); });
-      api({ action: 'ldImport', mod: UPM, importId: st.importId, fileName: st.fileName, force: !!force, carry: PKU() ? [] : refs,
+      api({ action: 'ldImport', mod: UPM, importId: st.importId, fileName: st.fileName, force: !!force, carry: PKU() ? [] : refs, customers: PKU() ? (st.customers || {}) : undefined,
         lines: st.lines.map(function (l) { return { doNo: l.doNo, doDate: l.doDate, itemCode: l.itemCode, desc: l.desc, barcode: l.barcode, qty: l.qty, uom: l.uom, spec: l.spec || '', batch: l.batch || '', fromDoc: l.fromDoc }; }) }, true)
         .then(function (d) {
           st.busy = false;
@@ -2132,22 +2309,29 @@
       var picked = (st.carry || []).filter(function (c) { return st.pick[c.ref]; });
       var h = '';
       if (st.done) {
-        h = '<div class="card upok"><div class="upok-ic">✓</div><h2>已建立装车任务 ' + esc(st.done.taskId) + '</h2><p>' +
+        if (PKU() && st.done.taskIds) h = '<div class="card upok"><div class="upok-ic">✓</div><h2>已建立 ' + st.done.taskIds.length + ' 个拣货任务</h2><p>' +
+          (st.done.status === 'duplicate' ? '（这些文件刚才已经上传过，没有重复建立）' : 'DO ' + st.done.doCount + ' 张 · ' + st.done.lineCount + ' 行 · 每张 DO 一个任务') + '</p><p><b>' + esc(st.done.taskIds.join('、')) + '</b></p>' +
+          (st.done.badLoc ? '<p class="err">其中 ' + st.done.badLoc + ' 项批次号没有库位 / 格式异常，PDA 上排在最后并标黄。</p>' : '') +
+          '<p class="hint">还没分配的任务 PDA 上看不到 —— 请在下面「PDA 任务分配」里勾选、分配给员工。</p><button class="btn save" id="upNew">上传下一个</button></div>';
+        else h = '<div class="card upok"><div class="upok-ic">✓</div><h2>已建立装车任务 ' + esc(st.done.taskId) + '</h2><p>' +
           (st.done.status === 'duplicate' ? '（这个文件刚才已经上传过，没有重复建立）' : 'DO ' + st.done.doCount + ' 张 · ' + st.done.lineCount + ' 行 · 商品 ' + st.done.itemCount + ' 项' + (st.done.carryCount ? '（含之前未装 ' + st.done.carryCount + ' 项）' : '')) +
           '</p>' + (st.done.badLoc ? '<p class="err">其中 ' + st.done.badLoc + ' 项批次号没有库位 / 格式异常，PDA 上排在最后并标黄。</p>' : '') +
           '<p class="hint">PDA 打开「🚚 装车点货」就能看到这个任务。</p><button class="btn save" id="upNew">上传下一个</button></div>';
       } else {
-        h = '<div class="card"><h3 style="margin-top:0">选择 AutoCount 导出的 Excel</h3>' +
-          '<ol class="hint upsteps">' + (PKU() ? '<li><b>送货单</b>（每张 DO 导出一个 Excel，可以一次选多个；需要有批次号、条码、数量）</li><li>或 <b>Delivery Order Detail Listing（带 Batch No. 列）</b></li><li>批次号结尾就是库位，如 2701-AB-07-J01 → 07-J-01</li></ol>' :
+        h = '<div class="card"><h3 style="margin-top:0">' + (PKU() ? '选择 AutoCount 送货单（Excel 或 PDF）' : '选择 AutoCount 导出的 Excel') + '</h3>' +
+          '<ol class="hint upsteps">' + (PKU() ? '<li><b>送货单</b>（每张 DO 导出一个 Excel，可以一次选多个；需要有批次号、条码、数量）</li><li>或 <b>送货单 PDF</b>：在 AutoCount 用「打印 → Microsoft Print to PDF」另存（直接导出的 PDF 没有中文，不能用）</li><li>或 <b>Delivery Order Detail Listing（带 Batch No. 列）</b></li><li>批次号结尾就是库位，如 2701-AB-07-J01 → 07-J-01</li></ol>' :
             '<li><b>Delivery Order Detail Listing</b>（必需：每行有 DO 号、条码或 Item Code、数量；有没有 Item Code 列都可以）</li><li><b>送货单</b>（可选：一起选上，自动补上单位 / 规格 / 批次号）</li></ol>') +
-          '<button class="btn save upfile" id="upPick">📂 选择 Excel 文件（可多选）</button><input id="upF" class="vh" type="file" accept=".xlsx,.xls" multiple tabindex="-1">' +
+          '<button class="btn save upfile" id="upPick">' + (PKU() ? '📂 选择 Excel / PDF 文件（可多选）' : '📂 选择 Excel 文件（可多选）') + '</button><input id="upF" class="vh" type="file" accept="' + (PKU() ? '.xlsx,.xls,.pdf' : '.xlsx,.xls') + '" multiple tabindex="-1">' +
           (st.fileName ? '<p class="hint">已选：' + esc(st.fileName) + '</p>' : '') + (note ? '<p>' + esc(note) + '</p>' : '') + '</div>';
         if (st.errors.length) h += '<div class="card upbad"><b>不能上传：</b><ul>' + st.errors.slice(0, 40).map(function (e) { return '<li>' + esc(e) + '</li>'; }).join('') + '</ul></div>';
         if (st.lines && !st.errors.length) {
           h += '<div class="card"><div class="upsum"><div><b>' + Object.keys(dos).length + '</b><span>张 DO</span></div><div><b>' + st.lines.length + '</b><span>行</span></div><div><b>' + items.length + '</b><span>个商品（合并后）</span></div>' +
             (PKU() ? '<div><b>' + items.filter(function (it) { return it.flag; }).length + '</b><span>没有库位</span></div>' : '<div><b>' + (st.carry ? picked.length : '…') + '</b><span>之前未装</span></div>') + '</div>' +
             '<p class="hint">需求合计：' + Object.keys(units).map(function (u) { return units[u] + ' ' + esc(u); }).join(' · ') + '</p>' +
-            '<p class="hint">DO：' + esc(Object.keys(dos).join('、')) + '</p></div>';
+            '<p class="hint">DO：' + esc(Object.keys(dos).map(function (d) { return d + (st.customers && st.customers[d] ? '（' + st.customers[d] + '）' : ''); }).join('、')) + '</p>' +
+            (PKU() ? '<p><b>上传后每张 DO 生成一个拣货任务（共 ' + Object.keys(dos).length + ' 个），再在下面分配给员工。</b></p>' : '') + '</div>';
+          if (PKU() && st.lineErrs && st.lineErrs.length) h += '<div class="card upbad"><b>还不能上传（请在下面改好）：</b><ul>' + st.lineErrs.slice(0, 40).map(function (e) { return '<li>' + esc(e) + '</li>'; }).join('') + '</ul></div>';
+          if (PKU()) h += fixHtml();
           if (st.warns.length) h += '<div class="card upwarn"><b>请注意：</b><ul>' + st.warns.map(function (e) { return '<li>' + esc(e) + '</li>'; }).join('') + '</ul></div>';
           if (st.infos.length) h += '<details class="card"><summary>其他提示（' + st.infos.length + '）</summary><ul class="hint">' + st.infos.map(function (e) { return '<li>' + esc(e) + '</li>'; }).join('') + '</ul></details>';
           if (st.carry && st.carry.length) h += '<div class="card"><h3 style="margin-top:0">之前没装上车的商品（打勾的会一起加进这次任务，注明原来的日期）</h3>' +
@@ -2162,15 +2346,29 @@
                 '</td><td class="n"><b>' + it.qty + '</b></td><td class="hint">' + esc(it.src.join('; ')) + '</td></tr>';
             }).join('') + '</tbody></table></div></div>';
           h += tasksHtml();
-          h += '<div id="dock" class="dock"><button class="btn save" id="upGo"' + (st.busy || !st.carry ? ' disabled' : '') + '>' + (st.busy ? '上传中…' : '⬆ 上传并建立装车任务') + '</button></div>';
+          h += '<div id="dock" class="dock"><button class="btn save" id="upGo"' + (st.busy || !st.carry || (PKU() && st.lineErrs && st.lineErrs.length) ? ' disabled' : '') + '>' + (st.busy ? '上传中…' : '⬆ 上传并建立装车任务') + '</button></div>';
         }
       }
       if (!(st.lines && !st.errors.length && !st.done)) h += tasksHtml();
       app.innerHTML = '<div class="mods upmods">' + [['ld', '🚚 司机装车点货'], ['pk', '📋 仓库拣货']].map(function (x) { return '<button class="mod' + (UPM === x[0] ? ' on' : '') + '" data-um="' + x[0] + '"' + (st.busy ? ' disabled' : '') + '>' + x[1] + '</button>'; }).join('') + '</div>' + upW(h);
       Array.prototype.forEach.call(app.querySelectorAll('[data-um]'), function (b) {
-        b.onclick = function () { if (st.busy || b.dataset.um === UPM) return; UPM = b.dataset.um; LS.set('upMod', UPM); st = newSt(); TK = { list: null, err: '', busy: '' }; draw(); loadTasks(); };
+        b.onclick = function () { if (st.busy || b.dataset.um === UPM) return; UPM = b.dataset.um; LS.set('upMod', UPM); st = newSt(); TK = { list: null, err: '', busy: '', staff: [], sel: {}, who: LS.get('pkWho', ''), f: 'all' }; draw(); loadTasks(); };
       });
       var tr = $('#tkR'); if (tr) tr.onclick = function () { TK.list = TK.list || null; loadTasks(); };
+      // v1.7 拣货任务分配
+      Array.prototype.forEach.call(app.querySelectorAll('[data-as]'), function (c) { c.onchange = function () { if (c.checked) TK.sel[c.dataset.as] = 1; else delete TK.sel[c.dataset.as]; draw(); }; });
+      var aa = $('#asAll'); if (aa) aa.onchange = function () { Array.prototype.forEach.call(app.querySelectorAll('[data-as]'), function (c) { if (aa.checked) TK.sel[c.dataset.as] = 1; else delete TK.sel[c.dataset.as]; }); draw(); };
+      Array.prototype.forEach.call(app.querySelectorAll('[data-af]'), function (b) { b.onclick = function () { TK.f = b.dataset.af; TK.sel = {}; draw(); }; });
+      var aw = $('#asWho'); if (aw) aw.onchange = function () { TK.who = aw.value; LS.set('pkWho', TK.who); };
+      var ag = $('#asGo'); if (ag) ag.onclick = function () { if (!TK.who) return infoBox('请选择员工', '先在右边选择要分配给哪个员工'); doAssign(TK.who); };
+      var au = $('#asUn'); if (au) au.onclick = function () { doAssign(''); };
+      Array.prototype.forEach.call(app.querySelectorAll('[data-fix]'), function (inp) {
+        inp.onchange = function () {
+          var l = st.lines[+inp.dataset.fix], k = inp.dataset.k, v = inp.value.trim();
+          if (k === 'qty') { l.qtyRaw = v; l.qty = Number(v.replace(/,/g, '')); } else if (k === 'barcode') l.barcode = v.replace(/\s+/g, ''); else l[k] = v;
+          pkCheck(); draw();
+        };
+      });
       Array.prototype.forEach.call(app.querySelectorAll('[data-del]'), function (b) {
         b.onclick = function () { var t = (TK.list || []).filter(function (x) { return x.id === b.dataset.del; })[0]; if (t) askDelete(t, false); };
       });
@@ -2387,7 +2585,7 @@
     var t = s && s.task; if (!t || !/^PK-/i.test(t.id)) return;
     var c = ldCounts(s), cnt = 0; s.items.forEach(function (it) { cnt = r3(cnt + (c[it.key] || 0)); });
     var all = LS.get('pkLocal', {});
-    all[t.id] = { id: t.id, date: t.date, doCount: t.doCount, itemCount: s.items.length, required: t.required, counted: cnt,
+    all[t.id] = { id: t.id, date: t.date, doCount: t.doCount, itemCount: s.items.length, required: t.required, counted: cnt, assignedTo: t.assignedTo || '', customer: t.customer || '', dos: t.dos || '',
       status: s.localDone ? '已完成' : t.status, at: new Date().toISOString() };
     LS.set('pkLocal', all);
   }
@@ -2446,20 +2644,23 @@
   }
   var ldRedraw = null;
   var LD_GONE = '这个装车任务已被删除或取消';
-  function ldGone(id) { return ldModOf(id) === 'pk' ? '这个拣货任务已被删除或取消' : LD_GONE; }
+  var ldMovedMsg = {};      // v1.7 拣货任务改派给别人 / 取消分配
+  function ldGone(id) { return ldMovedMsg[id] || (ldModOf(id) === 'pk' ? '这个拣货任务已被删除或取消' : LD_GONE); }
   var ldOnGone = null;      // 正在看的任务被删除时，页面要做的事
   /** v1.4.5 任务已被删除：清掉手机上的这个任务和它还没上传的记录（其他任务不受影响） */
-  function ldPurge(tid) {
-    delete ldMem[tid]; LDQ = (LDQ || []).filter(function (o) { return o.taskId !== tid; });
+  function ldPurge(tid, moved) {
+    if (moved) ldMovedMsg[tid] = typeof moved === 'string' ? moved : '这个拣货任务已改派给别人（或取消了分配），不能再在这台 PDA 上拣';
+    delete ldMem[tid];
+    if (!moved) LDQ = (LDQ || []).filter(function (o) { return o.taskId !== tid; });   // v1.7 改派：本机还没上传的记录保留，继续上传（改派前拣的后台照收）
     ['ldTasks', 'pkTasks'].forEach(function (ck) { var ts = LS.get(ck, null); if (ts) LS.set(ck, ts.filter(function (t) { return t.id !== tid; })); });
     var pl = LS.get('pkLocal', null); if (pl && pl[tid]) { delete pl[tid]; LS.set('pkLocal', pl); }
-    return Promise.all([IDB.kdel('ld:' + tid).catch(function () { }), ldSaveQ()]).then(function () { if (ldOnGone) ldOnGone(tid); });
+    return Promise.all([IDB.kdel('ld:' + tid).catch(function () { }), ldSaveQ()]).then(function () { if (ldOnGone) ldOnGone(tid); if (moved) ldFlush(); });
   }
   /** 有修改被退回（别人已经改过 / 任务已删除）→ 重新下载这个任务，手机上显示最新的数量 */
   function ldRefetch(ids) {
     return Promise.all(ids.map(function (tid) {
       return api({ action: 'ldTask', taskId: tid }, true).then(function (d) {
-        if (d.error === 'NOTASK') return ldPurge(tid);
+        if (d.error === 'NOTASK') return ldPurge(tid, d.moved ? d.message : false);
         if (d.error) return;
         return ldGet(tid).then(function (cur) { return ldPut(ldFromServer(d, cur)); });
       }).catch(function () { });
@@ -2485,6 +2686,7 @@
       Object.keys(loc).sort().reverse().forEach(function (k) {
         if (seen[k]) return;
         if (fromServer && !ldPending(k)) return;          // 联网时服务器列表里已经没有（已删除 / 太旧）又没有待上传的 → 不显示
+        if (loc[k].assignedTo && loc[k].assignedTo !== operator) return;   // v1.7 同一台 PDA 换了员工：只显示自己的任务
         out.push(Object.assign({}, loc[k], { local: true }));
       });
       return out;
@@ -2498,12 +2700,13 @@
       }
       app.innerHTML = modTabs(mod) + ldW('<div class="topline"><span>员工：<span data-nt>' + esc(operator) + '</span></span><button class="link" id="lr">刷新</button></div>' +
         (note ? '<p class="hint">' + esc(note) + '</p>' : '') +
-        (!list ? '<div class="empty">加载中…</div>' : list.length ? '' : '<div class="empty">' + (mod === 'pk' && offline ? '现在没有网络，手机里也还没有下载过的拣货任务。<br>联网后打开任务一次，之后断网也能继续。' : '没有装车任务。办公室上传 DO 后会出现在这里。') + '</div>') +
+        (!list ? '<div class="empty">加载中…</div>' : list.length ? '' : '<div class="empty">' + (mod === 'pk' && offline ? '现在没有网络，手机里也还没有下载过的拣货任务。<br>联网后打开任务一次，之后断网也能继续。' : (mod === 'pk' ? '没有分配给你的拣货任务。办公室在上传电脑分配后会出现在这里。' : '没有装车任务。办公室上传 DO 后会出现在这里。')) + '</div>') +
         (list || []).map(function (t) {
           var pct = t.required ? Math.min(100, t.counted / t.required * 100) : 0, pend = ldPending(t.id);
           var dl = mod === 'pk' ? (t.local ? '<span class="pkdl">📥 已下载，可离线</span>' : offline ? '<span class="pkdl no">未下载，需联网打开一次</span>' : '') : '';
           return '<button class="card job ldtask' + (mod === 'pk' && offline && !t.local ? ' nodl' : '') + '" data-id="' + esc(t.id) + '"><div class="id">' + esc(t.id) + ' ' + ldBadge(t.status) + dl + '</div>' +
-            '<div class="meta"><span>日期</span><b>' + esc(t.date) + '</b><span>DO</span><b>' + t.doCount + ' 张' + (t.carry ? ' + 之前未装 ' + t.carry + ' 项' : '') + '</b>' +
+            '<div class="meta"><span>日期</span><b>' + esc(t.date) + '</b><span>DO</span><b' + (mod === 'pk' && t.doCount === 1 && t.dos ? ' data-nt>' + esc(t.dos) : '>' + t.doCount + ' 张') + (t.carry ? ' + 之前未装 ' + t.carry + ' 项' : '') + '</b>' +
+            (mod === 'pk' && t.customer ? '<span>客户</span><b data-nt>' + esc(t.customer) + '</b>' : '') +
             '<span>商品</span><b>' + t.itemCount + ' 项</b><span>数量</span><b>已点 ' + t.counted + ' / 需求 ' + t.required + '</b></div>' +
             '<div class="progress"><i class="d" style="width:' + pct + '%"></i></div>' +
             (pend ? '<div class="ptext err">本机还有 ' + pend + ' 笔没上传</div>' : '') + '</button>';
@@ -3160,6 +3363,7 @@
       api({ action: 'ldStatus', taskIds: [id] }, true).then(function (d) {
         var v = d.status && d.status[id];
         if (v === 'gone') return ldPurge(id);
+        if (v === 'moved') return ldPurge(id, true);
         if (v && s && v !== s.task.status && !s.localDone && !ldPending(id)) ldRefetch([id]).then(function () { if (ldRedraw) ldRedraw(); });
       }, function () { });
     }, 30000);
@@ -3176,7 +3380,7 @@
       if (local) { s = local; draw(); }
       if (local && IT != null && Date.now() - Date.parse(local.fetched || 0) < 120000) { ldFlush(); return; }   // SKU 页之间切换：刚下载过就不重复下载
       return api({ action: 'ldTask', taskId: id }, true).then(function (d) {
-        if (d.error === 'NOTASK') return ldPurge(id);        // 任务已被删除 → 清掉本机资料和待上传
+        if (d.error === 'NOTASK') return ldPurge(id, d.moved ? d.message : false);        // 任务已被删除 → 清掉本机资料和待上传；改派 → 清掉本机资料，待上传的照样上传
         if (d.error) { if (!s) { msg = { cls: 'bad', text: d.message }; draw(); } return; }
         return ldGet(id).then(function (cur) { s = ldFromServer(d, cur); return ldPut(s); }).then(function () { if ($('#modal').hidden) draw(); ldFlush(); });
       }, function (e) {
