@@ -3,7 +3,7 @@
  * 原则：只采集原始资料，不做任何核对。先存手机（离线队列），再上传云端。 */
 (function () {
   'use strict';
-  var VERSION = '1.8.4';
+  var VERSION = '1.8.5';
   var $ = function (s, el) { return (el || document).querySelector(s); };
   var app = $('#app');
 
@@ -1193,7 +1193,7 @@
         $('#t_' + k).textContent = '📷 扫描 ' + hhmm(scanTimes[k]); onEdit();
         var bi = BC.findIndex ? BC.findIndex(function (x) { return x[0] === k; }) : 0;
         if (prefs.pda && bi < BC.length - 1) F[BC[bi + 1][0]].focus();
-      }, { line: true });          // v1.8.4 入库：画面里同时有几个条码（单品码 / 箱码）→ 只要红线上的那个
+      });
     };
     markHas();
     // 进入页面：PDA 模式自动聚焦第一个空的条码框（不弹键盘），扫描头可直接扫
@@ -2651,10 +2651,36 @@
           L.slice(0, 1500).map(function (x) { return '<tr><td><b>' + esc(x.bc) + '</b></td><td>' + esc(x.item) + '</td><td>' + esc(x.desc) + '</td><td>' + esc(x.uom) + '</td><td><span class="inbk ' + INB_KIND[x.kind][1] + '">' + INB_KIND[x.kind][0] + '</span>' +
             (x.old ? '<div class="hint">原来是 ' + esc(x.old) + (x.oldDesc ? ' ' + esc(x.oldDesc) : '') + '</div>' : '') + '</td></tr>'; }).join('') +
           (L.length ? '' : '<tr><td colspan="5" class="hint">全部箱码系统里已经一样，不用改。</td></tr>') + '</tbody></table></div>' +
+          inbBatchHtml(d, I) +
           '<div class="inb-act"><label class="hint"><input type="checkbox" id="inbAll"' + (I.all ? ' checked' : '') + '> 显示“已经一样”的行</label><button class="tbtn" id="inbX">取消</button>' +
-          '<button class="btn save" id="inbGo"' + (I.busy || !(c.bind + c.change + c.new) ? ' disabled' : '') + '>✓ 确认写入（' + (c.bind + c.change + c.new) + ' 个箱码）</button></div>';
+          '<button class="btn save" id="inbGo"' + (I.busy || !(c.bind + c.change + c.new + inbNewB(d)) ? ' disabled' : '') + '>✓ 确认写入（' + (c.bind + c.change + c.new) + ' 个箱码' + (inbNewB(d) ? ' · ' + inbNewB(d) + ' 个新批次' : '') + '）</button></div>';
       }
       return h + '</div>';
+    }
+    /** v1.8.5 新批次：批次号 = 到期年月 + 柜号 / 供应商编号（从文件名找，可以改） */
+    function inbNewB(d) { return (d.batches || []).filter(function (b) { return b.have !== 'ac'; }).length; }
+    function inbBatchHtml(d, I) {
+      var B = d.batches || [];
+      return '<div class="inb-bt"><div class="inb-bh"><b>新批次</b><label>柜号 / 供应商编号 <input id="inbCtn" value="' + esc(I.container || '') + '" placeholder="例如 LX26246" maxlength="20"></label>' +
+        '<span class="hint">批次号 = 到期年月 + 柜号，例如 2909-LX26246。AutoCount 以后有了同一个批次，以 AutoCount 为准。</span></div>' +
+        (!d.container ? '<p class="err"><b>请填柜号（或供应商编号）才会建批次</b></p>' : '') +
+        (d.noExp ? '<p class="hint">' + d.noExp + ' 行没有到期日（截止日期），不建批次</p>' : '') +
+        (B.length ? '<div class="rtw inbw"><table class="rtab-t"><thead><tr><th>Item Code</th><th>品名</th><th>批次号</th><th>生产</th><th>到期</th><th>数量</th><th>处理</th></tr></thead><tbody>' +
+          B.map(function (b) { return '<tr><td>' + esc(b.item) + '</td><td>' + esc(b.desc) + '</td><td><b>' + esc(b.base) + '</b></td><td>' + esc(b.mfg) + '</td><td><b>' + esc(b.exp) + '</b></td><td>' + esc(b.qty) + ' ' + esc(b.uom) + '</td><td>' +
+            (b.have === 'ac' ? '<span class="inbk k0">AutoCount 已有</span>' : b.have === 'in' ? '<span class="inbk k2">更新</span>' : '<span class="inbk k3">新批次</span>') + '</td></tr>'; }).join('') + '</tbody></table></div>' : '') + '</div>';
+    }
+    function inbDate(v) {
+      if (typeof v === 'number' && v > 20000 && v < 80000) { var d = new Date(Date.UTC(1899, 11, 30) + Math.round(v) * 864e5); return d.toISOString().slice(0, 10); }
+      var t = cellText(v), m = /^(\d{4})[-\/.](\d{1,2})[-\/.](\d{1,2})/.exec(t) || null;
+      if (m) return m[1] + '-' + ('0' + m[2]).slice(-2) + '-' + ('0' + m[3]).slice(-2);
+      m = /^(\d{1,2})[-\/.](\d{1,2})[-\/.](\d{4})/.exec(t);
+      return m ? m[3] + '-' + ('0' + m[2]).slice(-2) + '-' + ('0' + m[1]).slice(-2) : '';
+    }
+    function inbPreview() {
+      var I = R.inb; I.busy = true; draw();
+      return api({ action: 'rcInbound', rows: I.rows, batches: I.batches, container: I.container, fileName: I.file }, true).then(function (d) {
+        I.busy = false; I.res = d; I.msg = I.file + '：' + I.rows.length + ' 个整箱条码' + (I.skip ? '（另 ' + I.skip + ' 行没有整箱条码，不用绑定）' : '') + '，请核对后点“确认写入”。'; draw();
+      }, function (e) { R.inb = { msg: '读取失败：' + (e.network ? '网络不可用' : e.message), err: true }; draw(); });
     }
     /** 读入库单：在前 30 行找表头（箱码 / 条码 / Barcode + Item Code，品名、单位可选）。拿到正式模版后按模版调整。 */
     function inbRead(file) {
@@ -2666,31 +2692,32 @@
           var cs = rowCells(sh, r); if (cs.length) seen.push(cs.map(function (c) { return cellText(c.v); }).filter(Boolean).join(' | '));
           // 正式模版（FINAL DETAILS）：Item Code | BARCODE（单品）| Detail Description | … | UOM | Qty | BARCODE（整箱）| …；整箱条码才是箱码
           var bc = pickCol(cs, /整箱|箱码/i) || pickCol(cs, /条码|bar\s*code/i), it = pickCol(cs, /item\s*code|itemcode|商品编码|商品代码|货号|产品编码/i);
-          if (bc && it) { hr = r; C = { bc: bc, item: it, unit: pickCol(cs, /单品|^bar\s*code$/i, /整箱/), desc: pickCol(cs, /品名|名称|description|^desc/i, /code|description\s*2/i), uom: pickCol(cs, /^(uom|单位)/i) }; }
+          if (bc && it) { hr = r; C = { bc: bc, item: it, unit: pickCol(cs, /单品|^bar\s*code$/i, /整箱/), desc: pickCol(cs, /品名|名称|description|^desc/i, /code|description\s*2/i), uom: pickCol(cs, /^(uom|单位)/i),
+            qty: pickCol(cs, /收货数量|实收/) || pickCol(cs, /^qty$|数量/i), mfg: pickCol(cs, /生产日期|mfg/i), exp: pickCol(cs, /截止日期|到期|有效期至|expiry|exp\s*date/i, /保质期\s*\(?月/) }; }
         }
         if (!hr) throw new Error('认不出入库单：要有“箱码 / 条码”和“Item Code”两列。文件前几行是：' + seen.slice(0, 3).join(' ／ '));
-        var rows = [];
+        var rows = [], batches = [];
         for (var rr = hr + 1; rr <= sh.maxRow; rr++) {
           var o = {}; rowCells(sh, rr).forEach(function (x) { o[x.c1] = x.v; });
           var b = cellText(o[C.bc]).replace(/\s+/g, ''), i = cellText(o[C.item]), u = C.unit && C.unit !== C.bc ? cellText(o[C.unit]).replace(/\s+/g, '') : '';
           if (!i && u) i = u;                    // Item Code 空着：用单品条码（我们的 Item Code 一般就是单品条码）
           if (!b && !i) continue;
+          if (i && C.exp) batches.push([i, C.desc ? cellText(o[C.desc]) : '', C.uom ? cellText(o[C.uom]) : '', C.qty ? Number(o[C.qty]) || 0 : 0, C.mfg ? inbDate(o[C.mfg]) : '', inbDate(o[C.exp])]);
           if (!b || b === i || b === u) { skip++; continue; }       // 没有整箱条码（散装 / 桶装扫单品码就认得）
           rows.push([b, i, C.desc ? cellText(o[C.desc]) : '', C.uom ? cellText(o[C.uom]) : '']);
         }
         R.inb.skip = skip;
-        if (!rows.length) throw new Error('入库单里没有整箱条码' + (skip ? '（' + skip + ' 行没有整箱条码）' : ''));
-        R.inb.rows = rows;
-        return api({ action: 'rcInbound', rows: rows, fileName: file.name }, true);
-      }).then(function (d) {
-        R.inb.busy = false; R.inb.res = d; R.inb.msg = file.name + '：' + R.inb.rows.length + ' 个整箱条码' + (R.inb.skip ? '（另 ' + R.inb.skip + ' 行没有整箱条码，不用绑定）' : '') + '，请核对后点“确认写入”。'; draw();
-      }, function (e) { R.inb = { msg: '读取失败：' + (e.network ? '网络不可用' : e.message), err: true }; draw(); });
+        if (!rows.length && !batches.length) throw new Error('入库单里没有整箱条码' + (skip ? '（' + skip + ' 行没有整箱条码）' : ''));
+        R.inb.rows = rows; R.inb.batches = batches;
+        var cm = /([A-Z]{2,}\d{3,})/i.exec(file.name); R.inb.container = cm ? cm[1].toUpperCase() : '';      // 柜号从文件名找（例如 LX26246-297 (DSSB).xlsx）
+        return inbPreview();
+      }).catch(function (e) { R.inb = { msg: '读取失败：' + (e.network ? '网络不可用' : e.message), err: true }; draw(); });
     }
     function inbCommit() {
       var I = R.inb; I.busy = true; draw();
-      api({ action: 'rcInbound', rows: I.rows, fileName: I.file, commit: true }, true).then(function (d) {
+      api({ action: 'rcInbound', rows: I.rows, batches: I.batches, container: I.container, fileName: I.file, commit: true }, true).then(function (d) {
         var c = d.counts;
-        R.inb = { msg: '已写入 ' + I.file + '：新箱码绑定 ' + c.bind + ' · 改绑 ' + c.change + ' · 新品 ' + c.newItems + ' 个' + (d.merged ? ' · 仓管建的新商品已合并 ' + d.merged + ' 个' : '') + '。PDA 移库重新打开就认得这些箱码。' };
+        R.inb = { msg: '已写入 ' + I.file + '：新箱码绑定 ' + c.bind + ' · 改绑 ' + c.change + ' · 新品 ' + c.newItems + ' 个' + (d.batchesAdded ? ' · 新批次 ' + d.batchesAdded + ' 个（' + d.container + '）' : '') + (d.merged ? ' · 仓管建的新商品已合并 ' + d.merged + ' 个' : '') + '。PDA 移库重新打开就认得这些箱码和批次。' };
         draw();
       }, function (e) { I.busy = false; I.msg = '写入失败：' + (e.network ? '网络不可用' : e.message); I.err = true; draw(); });
     }
@@ -2859,6 +2886,7 @@
         var ig = $('#inbGo'); if (ig) ig.onclick = inbCommit;
         var ix = $('#inbX'); if (ix) ix.onclick = function () { R.inb = null; draw(); };
         var ia = $('#inbAll'); if (ia) ia.onchange = function () { R.inb.all = ia.checked; draw(); };
+        var ic = $('#inbCtn'); if (ic) ic.onchange = function () { R.inb.container = ic.value.trim().toUpperCase().replace(/[^A-Z0-9]/g, ''); inbPreview(); };
         Array.prototype.forEach.call(app.querySelectorAll('[data-st]'), function (b) { b.onclick = function () { R.trF.status = b.dataset.st; draw(); }; });
         inp('trQ', R.trF, 'q'); inp('trS', R.trF, 'src'); inp('trD', R.trF, 'dst'); inp('trF', R.trF, 'from'); inp('trT', R.trF, 'to');
         var r = $('#trR'); if (r) r.onclick = function () { load('tr'); };
@@ -4120,18 +4148,6 @@
       var t = $('#camTip'); if (t && camState === st) t.textContent = '还没扫到？光线暗→开手电筒；条码小→点放大或靠近一点；反光→手机稍微斜一点';
     }, 8000);
     var video = $('#camVideo');
-    /** v1.8.4 红线规则（入库）：同时读到 2 个以上条码时，只要离红线（画面中间横线）最近的那个；只有 1 个时照旧 */
-    function pickLine(rs, vw, vh) {
-      if (!opts.line || rs.length < 2 || !vw) return rs;
-      var cy = vh / 2, cx = vw / 2, best = null, bd = 1e9;
-      rs.forEach(function (r) {
-        var b = r.boundingBox; if (!b) return;
-        var d = Math.abs(b.y + b.height / 2 - cy) + 0.3 * Math.abs(b.x + b.width / 2 - cx);
-        if (b.y <= cy && b.y + b.height >= cy) d -= vh;          // 红线正好压着的优先
-        if (d < bd) { bd = d; best = r; }
-      });
-      return best ? [best] : rs;
-    }
     var hi = { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } };
     function startNative(formats) {
       var det = new BarcodeDetector({ formats: formats });
@@ -4146,7 +4162,7 @@
           if (camState !== st) return;
           if (video.readyState < 2) { st.loopT = setTimeout(loop, 80); return; }
           det.detect(video).then(function (rs) {
-            pickLine(rs || [], video.videoWidth, video.videoHeight).forEach(function (r) { accept(r.rawValue, r.format); });
+            (rs || []).forEach(function (r) { accept(r.rawValue, r.format); });
           }).catch(function () { }).then(function () { if (camState === st && !st.done) st.loopT = setTimeout(loop, 40); });
         })();
       }).catch(fail);
