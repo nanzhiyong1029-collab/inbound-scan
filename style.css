@@ -624,3 +624,4 @@ body.wcon header#bar { display: none; }
 }
 @media print { .wcnav, #wcTop, .wcbar .tbtn { display: none !important; } .wc { display: block; } }
 .wct td.mono { white-space: nowrap; }
+.wcwho { font-size: 14px; color: #334155; font-weight: 600; padding: 0 4px; }
