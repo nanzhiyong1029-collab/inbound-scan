@@ -25,6 +25,8 @@
   .cam .line { position: absolute; left: 3%; right: 3%; top: 50%; height: 0; border-top: 2px solid #f04438; display: none; pointer-events: none; }
   .cam.loc .line { display: block; }
   #reader { position: absolute; inset: 0; }
+  .camsg { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; text-align: center; color: #fff; padding: 20px; font-size: 16px; background: rgba(0,0,0,.6); }
+  .camsg button { font: inherit; font-weight: 700; border: 0; border-radius: 10px; padding: 12px 18px; background: #c55a11; color: #fff; margin-top: 10px; }
   .opts { display: flex; gap: 6px; margin: 8px 0; flex-wrap: wrap; }
   .opts button { padding: 6px 10px; font-size: 13px; }
   .res { background: #fff; border-radius: 12px; padding: 10px 12px; margin: 8px 0; min-height: 76px; border: 2px solid var(--line); }
@@ -50,7 +52,7 @@
     <button data-m="zoom">商品（放大）</button>
   </div>
   <div class="tip" id="tip"></div>
-  <div class="cam" id="cam"><video id="v" playsinline muted autoplay></video><div id="reader"></div><div class="aim"></div><div class="line"></div></div>
+  <div class="cam" id="cam"><video id="v" playsinline muted autoplay></video><div id="reader"></div><div class="aim"></div><div class="line"></div><div class="camsg" id="camsg"><div>正在打开摄像头…<br><small>如果弹出“允许使用相机”，请点允许</small></div></div></div>
   <div class="opts"><button id="hd">4K 画质</button><button id="torch" hidden>🔦 手电筒</button><button id="z" hidden>🔍 放大</button></div>
   <div class="res" id="res"><small>对准条码…</small></div>
   <div class="stat" id="stat"></div>
@@ -174,11 +176,11 @@
   }
   function constraints() { return { facingMode: { ideal: 'environment' }, width: { ideal: hd ? 3840 : 1920 }, height: { ideal: hd ? 2160 : 1080 } }; }
   function start() {
-    stop(); running = true; $('#go').textContent = '停止'; t0 = Date.now(); hist = [];
+    stop(true); msg('正在打开摄像头…<br><small>如果弹出“允许使用相机”，请点允许</small>'); running = true; $('#go').textContent = '停止'; t0 = Date.now(); hist = [];
     var useNative = function (fs) {
       det = new BarcodeDetector({ formats: fs }); $('#eng').textContent = '手机自带识别';
       navigator.mediaDevices.getUserMedia({ audio: false, video: constraints() }).then(function (s) {
-        stream = s; track = s.getVideoTracks()[0]; $('#v').srcObject = s; controls(); return $('#v').play();
+        stream = s; track = s.getVideoTracks()[0]; $('#v').srcObject = s; controls(); return $('#v').play().then(function () { msg(''); });
       }).then(function () {
         (function loop() {
           if (!running) return;
@@ -193,7 +195,7 @@
       var F = Html5QrcodeSupportedFormats;
       zx = new Html5Qrcode('reader', { verbose: false, formatsToSupport: [F.EAN_13, F.EAN_8, F.UPC_A, F.UPC_E, F.CODE_128, F.ITF, F.CODE_39, F.QR_CODE], experimentalFeatures: { useBarCodeDetectorIfSupported: true } });
       zx.start({ facingMode: 'environment' }, { fps: 20, videoConstraints: constraints(), qrbox: function (w, h) { return mode === 'loc' ? { width: Math.floor(w * .94), height: Math.max(60, Math.floor(h * .22)) } : { width: Math.floor(w * .92), height: Math.max(80, Math.floor(Math.min(h * .45, w * .5))) }; } },
-        function (t, r) { accept(t, r && r.result && r.result.format && r.result.format.formatName); }, function () { }).then(controls).catch(fail);
+        function (t, r) { accept(t, r && r.result && r.result.format && r.result.format.formatName); }, function () { }).then(function () { msg(''); controls(); }).catch(fail);
     };
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return fail('这个浏览器不能用摄像头（请用 Chrome）');
     if ('BarcodeDetector' in window && BarcodeDetector.getSupportedFormats) {
@@ -203,13 +205,23 @@
       }, useZx);
     } else useZx();
   }
-  function stop() {
+  function stop(quiet) {
     running = false; clearTimeout(loopT); $('#go').textContent = '开始扫描';
     if (stream) stream.getTracks().forEach(function (t) { t.stop(); }); stream = null; track = null;
-    if (zx) { var z = zx; zx = null; z.stop().catch(function () { }).then(function () { try { z.clear(); } catch (e) { } }); }
+    if (zx) { var z = zx; zx = null; try { z.stop().catch(function () { }).then(function () { try { z.clear(); } catch (e) { } }); } catch (e) { try { z.clear(); } catch (e2) { } } }
     $('#v').hidden = false;
+    if (!quiet) msg('已停止<br><button>开始扫描</button>');
   }
-  function fail(e) { stop(); log('r', '打不开摄像头：' + (e && (e.message || e.name) || e)); }
+  function msg(html) { var m = $('#camsg'); if (!html) { m.hidden = true; return; } m.hidden = false; m.innerHTML = '<div>' + html + '</div>'; var b = m.querySelector('button'); if (b) b.onclick = start; }
+  function fail(e) {
+    stop(true); var t = e && (e.name || e.message) || String(e);
+    log('r', '打不开摄像头：' + (e && (e.message || e.name) || e));
+    var inApp = /wv\)|WebView|; wv|MicroMessenger|FBAN|FBAV|Instagram|Line\/|WhatsApp|Telegram/i.test(navigator.userAgent);
+    msg(/NotAllowed|Permission|denied/i.test(t) ? '相机权限被拒绝。<br>请点地址栏左边的图标 → 权限 → 相机 → 允许，然后<br><button>重新打开</button>' :
+      /NotReadable|TrackStart|in use/i.test(t) ? '相机被别的 APP 占用（比如正式的扫码 APP 页面还开着）。<br>关掉它后<br><button>重新打开</button>' :
+      inApp ? '这是聊天软件里的浏览器，不能用相机。<br>请复制网址到 <b>Chrome</b> 打开。' :
+      '打不开摄像头：' + t.replace(/[<>&]/g, '') + '<br><button>重新打开</button>');
+  }
   Array.prototype.forEach.call(document.querySelectorAll('[data-m]'), function (b) { b.onclick = function () { setMode(b.dataset.m); }; });
   $('#go').onclick = function () { running ? stop() : start(); };
   $('#hd').onclick = function () { hd = !hd; $('#hd').classList.toggle('on', hd); log('i', '画质：' + (hd ? '4K' : '1080p')); stat(); if (running) start(); };
@@ -218,8 +230,9 @@
     var fb = function () { var t = document.createElement('textarea'); t.value = text; document.body.appendChild(t); t.select(); try { document.execCommand('copy'); } catch (e) { } t.remove(); };
     if (navigator.clipboard) navigator.clipboard.writeText(text).then(function () { log('a', '已复制，可以粘贴发给我'); }, function () { fb(); log('a', '已复制'); }); else { fb(); log('a', '已复制'); }
   };
-  document.addEventListener('visibilitychange', function () { if (document.hidden && running) stop(); });
+  document.addEventListener('visibilitychange', function () { if (document.hidden && running) stop(); else if (!document.hidden && !running && $('#camsg').textContent.indexOf('已停止') >= 0) start(); });
   setMode('loc'); stat();
+  if (!window.isSecureContext) msg('网址必须是 https 才能用相机'); else start();     // 打开就自动开摄像头
 })();
 </script>
 </body>
