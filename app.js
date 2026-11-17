@@ -3,7 +3,7 @@
  * 原则：只采集原始资料，不做任何核对。先存手机（离线队列），再上传云端。 */
 (function () {
   'use strict';
-  var VERSION = '1.8.0';
+  var VERSION = '1.8.1';
   var $ = function (s, el) { return (el || document).querySelector(s); };
   var app = $('#app');
 
@@ -2074,14 +2074,14 @@
           '<tr class="asun"><td><b>未分配</b></td><td class="n" colspan="3"><b>' + un + '</b> 个任务</td></tr></tbody></table></div>' +
           '<div class="asbar"><span>筛选</span>' + [['all', '全部'], ['未分配', '未分配'], ['已分配', '已分配'], ['拣货中', '拣货中'], ['已完成', '已完成']].map(function (x) { return '<button class="tbtn' + (TK.f === x[0] ? ' on' : '') + '" data-af="' + x[0] + '">' + x[1] + '</button>'; }).join('') +
           '<span class="asgap"></span><span>已选 <b>' + nSel + '</b> 个</span><select id="asWho"><option value="">— 选择员工 —</option>' + TK.staff.map(function (n) { return '<option' + (n === TK.who ? ' selected' : '') + '>' + esc(n) + '</option>'; }).join('') + '</select>' +
-          '<button class="btn save" id="asGo"' + (!nSel || TK.busy ? ' disabled' : '') + '>分配给所选员工</button><button class="tbtn" id="asUn"' + (!nSel || TK.busy ? ' disabled' : '') + '>取消分配</button></div>' +
+          '<button class="btn save" id="asGo"' + (!nSel || TK.busy ? ' disabled' : '') + '>分配给所选员工</button><button class="tbtn" id="asUn"' + (!nSel || TK.busy ? ' disabled' : '') + '>取消分配</button><button class="tbtn" id="asPr"' + (!nSel ? ' disabled' : '') + '>🖨 打印所选</button></div>' +
           (!shown.length ? '<p class="hint">没有任务。</p>' :
           '<div class="uptabw"><table class="uptab tktab astab"><thead><tr><th><input type="checkbox" id="asAll"' + (shown.some(function (t) { return t.status !== '已完成'; }) && shown.every(function (t) { return t.status === '已完成' || TK.sel[t.id]; }) ? ' checked' : '') + '></th><th>任务</th><th>DO</th><th>客户</th><th class="n">商品</th><th class="n">数量</th><th>状态</th><th>负责人</th><th></th></tr></thead><tbody>' +
           shown.map(function (t) {
             var a = ast(t), dis = t.status === '已完成';
             return '<tr class="' + (a === '未分配' ? 'asnone' : '') + '"><td>' + (dis ? '' : '<input type="checkbox" data-as="' + esc(t.id) + '"' + (TK.sel[t.id] ? ' checked' : '') + '>') + '</td><td><b>' + esc(t.id) + '</b><div class="hint">' + esc(t.created || t.date) + '</div></td><td>' + esc(t.dos) + '</td><td>' + esc(t.customer || '—') +
               '</td><td class="n">' + t.itemCount + '</td><td class="n">' + t.counted + ' / ' + t.required + '</td><td><span class="asst as-' + ({ '未分配': 'u', '已分配': 'a', '拣货中': 'p', '已完成': 'd' }[a]) + '">' + a + '</span></td><td>' + (t.assignedTo ? '<b>' + esc(t.assignedTo) + '</b><div class="hint">' + esc(t.assignedAt) + '</div>' : '<span class="hint">—</span>') +
-              '</td><td>' + (dis ? '' : '<button class="tbtn tkdel" data-del="' + esc(t.id) + '"' + (TK.busy ? ' disabled' : '') + '>🗑</button>') + '</td></tr>';
+              '</td><td class="tkacts"><button class="tbtn tkpr" data-pr="' + esc(t.id) + '" title="打印拣货单">🖨 打印</button>' + (dis ? '' : '<button class="tbtn tkdel" data-del="' + esc(t.id) + '"' + (TK.busy ? ' disabled' : '') + '>🗑</button>') + '</td></tr>';
           }).join('') + '</tbody></table></div>')) + '</div>');
     }
     function doAssign(who, confirm) {
@@ -2300,27 +2300,43 @@
     /** v1.8 打印拣货单：每张 DO 一页，内容和送货单一样（原序号、批次号、条码、品名、数量、规格、单位），只是按 PDA 的库位顺序排；样式和送货单明显不同 */
     function printPick() {
       var items = merged(), pos = {};
-      items.forEach(function (it, i) { pos[it.k] = { i: i, loc: it.loc, note: it.note, flag: it.flag }; });
+      items.forEach(function (it, i) { pos[it.k] = { i: i, loc: it.loc, note: it.note }; });
       var dos = {}, order = [];
-      st.lines.forEach(function (l, li) { if (!dos[l.doNo]) { dos[l.doNo] = []; order.push(l.doNo); } dos[l.doNo].push({ l: l, li: li, p: pos[l.doNo + '#' + ldLineKey(l, true)] || { i: 9e9, loc: '' } }); });
+      st.lines.forEach(function (l, li) { if (!dos[l.doNo]) { dos[l.doNo] = []; order.push(l.doNo); } dos[l.doNo].push({ l: l, li: li, n: dos[l.doNo].length + 1, p: pos[l.doNo + '#' + ldLineKey(l, true)] || { i: 9e9, loc: '' } }); });   // n = 这张 DO 的第几行（= 送货单序号）
+      printDocs(order.map(function (d) {
+        var rows = dos[d].sort(function (a, b) { return a.p.i - b.p.i || a.li - b.li; });
+        return { doNo: d, customer: st.customers && st.customers[d] || '', date: String(rows[0].l.doDate || '').replace(/^(\d{4})-(\d{2})-(\d{2})$/, '$3/$2/$1'),
+          rows: rows.map(function (x) { var l = x.l; return { loc: x.p.loc || '', note: x.p.note || '', row: x.n, batch: l.batch, barcode: l.barcode, desc: l.desc, qty: l.qty, spec: l.spec, uom: l.uom }; }) };
+      }));
+    }
+    /** v1.8 任务列表里随时打印（从系统读回这几个任务的 DO） */
+    function printTasks(ids) {
+      if (!ids.length) return;
+      toast('准备拣货单…', 1500);
+      api({ action: 'pkPrint', taskIds: ids }, true).then(function (d) {
+        if (!d.docs || !d.docs.length) return infoBox('没有资料', '这些任务找不到送货单明细');
+        printDocs(d.docs);
+      }, function (e) { infoBox('打印不了', e.network ? '没有网络' : e.message); });
+    }
+    /** 每张 DO 一页：内容和送货单一样（原序号、批次号、条码、品名、数量、规格、单位），只是按 PDA 的库位顺序排；样式和送货单明显不同 */
+    function printDocs(docs) {
       var now = new Date(Date.now() + 8 * 3600e3).toISOString().replace('T', ' ').slice(0, 16).split(' ');
       var printed = now[0].split('-').reverse().join('/') + ' ' + now[1];
-      var html = order.map(function (d, di) {
-        var rows = dos[d].sort(function (a, b) { return a.p.i - b.p.i || a.li - b.li; }), units = {}, prevLoc = null;
-        rows.forEach(function (x) { units[x.l.uom || ''] = Math.round(((units[x.l.uom || ''] || 0) + (+x.l.qty || 0)) * 1000) / 1000; });
-        var cust = st.customers && st.customers[d] || '', date = String(rows[0].l.doDate || '').replace(/^(\d{4})-(\d{2})-(\d{2})$/, '$3/$2/$1');
+      var html = docs.map(function (D, di) {
+        var units = {}, prevLoc = null;
+        D.rows.forEach(function (x) { units[x.uom || ''] = Math.round(((units[x.uom || ''] || 0) + (+x.qty || 0)) * 1000) / 1000; });
         return '<section class="pps">' +
           '<div class="pph"><div class="ppt">拣 货 单<small>PICKING LIST · 仓库内部用 · 不是送货单，不随货</small></div><div class="ppn">按库位顺序</div></div>' +
-          '<table class="ppi"><tr><td>DO 号</td><td><b>' + esc(d) + '</b></td><td>日期</td><td>' + esc(date) + '</td></tr>' +
-          '<tr><td>客户</td><td colspan="3"><b>' + esc(cust || '—') + '</b></td></tr>' +
-          '<tr><td>行数</td><td>' + rows.length + ' 行 · 合计 ' + Object.keys(units).map(function (u) { return units[u] + ' ' + esc(u); }).join(' · ') + '</td><td>打印</td><td>' + esc(printed) + '</td></tr></table>' +
+          '<table class="ppi"><tr><td>DO 号</td><td><b>' + esc(D.doNo) + '</b></td><td>日期</td><td>' + esc(D.date || '') + '</td></tr>' +
+          '<tr><td>客户</td><td colspan="3"><b>' + esc(D.customer || '—') + '</b></td></tr>' +
+          '<tr><td>行数</td><td>' + D.rows.length + ' 行 · 合计 ' + Object.keys(units).map(function (u) { return units[u] + ' ' + esc(u); }).join(' · ') + '</td><td>打印</td><td>' + esc(printed) + (D.task ? ' · ' + esc(D.task) : '') + '</td></tr></table>' +
           '<table class="ppl"><thead><tr><th class="c">✓</th><th>库位</th><th class="c2">原序号</th><th>批次号</th><th>条码</th><th>商品名称</th><th class="n">数量</th><th>规格</th><th>单位</th></tr></thead><tbody>' +
-          rows.map(function (x) {
-            var l = x.l, loc = x.p.loc || '', same = loc === prevLoc; prevLoc = loc;
-            return '<tr class="' + (same ? 'same' : 'newloc') + '"><td class="c"><span class="ppbox"></span></td><td class="pploc">' + (same ? '〃' : '<b>' + esc(loc || '没有库位') + '</b>') + (x.p.note && !same ? '<div class="ppnote">' + esc(x.p.note) + '</div>' : '') + '</td>' +
-              '<td class="c2">' + esc(l.row || '') + '</td><td>' + esc(l.batch || '') + '</td><td>' + esc(l.barcode || '') + '</td><td>' + esc(l.desc || '') + '</td><td class="n"><b>' + esc(l.qty) + '</b></td><td>' + esc(l.spec || '') + '</td><td>' + esc(l.uom || '') + '</td></tr>';
+          D.rows.map(function (x) {
+            var loc = x.loc || '', same = loc === prevLoc; prevLoc = loc;
+            return '<tr class="' + (same ? 'same' : 'newloc') + '"><td class="c"><span class="ppbox"></span></td><td class="pploc">' + (same ? '〃' : '<b>' + esc(loc || '没有库位') + '</b>') + (x.note && !same ? '<div class="ppnote">' + esc(x.note) + '</div>' : '') + '</td>' +
+              '<td class="c2">' + esc(x.row || '') + '</td><td>' + esc(x.batch || '') + '</td><td>' + esc(x.barcode || '') + '</td><td>' + esc(x.desc || '') + '</td><td class="n"><b>' + esc(x.qty) + '</b></td><td>' + esc(x.spec || '') + '</td><td>' + esc(x.uom || '') + '</td></tr>';
           }).join('') + '</tbody></table>' +
-          '<div class="ppf"><span>拣货人：________________</span><span>复核人：________________</span><span>DO ' + esc(d) + ' · 第 ' + (di + 1) + ' / ' + order.length + ' 张</span></div></section>';
+          '<div class="ppf"><span>拣货人：________________</span><span>复核人：________________</span><span>DO ' + esc(D.doNo) + ' · 第 ' + (di + 1) + ' / ' + docs.length + ' 张</span></div></section>';
       }).join('');
       var box = $('#printArea'); if (!box) { box = document.createElement('div'); box.id = 'printArea'; document.body.appendChild(box); }
       box.innerHTML = html; document.body.classList.add('printing');
@@ -2410,6 +2426,8 @@
       var aw = $('#asWho'); if (aw) aw.onchange = function () { TK.who = aw.value; LS.set('pkWho', TK.who); };
       var ag = $('#asGo'); if (ag) ag.onclick = function () { if (!TK.who) return infoBox('请选择员工', '先在右边选择要分配给哪个员工'); doAssign(TK.who); };
       var au = $('#asUn'); if (au) au.onclick = function () { doAssign(''); };
+      var apr = $('#asPr'); if (apr) apr.onclick = function () { printTasks(Object.keys(TK.sel)); };
+      Array.prototype.forEach.call(app.querySelectorAll('[data-pr]'), function (b) { b.onclick = function () { printTasks([b.dataset.pr]); }; });
       Array.prototype.forEach.call(app.querySelectorAll('[data-fix]'), function (inp) {
         inp.onchange = function () {
           var l = st.lines[+inp.dataset.fix], k = inp.dataset.k, v = inp.value.trim();
