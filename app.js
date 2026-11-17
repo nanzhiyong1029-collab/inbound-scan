@@ -3,7 +3,7 @@
  * 原则：只采集原始资料，不做任何核对。先存手机（离线队列），再上传云端。 */
 (function () {
   'use strict';
-  var VERSION = '1.9.3';
+  var VERSION = '1.9.4';
   var $ = function (s, el) { return (el || document).querySelector(s); };
   var app = $('#app');
 
@@ -3114,6 +3114,8 @@
   // v1.9 平板中控台（库位记录后台电脑 / 平板，#/wc）：数据从 Supabase 读（快），处理还是写回表格（正本）。样式按 AWMS 1.0（没有托盘码：库位上记“商品 + 批次”）
   // =====================================================================
   var WC = null;
+  /** v1.9.4 仓库货架（按库位标签）：排 → 最后一列；每列 01–03 层 */
+  var WC_RACKS = { '01': 'I', '02': 'I', '03': 'M', '04': 'M', '05': 'M', '06': 'M', '07': 'P', '08': 'Q', '09': 'Q', '10': 'Q', '11': 'Q', '12': 'Q', '13': 'Q', '14': 'Q', '15': 'Q' }, WC_LEVELS = 3;
   function viewConsole() {
     document.body.classList.add('wide', 'wcon');
     setBar('库位中控台', false);
@@ -3153,6 +3155,10 @@
       (s.tasks || []).forEach(function (r) {
         var t = { id: r[0], at: r[1], type: r[2], bc: r[3], item: r[4], desc: r[5], base: r[6], from: r[7], to: r[8], ref: r[9], note: r[10] };
         D.tasks.push(t); [t.from, t.to].forEach(function (l) { if (lmParts(l)) cell(l).tasks.push(t); });
+      });
+      // v1.9.4 仓库实际的全部货架（库位标签）：没放东西的也显示成空库位
+      Object.keys(WC_RACKS).forEach(function (a) {
+        for (var k = 65; k <= WC_RACKS[a].charCodeAt(0); k++) for (var lv = 1; lv <= WC_LEVELS; lv++) cell(a + '-' + String.fromCharCode(k) + '-0' + lv);
       });
       Object.keys(D.locs).forEach(function (l) { var c = D.locs[l]; c.st = c.tasks.length ? 'task' : c.recs.some(function (x) { return x.status !== '已核实'; }) ? 'todo' : c.recs.length ? 'ok' : 'empty'; });
       return D;
@@ -3241,7 +3247,7 @@
     function vEmpty() {
       var D = W.snap, E = Object.keys(D.locs).filter(function (l) { return D.locs[l].st === 'empty'; }).sort(), g = {};
       E.forEach(function (l) { (g[lmParts(l).a] = g[lmParts(l).a] || []).push(l); });
-      return '<div class="wcbar"><b>空库位 ' + E.length + ' 个</b><span class="hint">系统里没有放东西的库位（曾经用过或 AutoCount 记过）</span><button class="tbtn" id="wcPrint">🖨 打印</button></div>' +
+      return '<div class="wcbar"><b>空库位 ' + E.length + ' 个</b><span class="hint">仓库全部货架里，系统没记着放货的库位</span><button class="tbtn" id="wcPrint">🖨 打印</button></div>' +
         Object.keys(g).sort().map(function (a) { return '<div class="wcempg"><b>' + a + ' 排（' + g[a].length + '）</b><div>' + g[a].map(function (l) { return '<button class="lnk mono" data-goloc="' + l + '">' + l + '</button>'; }).join(' ') + '</div></div>'; }).join('');
     }
     function vExp() {
