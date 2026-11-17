@@ -3,7 +3,7 @@
  * 原则：只采集原始资料，不做任何核对。先存手机（离线队列），再上传云端。 */
 (function () {
   'use strict';
-  var VERSION = '1.7.0';
+  var VERSION = '1.8.0';
   var $ = function (s, el) { return (el || document).querySelector(s); };
   var app = $('#app');
 
@@ -198,9 +198,9 @@
   }, true);
 
   // ---------- 员工可用模块（v1.4.1，办公室在【员工 / PIN 管理】打勾） ----------
-  var ALL_MODS = [['in', '#/'], ['t', '#/t'], ['ld', '#/ld'], ['pk', '#/pk']];
+  var ALL_MODS = [['in', '#/'], ['t', '#/t'], ['ld', '#/ld'], ['pk', '#/pk'], ['lm', '#/lm']];
   function myMods() { return sess && Array.isArray(sess.mods) ? sess.mods : ['in', 't', 'ld', 'pk']; }
-  function hashMod(h) { h = h || '#/'; return h === '#/t' ? 't' : /^#\/ld(\/|$)/.test(h) ? 'ld' : /^#\/pk(\/|$)/.test(h) ? 'pk' : 'in'; }
+  function hashMod(h) { h = h || '#/'; return h === '#/t' ? 't' : /^#\/ld(\/|$)/.test(h) ? 'ld' : /^#\/pk(\/|$)/.test(h) ? 'pk' : /^#\/lm(\/|$)/.test(h) ? 'lm' : 'in'; }
   function modHome() { var m = myMods(); return (ALL_MODS.filter(function (x) { return m.indexOf(x[0]) >= 0; })[0] || [])[1] || ''; }
   function updateMods(mods) {
     if (!sess || !Array.isArray(mods) || mods.join() === myMods().join()) return;
@@ -444,6 +444,9 @@
     "这个拣货任务还没有分配给你": "ဤပစ္စည်းထုတ်လုပ်ငန်းကို သင့်ထံ မခွဲဝေရသေးပါ",
     "客户": "ဖောက်သည်",
     "没有分配给你的拣货任务。办公室在上传电脑分配后会出现在这里。": "သင့်ထံ ခွဲဝေထားသော ပစ္စည်းထုတ်လုပ်ငန်း မရှိပါ။ ရုံးခန်းမှ ခွဲဝေပြီးလျှင် ဤနေရာတွင် ပေါ်လာမည်။",
+    "系统库位（AutoCount 没有库位）": "စနစ်စင်နေရာ (AutoCount တွင် မရှိ)",
+    "系统库位（AutoCount 是": "စနစ်စင်နေရာ (AutoCount:",
+    "另有库位": "အခြားစင်နေရာ",
     "确认缺货并完成": "ပစ္စည်းပြတ်ကြောင်း အတည်ပြုပြီး ပြီးဆုံး",
     "剩余短少：": "ကျန်လိုနေ: ",
     "清除": "ရှင်း",
@@ -786,6 +789,7 @@
     if ((m = h.match(/^#\/job\/([^/]+)$/))) return viewProducts(decodeURIComponent(m[1]));
     if ((m = h.match(/^#\/p\/([^/]+)\/([^/]+)$/))) return viewCollect(decodeURIComponent(m[1]), decodeURIComponent(m[2]));
     if (h === '#/t') return viewTransfer();
+    if ((m = h.match(/^#\/lm(?:\/(l|i|todo|noloc|tasks|a|empty|exp)(?:\/([^?]+))?)?(?:\?.*)?$/))) return viewLm(m[1] || '', m[2] ? decodeURIComponent(m[2]) : '');   // v1.8 库位管理（仓管）
     if (h === '#/ld' || h === '#/pk') return viewLdList(h.slice(2));
     if ((m = h.match(/^#\/(ld|pk)\/([^/]+?)(\/review|\/i\/(\d+))?$/))) return viewLdTask(decodeURIComponent(m[2]), m[3] === '/review', m[1] === 'pk' && m[4] != null ? Number(m[4]) : null);
     return viewJobs();
@@ -1218,14 +1222,15 @@
   // 商品条码主档下载到本机（IndexedDB），离线也能识别；提交先存本机队列（含照片），联网自动上传
   // =====================================================================
   function modTabs(active) {
-    var my = myMods(), tabs = [['in', '📦 入库'], ['t', '🔁 库位转移'], ['ld', '🚚 装车点货'], ['pk', '📋 仓库拣货']].filter(function (x) { return my.indexOf(x[0]) >= 0; });
+    var my = myMods(), tabs = [['in', '📦 入库'], ['t', '🔁 库位转移'], ['ld', '🚚 装车点货'], ['pk', '📋 仓库拣货'], ['lm', '📍 库位']].filter(function (x) { return my.indexOf(x[0]) >= 0; });
     if (tabs.length < 2) return '';                 // 只有一个模块就不显示切换标签
-    return '<div class="mods' + (tabs.length > 3 ? ' m4' : '') + '">' + tabs.map(function (x) { return '<button class="mod' + (active === x[0] ? ' on' : '') + '" data-mod="' + x[0] + '">' + x[1] + '</button>'; }).join('') + '</div>';
+    if (tabs.length > 4) { var sh = { in: '📦 入库', t: '🔁 移库', ld: '🚚 装车', pk: '📋 拣货', lm: '📍 库位' }; tabs = tabs.map(function (x) { return [x[0], sh[x[0]]]; }); }   // 5 个模块：短名字
+    return '<div class="mods' + (tabs.length > 4 ? ' m4 m5' : tabs.length > 3 ? ' m4' : '') + '">' + tabs.map(function (x) { return '<button class="mod' + (active === x[0] ? ' on' : '') + '" data-mod="' + x[0] + '">' + x[1] + '</button>'; }).join('') + '</div>';
   }
   function bindModTabs() {
     Array.prototype.forEach.call(app.querySelectorAll('[data-mod]'), function (b) {
       b.onclick = function () {
-        var to = b.dataset.mod === 't' ? '#/t' : b.dataset.mod === 'ld' ? '#/ld' : b.dataset.mod === 'pk' ? '#/pk' : '#/';
+        var to = b.dataset.mod === 't' ? '#/t' : b.dataset.mod === 'ld' ? '#/ld' : b.dataset.mod === 'pk' ? '#/pk' : b.dataset.mod === 'lm' ? '#/lm' : '#/';
         if (location.hash === to || (to === '#/' && !location.hash)) return;
         guardLeave(function () { leaveGuard = null; location.hash = to; });
       };
@@ -2223,7 +2228,18 @@
       if (P.length) st.infos.push('送货单 ' + P.length + ' 个文件' + (P.some(function (x) { return x.printed.pdf; }) ? '（含 PDF）' : ''));
       if (!lines.length) { st.errors.push('文件里没有商品行'); return draw(); }
       st.multi = res.length > 1; st.baseWarns = st.warns.slice(); st.lines = lines; st.carry = [];
-      pkCheck(); draw();
+      pkCheck(); draw(); pkResolve();
+    }
+    /** v1.8 预览也用系统库位（仓管核实过的优先；没有才用批次号里的 AutoCount 库位） */
+    function pkResolve() {
+      var L0 = st.lines; if (!L0 || !L0.length) return;
+      api({ action: 'lmResolve', lines: L0.map(function (l) { return { batch: l.batch, desc: l.desc, barcode: l.barcode }; }) }, true).then(function (d) {
+        if (st.lines !== L0) return;
+        (d.list || []).forEach(function (f, i) { if (L0[i]) L0[i].fix = f; });
+        var n = L0.filter(function (l) { return l.fix && l.fix.corrected; }).length;
+        if (n) st.infos.push(n + ' 行用了系统里更正过的库位（和 AutoCount 批次号里的不一样）');
+        draw();
+      }, function () { });
     }
     /** v1.7 拣货：逐行检查（上传前可以在“需要确认 / 修正的行”里改，改完重新检查） */
     function pkCheck() {
@@ -2272,14 +2288,45 @@
       var m = {}, order = [];
       (st.lines || []).forEach(function (l) {
         var k = (PKU() ? l.doNo + '#' : '') + ldLineKey(l, PKU());        // v1.7 拣货每张 DO 一个任务：只在同一张 DO 里合并
-        if (!m[k]) { m[k] = { code: l.itemCode, desc: l.desc, uom: l.uom, spec: l.spec || '', batch: l.batch || '', bc: [], qty: 0, src: [], i: order.length }; order.push(k); }
+        if (!m[k]) { m[k] = { k: k, code: l.itemCode, desc: l.desc, uom: l.uom, spec: l.spec || '', batch: l.batch || '', bc: [], qty: 0, src: [], i: order.length, fix: l.fix }; order.push(k); }
         var it = m[k]; it.qty = Math.round((it.qty + l.qty) * 1000) / 1000; it.src.push(l.doNo + '×' + l.qty);
         if (l.barcode && it.bc.indexOf(l.barcode) < 0) it.bc.push(l.barcode);
       });
       var out = order.map(function (k) { return m[k]; });
-      if (PKU()) out.forEach(function (it) { var x = pkLoc(it.batch); it.loc = x.loc; it.key = x.key; it.flag = x.flag; });
+      if (PKU()) out.forEach(function (it) { var x = pkLoc(it.batch), f = it.fix; if (f && f.corrected) { x = { loc: f.loc, key: f.key, flag: '' }; it.note = f.ac ? 'AutoCount 是 ' + f.ac : 'AutoCount 没有库位'; } if (f && f.others && f.others.length) it.note = (it.note ? it.note + '；' : '') + '另有 ' + f.others.join(' / '); it.loc = x.loc; it.key = x.key; it.flag = x.flag; });
       if (PKU()) out.sort(function (a, b) { return a.key < b.key ? -1 : a.key > b.key ? 1 : a.i - b.i; });    // 和 PDA 一样的库位顺序
       return out;
+    }
+    /** v1.8 打印拣货单：每张 DO 一页，内容和送货单一样（原序号、批次号、条码、品名、数量、规格、单位），只是按 PDA 的库位顺序排；样式和送货单明显不同 */
+    function printPick() {
+      var items = merged(), pos = {};
+      items.forEach(function (it, i) { pos[it.k] = { i: i, loc: it.loc, note: it.note, flag: it.flag }; });
+      var dos = {}, order = [];
+      st.lines.forEach(function (l, li) { if (!dos[l.doNo]) { dos[l.doNo] = []; order.push(l.doNo); } dos[l.doNo].push({ l: l, li: li, p: pos[l.doNo + '#' + ldLineKey(l, true)] || { i: 9e9, loc: '' } }); });
+      var now = new Date(Date.now() + 8 * 3600e3).toISOString().replace('T', ' ').slice(0, 16).split(' ');
+      var printed = now[0].split('-').reverse().join('/') + ' ' + now[1];
+      var html = order.map(function (d, di) {
+        var rows = dos[d].sort(function (a, b) { return a.p.i - b.p.i || a.li - b.li; }), units = {}, prevLoc = null;
+        rows.forEach(function (x) { units[x.l.uom || ''] = Math.round(((units[x.l.uom || ''] || 0) + (+x.l.qty || 0)) * 1000) / 1000; });
+        var cust = st.customers && st.customers[d] || '', date = String(rows[0].l.doDate || '').replace(/^(\d{4})-(\d{2})-(\d{2})$/, '$3/$2/$1');
+        return '<section class="pps">' +
+          '<div class="pph"><div class="ppt">拣 货 单<small>PICKING LIST · 仓库内部用 · 不是送货单，不随货</small></div><div class="ppn">按库位顺序</div></div>' +
+          '<table class="ppi"><tr><td>DO 号</td><td><b>' + esc(d) + '</b></td><td>日期</td><td>' + esc(date) + '</td></tr>' +
+          '<tr><td>客户</td><td colspan="3"><b>' + esc(cust || '—') + '</b></td></tr>' +
+          '<tr><td>行数</td><td>' + rows.length + ' 行 · 合计 ' + Object.keys(units).map(function (u) { return units[u] + ' ' + esc(u); }).join(' · ') + '</td><td>打印</td><td>' + esc(printed) + '</td></tr></table>' +
+          '<table class="ppl"><thead><tr><th class="c">✓</th><th>库位</th><th class="c2">原序号</th><th>批次号</th><th>条码</th><th>商品名称</th><th class="n">数量</th><th>规格</th><th>单位</th></tr></thead><tbody>' +
+          rows.map(function (x) {
+            var l = x.l, loc = x.p.loc || '', same = loc === prevLoc; prevLoc = loc;
+            return '<tr class="' + (same ? 'same' : 'newloc') + '"><td class="c"><span class="ppbox"></span></td><td class="pploc">' + (same ? '〃' : '<b>' + esc(loc || '没有库位') + '</b>') + (x.p.note && !same ? '<div class="ppnote">' + esc(x.p.note) + '</div>' : '') + '</td>' +
+              '<td class="c2">' + esc(l.row || '') + '</td><td>' + esc(l.batch || '') + '</td><td>' + esc(l.barcode || '') + '</td><td>' + esc(l.desc || '') + '</td><td class="n"><b>' + esc(l.qty) + '</b></td><td>' + esc(l.spec || '') + '</td><td>' + esc(l.uom || '') + '</td></tr>';
+          }).join('') + '</tbody></table>' +
+          '<div class="ppf"><span>拣货人：________________</span><span>复核人：________________</span><span>DO ' + esc(d) + ' · 第 ' + (di + 1) + ' / ' + order.length + ' 张</span></div></section>';
+      }).join('');
+      var box = $('#printArea'); if (!box) { box = document.createElement('div'); box.id = 'printArea'; document.body.appendChild(box); }
+      box.innerHTML = html; document.body.classList.add('printing');
+      var done = function () { document.body.classList.remove('printing'); window.removeEventListener('afterprint', done); };
+      window.addEventListener('afterprint', done);
+      setTimeout(function () { try { window.print(); } catch (e) { } setTimeout(done, 1500); }, 50);
     }
     function upload(force) {
       if (st.busy) return;
@@ -2312,7 +2359,7 @@
         if (PKU() && st.done.taskIds) h = '<div class="card upok"><div class="upok-ic">✓</div><h2>已建立 ' + st.done.taskIds.length + ' 个拣货任务</h2><p>' +
           (st.done.status === 'duplicate' ? '（这些文件刚才已经上传过，没有重复建立）' : 'DO ' + st.done.doCount + ' 张 · ' + st.done.lineCount + ' 行 · 每张 DO 一个任务') + '</p><p><b>' + esc(st.done.taskIds.join('、')) + '</b></p>' +
           (st.done.badLoc ? '<p class="err">其中 ' + st.done.badLoc + ' 项批次号没有库位 / 格式异常，PDA 上排在最后并标黄。</p>' : '') +
-          '<p class="hint">还没分配的任务 PDA 上看不到 —— 请在下面「PDA 任务分配」里勾选、分配给员工。</p><button class="btn save" id="upNew">上传下一个</button></div>';
+          '<p class="hint">还没分配的任务 PDA 上看不到 —— 请在下面「PDA 任务分配」里勾选、分配给员工。</p>' + (st.lines ? '<button class="tbtn" id="upPrint">🖨 打印拣货单</button> ' : '') + '<button class="btn save" id="upNew">上传下一个</button></div>';
         else h = '<div class="card upok"><div class="upok-ic">✓</div><h2>已建立装车任务 ' + esc(st.done.taskId) + '</h2><p>' +
           (st.done.status === 'duplicate' ? '（这个文件刚才已经上传过，没有重复建立）' : 'DO ' + st.done.doCount + ' 张 · ' + st.done.lineCount + ' 行 · 商品 ' + st.done.itemCount + ' 项' + (st.done.carryCount ? '（含之前未装 ' + st.done.carryCount + ' 项）' : '')) +
           '</p>' + (st.done.badLoc ? '<p class="err">其中 ' + st.done.badLoc + ' 项批次号没有库位 / 格式异常，PDA 上排在最后并标黄。</p>' : '') +
@@ -2329,7 +2376,8 @@
             (PKU() ? '<div><b>' + items.filter(function (it) { return it.flag; }).length + '</b><span>没有库位</span></div>' : '<div><b>' + (st.carry ? picked.length : '…') + '</b><span>之前未装</span></div>') + '</div>' +
             '<p class="hint">需求合计：' + Object.keys(units).map(function (u) { return units[u] + ' ' + esc(u); }).join(' · ') + '</p>' +
             '<p class="hint">DO：' + esc(Object.keys(dos).map(function (d) { return d + (st.customers && st.customers[d] ? '（' + st.customers[d] + '）' : ''); }).join('、')) + '</p>' +
-            (PKU() ? '<p><b>上传后每张 DO 生成一个拣货任务（共 ' + Object.keys(dos).length + ' 个），再在下面分配给员工。</b></p>' : '') + '</div>';
+            (PKU() ? '<p><b>上传后每张 DO 生成一个拣货任务（共 ' + Object.keys(dos).length + ' 个），再在下面分配给员工。</b></p>' +
+              '<p><button class="tbtn" id="upPrint"' + (st.lineErrs && st.lineErrs.length ? ' disabled' : '') + '>🖨 打印拣货单（' + Object.keys(dos).length + ' 张，按库位顺序）</button></p>' : '') + '</div>';
           if (PKU() && st.lineErrs && st.lineErrs.length) h += '<div class="card upbad"><b>还不能上传（请在下面改好）：</b><ul>' + st.lineErrs.slice(0, 40).map(function (e) { return '<li>' + esc(e) + '</li>'; }).join('') + '</ul></div>';
           if (PKU()) h += fixHtml();
           if (st.warns.length) h += '<div class="card upwarn"><b>请注意：</b><ul>' + st.warns.map(function (e) { return '<li>' + esc(e) + '</li>'; }).join('') + '</ul></div>';
@@ -2342,7 +2390,7 @@
             }).join('') + '</tbody></table></div>';
           h += '<div class="card"><h3 style="margin-top:0">合并后的商品清单（PDA 上看到的就是这张' + (PKU() ? '，按库位顺序' : '') + '）</h3><div class="uptabw"><table class="uptab"><thead><tr><th>#</th>' + (PKU() ? '<th>库位</th><th>批次号</th>' : '') + '<th>Item Code</th><th>条码</th><th>品名</th><th>单位</th><th>规格</th><th class="n">需求</th><th>来自 DO</th></tr></thead><tbody>' +
             items.map(function (it, i) {
-              return '<tr' + (it.flag ? ' class="pkflagrow"' : '') + '><td class="hint">' + (i + 1) + '</td>' + (PKU() ? '<td><b>' + esc(it.loc || '—') + '</b>' + (it.flag ? '<div class="hint">' + esc(it.flag) + '</div>' : '') + '</td><td>' + esc(it.batch) + '</td>' : '') + '<td>' + esc(it.code || '—') + '</td><td>' + esc(it.bc.join(' / ')) + '</td><td>' + esc(it.desc) + '</td><td>' + esc(it.uom) + '</td><td class="hint">' + esc(it.spec) +
+              return '<tr' + (it.flag ? ' class="pkflagrow"' : '') + '><td class="hint">' + (i + 1) + '</td>' + (PKU() ? '<td><b>' + esc(it.loc || '—') + '</b>' + (it.flag ? '<div class="hint">' + esc(it.flag) + '</div>' : '') + (it.note ? '<div class="pkfix">📍 ' + esc(it.note) + '</div>' : '') + '</td><td>' + esc(it.batch) + '</td>' : '') + '<td>' + esc(it.code || '—') + '</td><td>' + esc(it.bc.join(' / ')) + '</td><td>' + esc(it.desc) + '</td><td>' + esc(it.uom) + '</td><td class="hint">' + esc(it.spec) +
                 '</td><td class="n"><b>' + it.qty + '</b></td><td class="hint">' + esc(it.src.join('; ')) + '</td></tr>';
             }).join('') + '</tbody></table></div></div>';
           h += tasksHtml();
@@ -2374,6 +2422,7 @@
       });
       var f = $('#upF'); if (f) { f.onchange = function () { readFiles(f.files); f.value = ''; }; $('#upPick').onclick = function () { f.click(); }; }
       var n = $('#upNew'); if (n) n.onclick = function () { st = newSt(); draw(); };
+      var pp = $('#upPrint'); if (pp) pp.onclick = printPick;
       var g = $('#upGo'); if (g) g.onclick = function () { upload(false); };
       Array.prototype.forEach.call(app.querySelectorAll('[data-ref]'), function (c) { c.onchange = function () { st.pick[c.dataset.ref] = c.checked; draw(); }; });
       var ca = $('#cAll'), cn = $('#cNone');
@@ -2434,10 +2483,10 @@
     document.body.classList.add('wide');
     var R = { tab: LS.get('rcTab', 'tr'), tr: null, pk: null, err: '', busy: false,
       trF: { status: '待处理', q: '', src: '', dst: '', from: myToday(-30), to: myToday(0), hist: '' },
-      pkF: { res: '不一致', q: '', sys: '', act: '', from: myToday(-30), to: myToday(0) } };
+      pkF: { res: '不一致', q: '', sys: '', act: '', from: myToday(-30), to: myToday(0) }, lmF: { st: 'all', q: '', loc: '' }, lmMsg: '', lm: null };
     function load(which) {
       R.err = '';
-      var a = which === 'pk' ? 'rcPickLocs' : 'rcTransfers';
+      var a = which === 'pk' ? 'rcPickLocs' : which === 'lm' ? 'rcLmList' : 'rcTransfers';
       return api({ action: a }, true).then(function (d) { R[which] = d; draw(); }, function (e) { R.err = e.network ? '网络不可用，请检查网络后点“刷新”' : e.message; draw(); });
     }
     function inRange(ts, f) { var a = myDay(f.from), b = myDay(f.to, true); return (a == null || ts >= a) && (b == null || ts <= b); }
@@ -2453,6 +2502,61 @@
     }
     var big = function (v) { return v ? '<span class="rbig" data-cp="' + esc(v) + '" title="点击复制">' + esc(v) + '</span>' : '<span class="hint">— 不填</span>'; };
     var ST = { '待处理': 's1', '有问题': 's2', '已完成': 's3' };
+    // ---- v1.8 上传入库单：新箱码绑定到 Item Code；Item Code 系统里没有 = 新品（建简单产品资料）。以入库单为准。
+    var INB_KIND = { bind: ['新箱码绑定', 'k1'], change: ['改绑（以入库单为准）', 'k2'], new: ['新品', 'k3'], same: ['已经一样', 'k0'] };
+    function inbHtml() {
+      var I = R.inb || {}, h = '<div class="inb"><div class="inb-h"><b>📥 上传入库单</b><span class="hint">箱码自动绑定到 Item Code；Item Code 系统里没有的就是新品，自动建产品资料。PDA 移库扫这些箱码就认得。</span>' +
+        '<button class="btn save" id="inbB"' + (I.busy ? ' disabled' : '') + '>📂 选择入库单 Excel</button><input id="inbF" class="vh" type="file" accept=".xlsx" tabindex="-1"></div>';
+      if (I.msg) h += '<p class="' + (I.err ? 'err' : 'hint') + '"><b>' + esc(I.msg) + '</b></p>';
+      var d = I.res;
+      if (d && !d.committed) {
+        var c = d.counts, L = d.list.filter(function (x) { return I.all || x.kind !== 'same'; });
+        h += '<div class="inb-sum">' + ['bind', 'change', 'new', 'same'].map(function (k) { return '<span class="inbk ' + INB_KIND[k][1] + '">' + INB_KIND[k][0] + ' <b>' + c[k] + '</b></span>'; }).join('') +
+          (c.newItems ? '<span class="hint">（新品 ' + c.newItems + ' 个 Item Code）</span>' : '') + '</div>' +
+          (d.errors.length ? '<div class="err"><b>这些行没有导入：</b><ul>' + d.errors.slice(0, 30).map(function (e) { return '<li>' + esc(e) + '</li>'; }).join('') + '</ul></div>' : '') +
+          '<div class="rtw inbw"><table class="rtab-t"><thead><tr><th>箱码</th><th>Item Code</th><th>品名</th><th>单位</th><th>处理</th></tr></thead><tbody>' +
+          L.slice(0, 1500).map(function (x) { return '<tr><td><b>' + esc(x.bc) + '</b></td><td>' + esc(x.item) + '</td><td>' + esc(x.desc) + '</td><td>' + esc(x.uom) + '</td><td><span class="inbk ' + INB_KIND[x.kind][1] + '">' + INB_KIND[x.kind][0] + '</span>' +
+            (x.old ? '<div class="hint">原来是 ' + esc(x.old) + (x.oldDesc ? ' ' + esc(x.oldDesc) : '') + '</div>' : '') + '</td></tr>'; }).join('') +
+          (L.length ? '' : '<tr><td colspan="5" class="hint">全部箱码系统里已经一样，不用改。</td></tr>') + '</tbody></table></div>' +
+          '<div class="inb-act"><label class="hint"><input type="checkbox" id="inbAll"' + (I.all ? ' checked' : '') + '> 显示“已经一样”的行</label><button class="tbtn" id="inbX">取消</button>' +
+          '<button class="btn save" id="inbGo"' + (I.busy || !(c.bind + c.change + c.new) ? ' disabled' : '') + '>✓ 确认写入（' + (c.bind + c.change + c.new) + ' 个箱码）</button></div>';
+      }
+      return h + '</div>';
+    }
+    /** 读入库单：在前 30 行找表头（箱码 / 条码 / Barcode + Item Code，品名、单位可选）。拿到正式模版后按模版调整。 */
+    function inbRead(file) {
+      R.inb = { busy: true, msg: '读取 ' + file.name + '…', file: file.name }; draw();
+      file.arrayBuffer().then(xlsxRead).then(function (sh) {
+        var hr = 0, C = {}, seen = [];
+        var pickCol = function (cs, re, not) { var x = cs.filter(function (c) { var t = cellText(c.v); return re.test(t) && !(not && not.test(t)); })[0]; return x ? x.c1 : 0; };
+        for (var r = 1; r <= Math.min(sh.maxRow, 30) && !hr; r++) {
+          var cs = rowCells(sh, r); if (cs.length) seen.push(cs.map(function (c) { return cellText(c.v); }).filter(Boolean).join(' | '));
+          var bc = pickCol(cs, /箱码|条码|bar\s*code/i), it = pickCol(cs, /item\s*code|itemcode|商品编码|商品代码|货号|产品编码/i);
+          if (bc && it) { hr = r; C = { bc: bc, item: it, desc: pickCol(cs, /品名|名称|description|^desc/i, /code/i), uom: pickCol(cs, /^(uom|单位)/i) }; }
+        }
+        if (!hr) throw new Error('认不出入库单：要有“箱码 / 条码”和“Item Code”两列。文件前几行是：' + seen.slice(0, 3).join(' ／ '));
+        var rows = [];
+        for (var rr = hr + 1; rr <= sh.maxRow; rr++) {
+          var o = {}; rowCells(sh, rr).forEach(function (x) { o[x.c1] = x.v; });
+          var b = cellText(o[C.bc]).replace(/\s+/g, ''), i = cellText(o[C.item]);
+          if (!b && !i) continue;
+          rows.push([b, i, C.desc ? cellText(o[C.desc]) : '', C.uom ? cellText(o[C.uom]) : '']);
+        }
+        if (!rows.length) throw new Error('入库单里没有资料行');
+        R.inb.rows = rows;
+        return api({ action: 'rcInbound', rows: rows, fileName: file.name }, true);
+      }).then(function (d) {
+        R.inb.busy = false; R.inb.res = d; R.inb.msg = file.name + '：' + R.inb.rows.length + ' 行，请核对后点“确认写入”。'; draw();
+      }, function (e) { R.inb = { msg: '读取失败：' + (e.network ? '网络不可用' : e.message), err: true }; draw(); });
+    }
+    function inbCommit() {
+      var I = R.inb; I.busy = true; draw();
+      api({ action: 'rcInbound', rows: I.rows, fileName: I.file, commit: true }, true).then(function (d) {
+        var c = d.counts;
+        R.inb = { msg: '已写入 ' + I.file + '：新箱码绑定 ' + c.bind + ' · 改绑 ' + c.change + ' · 新品 ' + c.newItems + ' 个' + (d.merged ? ' · 仓管建的新商品已合并 ' + d.merged + ' 个' : '') + '。PDA 移库重新打开就认得这些箱码。' };
+        draw();
+      }, function (e) { I.busy = false; I.msg = '写入失败：' + (e.network ? '网络不可用' : e.message); I.err = true; draw(); });
+    }
     function trHtml() {
       var f = R.trF, d = R.tr, c = d ? d.counts : {}, rows = d ? trRows() : [];
       var h = '<div class="rbar">' + (f.hist ? '<b>箱码 ' + esc(f.hist) + ' 的移库历史（' + rows.length + ' 笔，按时间）</b> <button class="tbtn" id="trHx">‹ 返回全部记录</button>' :
@@ -2461,6 +2565,7 @@
         '<label>日期 <input type="date" id="trF" value="' + esc(f.from) + '"></label><label>到 <input type="date" id="trT" value="' + esc(f.to) + '"></label>' +
         '<button class="tbtn" id="trR">刷新</button><button class="btn save rexp" id="trX"' + (rows.length ? '' : ' disabled') + '>⬇ 导出 Excel（' + rows.length + '）</button></div>' +
         '<p class="hint">点箱码或库位即可复制，粘贴到 AutoCount。改好后点“✓ 已完成”；不对点“有问题”并写原因；录错的可“删除”。点 📜 看这个箱码的全部移库历史。时间为马来西亚时间。</p>';
+      if (!f.hist) h = inbHtml() + h;
       if (!d) return h + '<p class="hint">读取中…</p>';
       if (!rows.length) return h + '<div class="empty">没有记录。</div>';
       return h + '<div class="rtw"><table class="rtab-t"><thead><tr><th>#</th><th>箱码 / SKU</th><th>From Location</th><th></th><th>To Location</th><th>照片</th><th>提交</th><th>状态</th><th>操作</th></tr></thead><tbody>' +
@@ -2496,16 +2601,125 @@
             '<td><span class="rst ' + (x.result === '一致' ? 's3' : x.result === '不一致' ? 's2' : 's1') + '">' + esc(x.result) + '</span></td></tr>';
         }).join('') + '</tbody></table></div>';
     }
+    // ---------- v1.8 库位主档（以后库位只看本系统） ----------
+    function lmRows() {
+      var f = R.lmF, all = (R.lm && R.lm.list) || [];
+      return all.filter(function (x) { return (f.st === 'all' || x.status === f.st) && (has(x.desc, f.q) || has(x.item, f.q) || has(x.base, f.q)) && has(x.loc, f.loc); })
+        .sort(function (a, b) { return a.loc < b.loc ? -1 : a.loc > b.loc ? 1 : a.desc < b.desc ? -1 : 1; });
+    }
+    function lmHtml() {
+      var d = R.lm, c = d ? d.counts : {}, rows = d ? lmRows() : [], f = R.lmF;
+      var h = '<div class="rstats"><div class="g"><b>' + (c.ok || 0) + '</b><span>已核实</span></div><div class="o"><b>' + (c.todo || 0) + '</b><span>待核实（AutoCount）</span></div><div><b>' + (c.noloc || 0) + '</b><span>有库存没库位</span></div><div><b>' + (c.tasks || 0) + '</b><span>仓管待处理</span></div><div><b>' + (c.batches || 0) + '</b><span>AutoCount 批次行</span></div><div><b>' + (c.barcodes || 0) + '</b><span>条码' + (c.newItems ? ' · 新商品 ' + c.newItems : '') + '</span></div></div>' +
+        '<div class="rfil lmimp"><label>导入 AutoCount「Stock Item with Batch」<button class="btn save" id="lmImp"' + (R.busy ? ' disabled' : '') + '>📂 选择 Excel</button><input id="lmImpF" class="vh" type="file" accept=".xlsx" tabindex="-1"></label>' +
+        '<label>导入 AutoCount 条码表（Item Sales Price Listing with barcode）<button class="btn save" id="lmBc"' + (R.busy ? ' disabled' : '') + '>📂 选择 Excel</button><input id="lmBcF" class="vh" type="file" accept=".xlsx" tabindex="-1"></label>' +
+        '<label>移库记录转给仓管（从这天起）<span class="lmrow"><input type="date" id="lmTrD" value="' + esc(myToday(-7)) + '"><button class="tbtn" id="lmTr"' + (R.busy ? ' disabled' : '') + '>导入</button></span></label></div>' +
+        (R.lmMsg ? '<p class="' + (/失败|不对|没有/.test(R.lmMsg) ? 'err' : 'hint') + '"><b>' + esc(R.lmMsg) + '</b></p>' : '') +
+        '<div class="rbar">' + [['all', '全部'], ['已核实', '已核实'], ['待核实', '待核实']].map(function (t) { return '<button class="rtab' + (f.st === t[0] ? ' on' : '') + '" data-lst="' + t[0] + '">' + t[1] + '</button>'; }).join('') + '</div>' +
+        '<div class="rfil"><label>商品 / Item Code / 批次 <input id="lmQ" value="' + esc(f.q) + '"></label><label>库位 <input id="lmL" value="' + esc(f.loc) + '"></label><button class="tbtn" id="lmR">刷新</button><button class="btn save rexp" id="lmX"' + (rows.length ? '' : ' disabled') + '>⬇ 导出 Excel（' + rows.length + '）</button></div>' +
+        '<p class="hint">库位按「商品 + 批次」记，以后库位只看这里。AutoCount 导入的是“待核实”，仓管在 PDA【📍 库位】里核实 / 改库位后变成“已核实”。拣货上传 DO 时自动用这里已核实的库位。</p>';
+      if (!d) return h + '<p class="hint">读取中…</p>';
+      if (!rows.length) return h + '<div class="empty">没有记录。</div>';
+      return h + '<div class="rtw"><table class="rtab-t"><thead><tr><th>库位</th><th>商品</th><th>Item Code</th><th>批次</th><th>库存</th><th>状态</th><th>来源</th><th>更新</th></tr></thead><tbody>' +
+        rows.slice(0, 3000).map(function (x) {
+          return '<tr><td><b class="rloc">' + esc(x.loc) + '</b></td><td>' + esc(x.desc) + '</td><td>' + esc(x.item) + '</td><td>' + esc(x.base) + '</td><td>' + x.stock + '</td><td><span class="rst ' + (x.status === '已核实' ? 's3' : 's1') + '">' + esc(x.status) + '</span></td><td class="rmeta">' + esc(x.source) + '</td><td class="rmeta">' + esc(x.by) + '<br>' + esc(x.at) + '</td></tr>';
+        }).join('') + '</tbody></table></div>';
+    }
+    /** 读 AutoCount「Stock Item with Batch」Excel → 分批上传 */
+    function lmImport(file) {
+      R.busy = true; R.lmMsg = '读取 ' + file.name + '…'; draw();
+      file.arrayBuffer().then(xlsxRead).then(function (sh) {
+        var hr = 0, cols = {};
+        for (var r = 1; r <= Math.min(sh.maxRow, 20) && !hr; r++) {
+          var cs = rowCells(sh, r), t = cs.map(function (x) { return cellText(x.v); });
+          if (t.indexOf('Item Code') >= 0 && t.some(function (x) { return /^Batch No\.?$/i.test(x); })) { hr = r; cs.forEach(function (x) { cols[cellText(x.v)] = x.c1; }); }
+        }
+        if (!hr) throw new Error('认不出格式：需要 AutoCount「Stock Item with Batch」（有 Item Code、Batch No.、Qty 列）');
+        var col = function (re) { var k = Object.keys(cols).filter(function (x) { return re.test(x); })[0]; return k ? cols[k] : 0; };
+        var C = { code: col(/^Item Code$/i), desc: col(/^Description$/i), batch: col(/^Batch No\.?$/i), uom: col(/^UOM$/i), qty: col(/^Qty$/i), rate: col(/^UOM Rate$/i), group: col(/^Item Group$/i), mfg: col(/Manufactured/i), exp: col(/Expiry/i) };
+        var rows = [];
+        for (var rr = hr + 1; rr <= sh.maxRow; rr++) {
+          var o = {}; rowCells(sh, rr).forEach(function (x) { o[x.c1] = x.v; });
+          var code = cellText(o[C.code]); if (!code) continue;
+          rows.push([code, cellText(o[C.desc]), cellText(o[C.batch]), cellText(o[C.uom]), Number(o[C.qty]) || 0, Number(o[C.rate]) || 0, cellText(o[C.group]), xlDate(o[C.mfg]), xlDate(o[C.exp])]);
+        }
+        if (!rows.length) throw new Error('文件里没有资料');
+        var parts = []; for (var i = 0; i < rows.length; i += 1000) parts.push(rows.slice(i, i + 1000));
+        var k = 0, last = null;
+        var next = function () {
+          if (k >= parts.length) return last;
+          R.lmMsg = '上传中… ' + Math.min((k + 1) * 1000, rows.length) + ' / ' + rows.length; draw();
+          return api({ action: 'rcLmImport', rows: parts[k], first: k === 0, last: k === parts.length - 1 }, true).then(function (d) { last = d; k++; return next(); });
+        };
+        return next();
+      }).then(function (d) {
+        R.busy = false; R.lmMsg = '已导入 ' + d.total + ' 行（' + d.items + ' 个商品）· 新增待核实库位 ' + d.newTodo + ' 条' + (d.barcodes ? ' · 新增条码 ' + d.barcodes : '') + (d.merged ? ' · ' + d.merged + ' 个新商品已对上正式商品，自动合并' : ''); load('lm');
+      }, function (e) { R.busy = false; R.lmMsg = '导入失败：' + (e.network ? '网络不可用' : e.message); draw(); });
+    }
+    /** 读 AutoCount「Item Sales Price Listing」（带 BARCODE）→ 只取 Item Code / 品名 / 单位 / 条码，价格一律不读不传 */
+    function lmBcImport(file) {
+      R.busy = true; R.lmMsg = '读取 ' + file.name + '…'; draw();
+      file.arrayBuffer().then(xlsxRead).then(function (sh) {
+        var ci = 0, cd = 0, rows = [], cur = null, uom = '', got = 0, labels = 0;
+        var flush = function () { if (cur && !got) rows.push([cur.code, cur.desc, '', '']); };
+        for (var r = 1; r <= sh.maxRow; r++) {
+          var cs = rowCells(sh, r), t = cs.map(function (x) { return cellText(x.v); });
+          if (!ci) { var a = t.indexOf('Item Code'), b = t.indexOf('Description'); if (a >= 0 && b >= 0) { ci = cs[a].c1; cd = cs[b].c1; } continue; }
+          var li = -1, lab = '';
+          t.forEach(function (x, i) { if (li < 0 && /^(UOM|BAR\s*CODE)\s*[:：]?$/i.test(x)) { li = i; lab = /^UOM/i.test(x) ? 'u' : 'b'; } });
+          if (li >= 0) {
+            labels++;
+            var val = (t.slice(li + 1).filter(Boolean)[0] || '').trim();
+            if (lab === 'u') uom = val;
+            else if (cur) { rows.push([cur.code, cur.desc, uom, /^\d{6,14}$/.test(val) ? val : '']); got++; }
+            continue;
+          }
+          var o = {}; cs.forEach(function (x) { o[x.c1] = cellText(x.v); });
+          if (o[ci] && o[cd] && !/^(Item Code|Date|User ID|Page)/i.test(o[ci])) { flush(); cur = { code: o[ci].trim(), desc: o[cd].trim() }; uom = ''; got = 0; }
+        }
+        flush();
+        if (!ci || !labels || !rows.length) throw new Error('认不出格式：需要 AutoCount「Item Sales Price Listing」并勾选显示 BARCODE');
+        var parts = []; for (var i = 0; i < rows.length; i += 2000) parts.push(rows.slice(i, i + 2000));
+        var k = 0, last = null;
+        var next = function () {
+          if (k >= parts.length) return last;
+          R.lmMsg = '上传中… ' + Math.min((k + 1) * 2000, rows.length) + ' / ' + rows.length; draw();
+          return api({ action: 'rcLmBarcodes', rows: parts[k], first: k === 0, last: k === parts.length - 1 }, true).then(function (d) { if (d.status !== 'ok') throw new Error(d.message || '上传失败'); last = d; k++; return next(); });
+        };
+        return next();
+      }).then(function (d) {
+        R.busy = false; R.lmMsg = '条码表已导入：' + d.items + ' 个商品，' + d.barcodes + ' 个条码' + (d.merged ? ' · ' + d.merged + ' 个仓管新建的新商品已对上正式商品，自动合并' : '') + (d.conflicts ? ' · ' + d.conflicts + ' 个学来的条码和条码表不一样，以条码表为准' : ''); load('lm');
+      }, function (e) { R.busy = false; R.lmMsg = '导入失败：' + (e.network ? '网络不可用' : e.message); draw(); });
+    }
     function draw() {
       var y = window.scrollY;
-      app.innerHTML = '<div class="mods rcmods">' + [['tr', 'Shelf Transfer · 移库记录'], ['pk', 'Picking Location Discrepancy · 拣货库位差异']].map(function (t) { return '<button class="mod' + (R.tab === t[0] ? ' on' : '') + '" data-tab="' + t[0] + '">' + t[1] + '</button>'; }).join('') + '</div>' +
-        (R.err ? '<p class="err">' + esc(R.err) + '</p>' : '') + '<div class="card rcard">' + (R.tab === 'tr' ? trHtml() : pkHtml()) + '</div>';
+      app.innerHTML = '<div class="mods rcmods">' + [['tr', 'Shelf Transfer · 移库记录'], ['pk', 'Picking Location Discrepancy · 拣货库位差异'], ['lm', 'Item Locations · 库位主档']].map(function (t) { return '<button class="mod' + (R.tab === t[0] ? ' on' : '') + '" data-tab="' + t[0] + '">' + t[1] + '</button>'; }).join('') + '</div>' +
+        (R.err ? '<p class="err">' + esc(R.err) + '</p>' : '') + '<div class="card rcard">' + (R.tab === 'tr' ? trHtml() : R.tab === 'lm' ? lmHtml() : pkHtml()) + '</div>';
       window.scrollTo(0, y); bind();
     }
     function bind() {
       Array.prototype.forEach.call(app.querySelectorAll('[data-tab]'), function (b) { b.onclick = function () { R.tab = b.dataset.tab; LS.set('rcTab', R.tab); draw(); if (!R[R.tab]) load(R.tab); }; });
       var inp = function (id, obj, k) { var e = $('#' + id); if (!e) return; e.oninput = e.onchange = function () { obj[k] = e.value; var pos = e.selectionStart; draw(); var n = $('#' + id); if (n) { n.focus(); try { n.setSelectionRange(pos, pos); } catch (x) { } } }; };
-      if (R.tab === 'tr') {
+      if (R.tab === 'lm') {
+        Array.prototype.forEach.call(app.querySelectorAll('[data-lst]'), function (b) { b.onclick = function () { R.lmF.st = b.dataset.lst; draw(); }; });
+        inp('lmQ', R.lmF, 'q'); inp('lmL', R.lmF, 'loc');
+        $('#lmR').onclick = function () { load('lm'); };
+        $('#lmImp').onclick = function () { $('#lmImpF').click(); };
+        $('#lmImpF').onchange = function () { var f = this.files[0]; this.value = ''; if (f) lmImport(f); };
+        $('#lmBc').onclick = function () { $('#lmBcF').click(); };
+        $('#lmBcF').onchange = function () { var f = this.files[0]; this.value = ''; if (f) lmBcImport(f); };
+        $('#lmTr').onclick = function () {
+          var dt = $('#lmTrD').value; R.busy = true; draw();
+          api({ action: 'rcLmTransfers', from: dt }, true).then(function (d) { R.busy = false; R.lmMsg = d.status === 'ok' ? dt + ' 起的移库记录 ' + d.found + ' 条，新转给仓管 ' + d.added + ' 条（已转过的不重复）' : d.message; load('lm'); },
+            function (e) { R.busy = false; R.lmMsg = '导入失败：' + e.message; draw(); });
+        };
+        var lx = $('#lmX'); if (lx) lx.onclick = function () {
+          download(xlsxBlob('Item Locations', [['库位', '商品', 'Item Code', '批次', '库存', '状态', '来源', '更新人', '更新时间']].concat(lmRows().map(function (x) { return [x.loc, x.desc, x.item, x.base, x.stock, x.status, x.source, x.by, x.at]; }))), 'Item Locations ' + myToday(0) + '.xlsx');
+        };
+      } else if (R.tab === 'tr') {
+        var ib = $('#inbB'); if (ib) { ib.onclick = function () { $('#inbF').click(); }; $('#inbF').onchange = function () { var f0 = this.files[0]; this.value = ''; if (f0) inbRead(f0); }; }
+        var ig = $('#inbGo'); if (ig) ig.onclick = inbCommit;
+        var ix = $('#inbX'); if (ix) ix.onclick = function () { R.inb = null; draw(); };
+        var ia = $('#inbAll'); if (ia) ia.onchange = function () { R.inb.all = ia.checked; draw(); };
         Array.prototype.forEach.call(app.querySelectorAll('[data-st]'), function (b) { b.onclick = function () { R.trF.status = b.dataset.st; draw(); }; });
         inp('trQ', R.trF, 'q'); inp('trS', R.trF, 'src'); inp('trD', R.trF, 'dst'); inp('trF', R.trF, 'from'); inp('trT', R.trF, 'to');
         var r = $('#trR'); if (r) r.onclick = function () { load('tr'); };
@@ -2756,7 +2970,7 @@
       var diff = r3(it._c - it.req);
       if (PK) return '<button class="ldi pki ' + ({ '未点': 's0', '点货中': 's1', '已点齐': 's2', '超出': 's3', '短少': 's4' }[it._st]) + (it.flag ? ' pkflag' : '') + '" data-k="' + esc(it.key) + '">' +
         '<div class="pkloc' + (it.loc ? '' : ' no') + '" data-fl="' + esc(it.loc) + '"' + (it.loc ? ' data-nt' : '') + '>' + (it.loc ? esc(it.loc) : '无库位') + '</div>' +
-        '<div class="ldi-t"><div class="pkbatch" data-fb="' + esc(it.batch) + '"' + (it.batch ? ' data-nt' : '') + '>' + esc(it.batch || '（没有批次号）') + '</div><b>' + itemName(it) + '</b><span>' + esc(ldId(it, '')) + (it.spec ? ' · ' + esc(it.spec) : '') + (it.flag ? '</span><span class="pkwarn">⚠ ' + esc(it.flag) : '') + '</span></div>' +
+        '<div class="ldi-t"><div class="pkbatch" data-fb="' + esc(it.batch) + '"' + (it.batch ? ' data-nt' : '') + '>' + esc(it.batch || '（没有批次号）') + '</div><b>' + itemName(it) + '</b><span>' + esc(ldId(it, '')) + (it.spec ? ' · ' + esc(it.spec) : '') + (it.flag ? '</span><span class="pkwarn">⚠ ' + esc(it.flag) : '') + (it.locNote ? '</span><span class="pkfix">📍 ' + esc(it.locNote) : '') + '</span></div>' +
         '<div class="ldi-n"><b>' + it._c + '<small> / ' + it.req + ' ' + esc(it.uom) + '</small></b><span>' + esc(it._so && it._c < it.req ? '已确认短少' : it._st) + (diff && it._c ? '（' + (diff > 0 ? '+' : '') + diff + '）' : '') + '</span></div></button>';
       return '<button class="ldi ' + ({ '未点': 's0', '点货中': 's1', '已点齐': 's2', '超出': 's3', '短少': 's4' }[it._st]) + '" data-k="' + esc(it.key) + '">' +
         '<div class="ldi-t"><b>' + itemName(it) + '</b><span>' + esc(ldId(it, '')) + (it.spec ? ' · ' + esc(it.spec) : '') + '</span></div>' +
@@ -2942,7 +3156,7 @@
           '<span class="al-t"><span>实际取货库位' + (aloc ? '' : '（选填）') + '</span><u>' + (aloc ? '✎ 修改' : '✎ 手输') + '</u></span>' +
           '<span class="al-v">' + (aloc ? '<b data-nt>' + esc(aloc) + ' ✓</b><i>' + (!it.loc || aloc === it.loc ? '已记录实际取货位置' : '⚠ 和系统库位 ' + esc(it.loc) + ' 不一样') + '</i>' : '<em>尚未记录 · 扫描货架码即可自动记录</em>') + '</span></button>') +
         '<div class="pks-desc">' + itemName(it) + '</div>' +
-        '<div class="pks-code">' + esc(ldId(it, '条码 ')) + ' · ' + esc(it.uom || '') + (it.flag ? ' · <span class="pkwarn">⚠ ' + esc(it.flag) + '</span>' : '') + '</div></div>' +
+        '<div class="pks-code">' + esc(ldId(it, '条码 ')) + ' · ' + esc(it.uom || '') + (it.flag ? ' · <span class="pkwarn">⚠ ' + esc(it.flag) + '</span>' : '') + (it.locNote ? ' · <span class="pkfix">📍 ' + esc(it.locNote) + '</span>' : '') + '</div></div>' +
         '<div class="pks-st"><div><span>应拣</span><b>' + it.req + '</b></div><div><span>累计已拣</span><b id="pkCnt">' + it._c + '</b></div>' +
         '<div class="' + (d > 0 ? 'p' : d ? 'o' : 'g') + '"><span>差异</span><b>' + (d > 0 ? '+' : '') + d + '</b></div></div>' +
         (ro ? '' :
@@ -3389,13 +3603,318 @@
     });
     draw();
   }
+  // =====================================================================
+  // v1.8 PDA【📍 库位】（只有仓管）：扫货架看放了什么、扫箱码看在哪；核实 / 改库位 / 绑定 / 移走；待核实、没有库位、待处理 三个清单
+  //   按「商品 + 批次」记库位。货上没有批次码：选批次时显示生产日期 / 到期日，对着箱子上的日期选。需要联网。
+  // =====================================================================
+  function viewLm(sub, arg) {
+    setBar('库位管理', false);
+    var LMS = { busy: false };
+    var head = function (inner) { var o = $('#lmIn'); LMS.keep = o && document.activeElement === o ? o.value : null; return modTabs('lm') + '<div class="lmscan"><input id="lmIn" inputmode="none" maxlength="64" autocomplete="off" spellcheck="false" placeholder="扫货架码 / 箱码 / 搜索商品"><button class="btn cam" id="lmCam" aria-label="摄像头扫码">📷</button></div>' + inner; };
+    var stChip = function (s) { return '<span class="lmst ' + (s === '已核实' ? 'ok' : 'todo') + '">' + (s === '已核实' ? '✓ 已核实' : '? 待核实') + '</span>'; };
+    function bindHead() {
+      bindModTabs();
+      var inp = $('#lmIn');
+      if (LMS.keep != null) { inp.value = LMS.keep; inp.focus(); LMS.keep = null; }   // 重新画页面时扫描枪正在输入：不丢字
+      inp.addEventListener('keydown', function (e) { if (e.key === 'Enter' || e.keyCode === 13) { e.preventDefault(); var v = inp.value.trim(); inp.value = ''; inp.blur(); if (v) go(v); } });
+      $('#lmCam').onclick = function () { openCamera('lm', function (code) { go(code); }, { label: '货架码 / 箱码', qr: true }); };
+    }
+    /** 扫到 / 输入的东西：库位 → 库位页；箱码 → 商品页；文字 → 搜索 */
+    function go(v) {
+      var c = normLoc(v);
+      if (c && locRe().test(c)) { location.hash = '#/lm/l/' + encodeURIComponent(c); return; }
+      loading('查找中…');
+      api({ action: 'lmFind', code: v }, true).then(function (d) {
+        if (d.kind === 'item') { lmLast = d; location.hash = '#/lm/i/' + encodeURIComponent(d.item) + (/^\d{6,}$/.test(v) ? '?bc=' + encodeURIComponent(v) : ''); return; }
+        if (d.kind === 'unknown') return pickItem('', '这个码系统还不认识：' + v + '（可能是新商品，也可能是老商品的另一个箱码）。先搜品名：找到就选它，系统会记住这个码；都不是再点“新商品”。', function (it) {
+          if (!it.isNewName) { location.hash = '#/lm/i/' + encodeURIComponent(it.item) + '?bc=' + encodeURIComponent(v); return; }
+          askLoc('新商品放在哪个库位？', '', function (c) { save({ act: 'bind', newName: it.desc, barcode: v, loc: c }, '已记住新商品，库位 ' + c, function (r) { location.hash = '#/lm/i/' + encodeURIComponent(r.item) + '?bc=' + encodeURIComponent(v); }); });
+        }, null, v);
+        if (d.kind === 'search') return pickItem(v, '', function (it) {
+          if (!it.isNewName) { location.hash = '#/lm/i/' + encodeURIComponent(it.item); return; }
+          askLoc('新商品放在哪个库位？', '', function (c) { save({ act: 'bind', newName: it.desc, loc: c }, '已记住新商品，库位 ' + c, function (r) { location.hash = '#/lm/i/' + encodeURIComponent(r.item); }); });
+        }, d.items, '');
+        draw();
+      }, fail);
+    }
+    var lmLastMsg = '';
+    function fail(e) { LMS.busy = false; lmLastMsg = e.network ? '没有网络：库位管理需要联网' : e.message; draw(); errBeep(); }
+    function loading(t) { app.innerHTML = head('<div class="empty">' + esc(t) + '</div>'); bindHead(); }
+    /** 搜索 / 选商品（弹窗） */
+    function pickItem(q, note, cb, first, newCode) {
+      var show = function (items, qq) {
+        modal('<div class="ldq"><div class="ldq-h">选商品</div>' + (note ? '<p class="hint">' + esc(note) + '</p>' : '') +
+          '<div class="lmrow"><input id="piQ" class="pkq" placeholder="品名 / Item Code" value="' + esc(qq || '') + '"><button class="btn save" id="piGo" style="flex:0 0 70px">搜索</button></div>' +
+          '<div class="lmpick">' + (items ? (items.length ? items.map(function (x, i) { return '<button class="lmpi" data-pi="' + i + '"><b data-nt>' + esc(x.desc) + '</b><span>' + (x.isNew ? '<em class="lmnew">新商品</em>' : '<span data-nt>' + esc(x.item) + '</span>') + (x.stock === false && !x.isNew ? ' · 没有库存' : '') + '</span></button>'; }).join('') : '<p class="hint">没有找到</p>') : '') + '</div>' +
+          (newCode != null && items ? '<button class="tbtn lmnewb" id="piNew">都不是：新商品（系统里还没有）</button>' : '') +
+          '<div class="row"><button class="btn ghost" id="piX">取消</button></div></div>', function (m) {
+            var q2 = $('#piQ', m), run = function () { var v = q2.value.trim(); if (!v) return; api({ action: 'lmFind', code: v }, true).then(function (d) { show(d.kind === 'search' ? d.items : d.kind === 'item' ? [{ item: d.item, desc: d.desc }] : [], v); }, function (e) { toast(e.message, 2500); }); };
+            $('#piGo', m).onclick = run; q2.onkeydown = function (e) { if (e.key === 'Enter') { e.preventDefault(); run(); } };
+            $('#piX', m).onclick = function () { closeModal(); draw(); };
+            Array.prototype.forEach.call(m.querySelectorAll('[data-pi]'), function (b) { b.onclick = function () { closeModal(); cb(items[+b.dataset.pi]); }; });
+            var nb = $('#piNew', m); if (nb) nb.onclick = function () { newItem(q2.value.trim(), newCode, cb); };
+            if (!items) { if (q2.value.trim()) run(); else setTimeout(function () { q2.focus(); }, 50); }
+          });
+      };
+      show(first || null, q);
+    }
+    /** 新商品：输入品名（系统先用临时编号记住，以后导入条码表 / 库存表对上了自动合并） */
+    function newItem(name, code, cb) {
+      modal('<div class="ldq"><div class="ldq-h">新商品</div><p class="hint">' + (code ? '箱码 <b data-nt>' + esc(code) + '</b> · ' : '没有箱码 · ') + '写下箱子上的品名，系统记住它和库位。以后 DO 开这个商品就能找到库位。</p>' +
+        '<input id="niN" class="pkq" maxlength="100" autocomplete="off" placeholder="品名，例如 李錦記蒸鱼豉油 410ML" value="' + esc(/^\d+$/.test(name || '') ? '' : name || '') + '"><div id="niM" class="ldq-m"></div>' +
+        '<div class="row"><button class="btn ghost" id="niX">取消</button><button class="btn save" id="niO">下一步：扫库位</button></div></div>', function (m) {
+          var inp = $('#niN', m), ok = function () { var v = inp.value.trim(); if (v.length < 2) { $('#niM', m).className = 'ldq-m err'; $('#niM', m).textContent = '请写品名'; errBeep(); return; } closeModal(); cb({ item: '', desc: v, isNewName: true }); };
+          inp.onkeydown = function (e) { if (e.key === 'Enter') { e.preventDefault(); ok(); } };
+          $('#niO', m).onclick = ok; $('#niX', m).onclick = function () { closeModal(); draw(); }; setTimeout(function () { inp.focus(); }, 50);
+        });
+    }
+    /** 扫 / 输入一个库位（弹窗） */
+    function askLoc(title, cur, cb) {
+      modal('<div class="ldq"><div class="ldq-h">' + esc(title) + '</div><p class="hint">扫货架上的库位码，或输入，例如 07-J-01</p>' +
+        '<input id="alIn" class="pkq" maxlength="20" autocomplete="off" autocapitalize="characters" placeholder="07-J-01" value="' + esc(cur || '') + '"><div id="alM" class="ldq-m"></div>' +
+        '<div class="row"><button class="btn ghost" id="alC">取消</button><button class="btn save" id="alO">确定</button></div></div>', function (m) {
+          var inp = $('#alIn', m), ok = function () { var c = normLoc(inp.value); if (!c || !locRe().test(c)) { $('#alM', m).className = 'ldq-m err'; $('#alM', m).textContent = '库位格式不对，例如 07-J-01'; errBeep(); return; } closeModal(); cb(c); };
+          inp.onkeydown = function (e) { if (e.key === 'Enter') { e.preventDefault(); ok(); } };
+          $('#alO', m).onclick = ok; $('#alC', m).onclick = closeModal; setTimeout(function () { inp.focus(); inp.select(); }, 50);
+        });
+    }
+    function save(p, okMsg, after) {
+      if (LMS.busy) return; LMS.busy = true;
+      api(Object.assign({ action: 'lmSave' }, p), true).then(function (d) {
+        LMS.busy = false;
+        if (d.status !== 'ok') { errBeep(); return toast(d.message || '没有保存', 3000); }
+        beep(); toast(d.already ? '已经是这样了' : okMsg, 2000); (after || draw)(d);
+      }, function (e) { LMS.busy = false; errBeep(); toast(e.network ? '没有网络，没有保存' : e.message, 3000); });
+    }
+    /** 一条库位记录的按钮 */
+    function recActs(x, fromLoc) {
+      return '<div class="lmacts">' + (x.status !== '已核实' ? '<button class="btn save" data-v="' + esc(x.id) + '">✓ 核实在这里</button>' : '') +
+        '<button class="tbtn" data-mv="' + esc(x.id) + '" data-cur="' + esc(x.loc) + '">改库位</button><button class="tbtn red" data-rm="' + esc(x.id) + '" data-what="' + esc(x.desc + ' ' + x.base + ' @ ' + x.loc) + '">不在这里了</button></div>';
+    }
+    function bindRecActs() {
+      Array.prototype.forEach.call(app.querySelectorAll('[data-v]'), function (b) { b.onclick = function () { save({ act: 'verify', id: b.dataset.v }, '已核实'); }; });
+      Array.prototype.forEach.call(app.querySelectorAll('[data-mv]'), function (b) { b.onclick = function () { askLoc('改到哪个库位？（现在 ' + b.dataset.cur + '）', '', function (c) { save({ act: 'move', id: b.dataset.mv, loc: c }, '已改到 ' + c); }); }; });
+      Array.prototype.forEach.call(app.querySelectorAll('[data-rm]'), function (b) { b.onclick = function () { confirmBox('确定“' + b.dataset.what + '”不在这个库位了？（记录会保留，可在后台查到）', '不在这里了', function () { save({ act: 'remove', id: b.dataset.rm }, '已移走'); }); }; });
+    }
+    /** 选批次 → 绑定到库位 */
+    function bindFlow(v, loc, bc, taskId) {
+      var bs = v.batches.filter(function (b) { return b.qty > 0; });
+      var pickBatch = function (cb) {
+        if (bs.length === 1) return cb(bs[0]);
+        modal('<div class="ldq"><div class="ldq-h">是哪个批次？</div><p class="hint">对照箱子上印的<b>生产日期 / 到期日</b>选</p><div class="lmpick">' +
+          (bs.length ? bs : v.batches).map(function (b, i) { return '<button class="lmpi" data-bi="' + i + '"><b data-nt>' + esc(b.base || '（没有批次号）') + '</b><span>生产 ' + esc(b.mfg || '—') + ' · 到期 ' + esc(b.exp || '—') + ' · 库存 ' + b.qty + ' ' + esc(b.uom || '') + '</span></button>'; }).join('') +
+          '</div><div class="row"><button class="btn ghost" id="bX">取消</button></div></div>', function (m) {
+            $('#bX', m).onclick = closeModal;
+            Array.prototype.forEach.call(m.querySelectorAll('[data-bi]'), function (b) { b.onclick = function () { closeModal(); cb((bs.length ? bs : v.batches)[+b.dataset.bi]); }; });
+          });
+      };
+      pickBatch(function (b) {
+        var doIt = function (c) { save({ act: 'bind', item: v.item, base: b.base, loc: c, barcode: bc || '', taskId: taskId || '' }, '已绑定 ' + c); };
+        if (loc) doIt(loc); else askLoc('放在哪个库位？', '', doIt);
+      });
+    }
+    function draw() {
+      var m;
+      if (sub === 'l') return drawLoc(arg);
+      if (sub === 'i') return drawItem(arg);
+      if (sub === 'todo' || sub === 'noloc' || sub === 'tasks') return drawList(sub);
+      if (sub === 'a') return drawAisle(arg);
+      if (sub === 'empty') return drawEmpty();
+      if (sub === 'exp') return drawExp(arg);
+      // 首页 = 现场总览：每排进度
+      loading('读取库位总览…');
+      api({ action: 'lmMap' }, true).then(function (d) {
+        setBar('库位总览', false);
+        var L = d.locs, tot = L.ok + L.todo + L.task + L.empty, pct = function (x, t) { return (t ? x * 100 / t : 0).toFixed(1) + '%'; };
+        app.innerHTML = head((lmLastMsg ? '<p class="err">' + esc(lmLastMsg) + '</p>' : '') +
+          '<div class="lmstats">' + [['tasks', d.counts.tasks, '待处理', 'r'], ['todo', d.counts.todo, '待核实', 'y'], ['empty', L.empty, '空库位', 'k'], ['noloc', d.counts.noloc, '没库位商品', 'k']].map(function (x) {
+            return '<button data-go="' + x[0] + '"><b class="' + x[3] + '">' + x[1] + '</b><span>' + x[2] + '</span></button>'; }).join('') + '</div>' +
+          '<div class="lmchips"><button class="tbtn" data-go="exp">⏰ 快到期</button><span class="hint">已核实库位 ' + L.ok + ' / ' + tot + '</span></div>' +
+          '<div class="lmlg"><span class="ok">已核实</span><span class="todo">待核实</span><span class="task">有问题</span><span class="emp">空</span></div>' +
+          d.aisles.map(function (a) {
+            return '<button class="card lmais" data-a="' + a.a + '"><span class="lmaisn" data-nt>' + a.a + '</span><span class="lmpb"><i class="ok" style="width:' + pct(a.ok, a.total) + '"></i><i class="todo" style="width:' + pct(a.todo, a.total) + '"></i><i class="task" style="width:' + pct(a.task, a.total) + '"></i></span>' +
+              '<small>' + a.ok + '/' + a.total + ' 已核实<br>空 ' + a.empty + (a.task ? ' · ⚠ ' + a.task : '') + '</small></button>';
+          }).join('') + (d.aisles.length ? '' : '<div class="empty">还没有库位资料：请先在电脑后台导入 AutoCount 库存表</div>'));
+        bindHead(); lmLastMsg = '';
+        Array.prototype.forEach.call(app.querySelectorAll('[data-go]'), function (b) { b.onclick = function () { location.hash = '#/lm/' + b.dataset.go; }; });
+        Array.prototype.forEach.call(app.querySelectorAll('[data-a]'), function (b) { b.onclick = function () { location.hash = '#/lm/a/' + b.dataset.a; }; });
+      }, fail);
+    }
+    /** 一排一张表：行 = 位置（字母），列 = 层 */
+    function drawAisle(a) {
+      loading('读取第 ' + a + ' 排…');
+      api({ action: 'lmMap', kind: 'aisle', aisle: a }, true).then(function (d) {
+        setBar('第 ' + d.aisle + ' 排', true);
+        var ix = d.aisles.indexOf(d.aisle), prev = d.aisles[ix - 1], next = d.aisles[ix + 1];
+        var ps = [], lvs = [], by = {};
+        d.cells.forEach(function (c) { if (ps.indexOf(c.p) < 0) ps.push(c.p); if (lvs.indexOf(c.lv) < 0) lvs.push(c.lv); by[c.p + c.lv] = c; });
+        ps.sort(); lvs.sort();
+        var stTxt = { ok: '已核实', todo: '待核实', task: '有问题', empty: '空' };
+        app.innerHTML = head('<div class="lmnav">' + (prev ? '<button class="tbtn" data-a="' + prev + '">◀ ' + prev + '</button>' : '<span></span>') + '<b>第 ' + d.aisle + ' 排 · ' + d.cells.length + ' 个库位</b>' + (next ? '<button class="tbtn" data-a="' + next + '">' + next + ' ▶</button>' : '<span></span>') + '</div>' +
+          '<div class="lmlg"><span class="ok">已核实</span><span class="todo">待核实</span><span class="task">有问题</span><span class="emp">空</span></div>' +
+          '<div class="lmgrid" style="grid-template-columns:24px repeat(' + lvs.length + ',1fr)"><span></span>' + lvs.map(function (l) { return '<span class="lmgh">' + l + ' 层</span>'; }).join('') +
+          ps.map(function (p) {
+            return '<span class="lmgp">' + p + '</span>' + lvs.map(function (l) {
+              var c = by[p + l];
+              if (!c) return '<span class="lmcell none"></span>';
+              return '<button class="lmcell ' + c.st + '" data-c="' + esc(c.loc) + '" aria-label="' + esc(c.loc + ' ' + stTxt[c.st]) + '">' + (c.n ? '<b data-nt>' + esc(c.first) + '</b>' + (c.n > 1 ? '<small>+' + (c.n - 1) + ' 个</small>' : '') : '<small>空</small>') + '</button>';
+            }).join('');
+          }).join('') + '</div><p class="hint">点格子看放了什么。字母 = 位置，01–03 = 层。</p>');
+        bindHead();
+        Array.prototype.forEach.call(app.querySelectorAll('[data-a]'), function (b) { b.onclick = function () { location.hash = '#/lm/a/' + b.dataset.a; }; });
+        Array.prototype.forEach.call(app.querySelectorAll('[data-c]'), function (b) { b.onclick = function () { peekLoc(b.dataset.c); }; });
+      }, fail);
+    }
+    /** 点格子：弹出这个库位放了什么 */
+    function peekLoc(loc) {
+      api({ action: 'lmFind', code: loc }, true).then(function (d) {
+        modal('<div class="ldq"><div class="ldq-h"><span data-nt>' + esc(d.loc) + '</span> · ' + d.rows.length + ' 个商品</div>' +
+          (d.rows.length ? d.rows.map(function (x) { return '<div class="lmpeek"><b data-nt>' + esc(x.desc) + '</b> ' + stChip(x.status) + '<small>批次 <span data-nt>' + esc(x.base || '—') + '</span> · 库存 ' + x.stock + (x.status === '已核实' ? ' · ' + esc(x.by) + ' ' + esc(x.at) : ' · ' + esc(x.source)) + '</small></div>'; }).join('') : '<p class="hint">系统里这个库位是空的</p>') +
+          '<div class="row"><button class="btn ghost" id="pkX">关闭</button><button class="btn save" id="pkO">打开这个库位（核实 / 改）</button></div></div>', function (m) {
+            $('#pkX', m).onclick = closeModal; $('#pkO', m).onclick = function () { closeModal(); location.hash = '#/lm/l/' + encodeURIComponent(d.loc); };
+          });
+      }, function (e) { toast(e.network ? '没有网络' : e.message, 2500); });
+    }
+    function drawEmpty() {
+      loading('读取空库位…');
+      api({ action: 'lmMap', kind: 'empty' }, true).then(function (d) {
+        setBar('空库位（' + d.list.length + '）', true);
+        app.innerHTML = head('<p class="hint">系统里没有放东西的库位（只列出 AutoCount 或系统里出现过的库位）。给新品安排库位：挑一个，到现场确认是空的，点进去扫箱码绑定。</p>' +
+          (d.list.length ? d.list.map(function (x) { return '<button class="card lmemp" data-l="' + esc(x.loc) + '"><b class="pkloc" data-nt>' + esc(x.loc) + '</b><small>' + (x.gone ? '上次 ' + esc(x.gone.slice(0, 5)) + ' 移走' : x.hist ? 'AutoCount 以前放过，现在没库存' : '系统里没放过') + '</small></button>'; }).join('') : '<div class="empty">没有空库位</div>'));
+        bindHead();
+        Array.prototype.forEach.call(app.querySelectorAll('[data-l]'), function (b) { b.onclick = function () { location.hash = '#/lm/l/' + encodeURIComponent(b.dataset.l); }; });
+      }, fail);
+    }
+    function drawExp(days) {
+      days = +days || 60;
+      loading('读取快到期…');
+      api({ action: 'lmMap', kind: 'exp', days: days }, true).then(function (d) {
+        setBar('快到期（' + d.list.length + '）', true);
+        app.innerHTML = head('<div class="lmchips">' + [30, 60, 90].map(function (n) { return '<button class="tbtn' + (n === d.days ? ' on' : '') + '" data-d="' + n + '">' + n + ' 天内</button>'; }).join('') + '</div>' +
+          (d.list.length ? d.list.map(function (x) {
+            return '<button class="card lmgrp" data-i="' + esc(x.item) + '"><b data-nt>' + esc(x.desc) + '</b><span class="' + (x.days < 0 ? 'r' : x.days <= 30 ? 'y' : '') + '">' + (x.days < 0 ? '已过期 ' + (-x.days) + ' 天' : '还有 ' + x.days + ' 天') + '</span>' +
+              '<small>到期 ' + esc(x.exp) + ' · 批次 <span data-nt>' + esc(x.base) + '</span> · 库存 ' + x.qty + ' ' + esc(x.uom) + ' · 库位 <b data-nt>' + esc(x.locs.join(' / ') || '没有') + '</b></small></button>';
+          }).join('') : '<div class="empty">' + d.days + ' 天内没有到期的</div>'));
+        bindHead();
+        Array.prototype.forEach.call(app.querySelectorAll('[data-d]'), function (b) { b.onclick = function () { location.hash = '#/lm/exp/' + b.dataset.d; }; });
+        Array.prototype.forEach.call(app.querySelectorAll('[data-i]'), function (b) { b.onclick = function () { location.hash = '#/lm/i/' + encodeURIComponent(b.dataset.i); }; });
+      }, fail);
+    }
+    function drawLoc(loc) {
+      loading('读取库位 ' + loc + '…');
+      api({ action: 'lmFind', code: loc }, true).then(function (d) {
+        setBar('库位 ' + d.loc, true);
+        app.innerHTML = head('<div class="lmloc"><div class="pkloc big" data-nt>' + esc(d.loc) + '</div><span>' + d.rows.length + ' 个商品 / 批次</span></div>' +
+          (d.rows.length ? d.rows.map(function (x) {
+            return '<div class="card lmrec"><div class="lmrec-h"><b data-nt>' + esc(x.desc) + '</b>' + stChip(x.status) + '</div><div class="hint"><span data-nt>' + esc(x.item) + '</span> · 批次 <b data-nt>' + esc(x.base || '—') + '</b> · 库存 ' + x.stock +
+              (x.status !== '已核实' ? ' · 来自 ' + esc(x.source) : ' · ' + esc(x.by) + ' ' + esc(x.at)) + '</div>' + recActs(x) + '</div>';
+          }).join('') : '<div class="empty">系统里这个库位还没有商品</div>') +
+          '<button class="btn save lmadd" id="lmAdd">＋ 这个库位还放了别的商品（扫箱码）</button>');
+        bindHead(); bindRecActs();
+        $('#lmAdd').onclick = function () {
+          modal('<div class="ldq"><div class="ldq-h">扫箱码</div><p class="hint">扫箱子上的条码；箱子上没有条码就输入品名搜索</p><input id="adIn" class="pkq" autocomplete="off"><div class="row"><button class="btn ghost" id="adX">取消</button><button class="btn save" id="adO">下一步</button></div></div>', function (m) {
+            var inp = $('#adIn', m), next = function () {
+              var v = inp.value.trim(); if (!v) return; closeModal();
+              api({ action: 'lmFind', code: v }, true).then(function (r) {
+                if (r.kind === 'item') return bindFlow(r, d.loc, /^\d{6,}$/.test(v) ? v : '');
+                var code = /^\d{6,}$/.test(v) ? v : '';
+                var then = function (it) {
+                  if (it.isNewName) return save({ act: 'bind', newName: it.desc, barcode: code, loc: d.loc }, '已记住新商品，库位 ' + d.loc);
+                  api({ action: 'lmFind', code: it.item, item: it.item }, true).then(function (r2) { bindFlow(r2, d.loc, code); }, fail);
+                };
+                if (r.kind === 'unknown') return pickItem('', '这个码系统还不认识：' + v + '（可能是新商品，也可能是老商品的另一个箱码）。先搜品名：找到就选它，系统会记住这个码；都不是再点“新商品”。', then, null, v);
+                pickItem(v, '', then, r.items || [], '');
+              }, fail);
+            };
+            inp.onkeydown = function (e) { if (e.key === 'Enter') { e.preventDefault(); next(); } };
+            $('#adO', m).onclick = next; $('#adX', m).onclick = closeModal; setTimeout(function () { inp.focus(); }, 50);
+          });
+        };
+      }, fail);
+    }
+    function drawItem(item) {
+      var bc = (location.hash.match(/\?bc=([^&]+)/) || [])[1]; bc = bc ? decodeURIComponent(bc) : '';
+      loading('读取商品…');
+      api({ action: 'lmFind', code: item, item: item }, true).then(function (v) {
+        setBar('商品库位', true);
+        app.innerHTML = head('<div class="card lmitem"><b data-nt>' + esc(v.desc) + '</b><div class="hint">' + (v.isNew ? '<em class="lmnew">新商品 · 还没对上 AutoCount</em>' : '<span data-nt>' + esc(v.item) + '</span>') + (bc ? ' · 箱码 <span data-nt>' + esc(bc) + '</span>' : '') + '</div>' +
+          (v.barcodes && v.barcodes.length ? '<div class="hint lmbcs">条码：<span data-nt>' + esc(v.barcodes.join(' · ')) + '</span></div>' : '') +
+          (v.isNew ? '<button class="tbtn" id="lmMerge">其实是已有商品？合并过去</button>' : '') + '</div>' +
+          (v.batches.length ? v.batches.map(function (b, bi) {
+            return '<div class="card lmbatch">' + (b.nobatch ? '<div class="lmrec-h"><b>不分批次</b><span class="hint">' + (v.isNew ? '新商品' : '没有库存批次') + '</span></div>' :
+              '<div class="lmrec-h"><b data-nt>批次 ' + esc(b.base || '—') + '</b><span class="hint">库存 ' + b.qty + ' ' + esc(b.uom) + '</span></div><div class="hint">生产 ' + esc(b.mfg || '—') + ' · 到期 ' + esc(b.exp || '—') +
+              (b.ac.length ? ' · AutoCount：' + esc(b.ac.join(' / ')) : '') + '</div>') +
+              (b.locs.length ? b.locs.map(function (x) { return '<div class="lmloc2"><b class="pkloc" data-nt>' + esc(x.loc) + '</b>' + stChip(x.status) + recActs(x) + '</div>'; }).join('') : '<p class="err" style="margin:4px 0">没有库位</p>') +
+              '<button class="tbtn lmbind" data-bb="' + bi + '">＋ 绑定库位</button></div>';
+          }).join('') : '<div class="empty">这个商品现在没有库存批次</div>'));
+        bindHead(); bindRecActs();
+        var mg = $('#lmMerge'); if (mg) mg.onclick = function () {
+          pickItem(v.desc.split(/\s+/)[0], '选它其实是哪个商品。库位和条码都会合并过去。', function (it) {
+            if (it.isNew || it.item === v.item) return toast('请选 AutoCount 里的商品', 2500);
+            confirmBox('把“' + v.desc + '”合并到“' + it.desc + '”（' + it.item + '）？', '合并', function () { save({ act: 'merge', item: v.item, into: it.item }, '已合并', function () { location.hash = '#/lm/i/' + encodeURIComponent(it.item); }); });
+          });
+        };
+        Array.prototype.forEach.call(app.querySelectorAll('[data-bb]'), function (b) { b.onclick = function () { var one = Object.assign({}, v, { batches: [v.batches[+b.dataset.bb]] }); one.batches[0] = Object.assign({}, one.batches[0], { qty: Math.max(1, one.batches[0].qty) }); bindFlow(one, '', bc); }; });
+      }, fail);
+    }
+    function drawList(kind) {
+      loading('读取中…');
+      api({ action: 'lmTodo', kind: kind }, true).then(function (d) {
+        setBar({ todo: '待核实', noloc: '没有库位', tasks: '待处理' }[kind] + '（' + d.counts[kind] + '）', true);
+        var L = d.list, h = '';
+        if (kind === 'todo') {
+          var g = {}, order = [];
+          L.forEach(function (x) { if (!g[x.loc]) { g[x.loc] = []; order.push(x.loc); } g[x.loc].push(x); });
+          h = order.map(function (l) { return '<button class="card lmgrp" data-l="' + esc(l) + '"><b class="pkloc" data-nt>' + esc(l) + '</b><span>' + g[l].length + ' 个待核实</span><small data-nt>' + esc(g[l].slice(0, 3).map(function (x) { return x.desc; }).join('、')) + (g[l].length > 3 ? '…' : '') + '</small></button>'; }).join('');
+        } else if (kind === 'noloc') {
+          h = L.map(function (x) { return '<button class="card lmgrp" data-i="' + esc(x.item) + '"><b data-nt>' + esc(x.desc) + '</b><span>库存 ' + x.qty + ' ' + esc(x.uom) + '</span><small><span data-nt>' + esc(x.item) + ' · ' + esc(x.base) + '</span> · 到期 ' + esc(x.exp || '—') + '</small></button>'; }).join('');
+        } else {
+          h = L.map(function (t, i) {
+            return '<div class="card lmtask"><div class="lmrec-h"><b>' + esc(t.type) + '</b><span class="hint">' + esc(t.at) + '</span></div><div><b data-nt>' + esc(t.desc || '（不认识的箱码）') + '</b></div><div class="hint">' +
+              (t.bc ? '箱码 <span data-nt>' + esc(t.bc) + '</span> · ' : '') + (t.base ? '批次 <span data-nt>' + esc(t.base) + '</span> · ' : '') + esc(t.note) + '</div>' +
+              (t.to ? '<div class="lmmv"><span data-nt>' + esc(t.from || '—') + '</span> → <b class="pkloc" data-nt>' + esc(t.to) + '</b></div>' : '<p class="err" style="margin:4px 0">' + (t.item ? '没有库位' : '系统认不出这个商品') + '</p>') +
+              (t.to ? '<p class="hint lmchk">请到 <b data-nt>' + esc(t.to) + '</b> 现场核实这个商品和批次，确认后再改</p>' : '') +
+              '<div class="lmacts"><button class="btn save" data-tk="' + i + '">' + (t.to ? '已核实：改到 ' + esc(t.to) : t.item ? '处理：绑定库位' : '处理：选商品 + 库位') + '</button><button class="tbtn" data-sk="' + i + '">' + (t.to && t.from ? '不对，还在 ' + esc(t.from) : '忽略') + '</button></div></div>';
+          }).join('');
+        }
+        app.innerHTML = head(h || '<div class="empty">没有了 👍</div>');
+        bindHead();
+        Array.prototype.forEach.call(app.querySelectorAll('[data-l]'), function (b) { b.onclick = function () { location.hash = '#/lm/l/' + encodeURIComponent(b.dataset.l); }; });
+        Array.prototype.forEach.call(app.querySelectorAll('[data-i]'), function (b) { b.onclick = function () { location.hash = '#/lm/i/' + encodeURIComponent(b.dataset.i); }; });
+        Array.prototype.forEach.call(app.querySelectorAll('[data-sk]'), function (b) { b.onclick = function () { var t = L[+b.dataset.sk]; confirmBox('忽略这条？（' + (t.desc || t.bc) + (t.to ? ' → ' + t.to : '') + '）', '忽略', function () { api({ action: 'lmTaskSkip', id: t.id }, true).then(function () { toast('已忽略', 1500); draw(); }, fail); }); }; });
+        Array.prototype.forEach.call(app.querySelectorAll('[data-tk]'), function (b) {
+          b.onclick = function () {
+            var t = L[+b.dataset.tk];
+            if (t.to && !b.dataset.sure) return confirmBox('你已经到 ' + t.to + ' 看过，“' + (t.desc || t.bc) + '”' + (t.base ? '（批次 ' + t.base + '）' : '') + '确实在这里？确定就把库位' + (t.from ? '从 ' + t.from + ' ' : '') + '改到 ' + t.to + '。', '已核实，改库位', function () { b.dataset.sure = '1'; b.click(); });
+            var withItem = function (item) { api({ action: 'lmFind', code: item, item: item }, true).then(function (v) {
+              // 旧库位上的同一批次（系统里有记录的）→ 改库位；没有 → 绑定新库位
+              var cand = [].concat.apply([], v.batches.map(function (x) { return x.locs; })).filter(function (x) { return x.loc === t.from && (!t.base || x.base === t.base); });
+              if (cand.length === 1) return save({ act: 'move', id: cand[0].id, loc: t.to, taskId: t.id }, '已改到 ' + t.to);
+              if (t.base) { var bb = v.batches.filter(function (x) { return x.base === t.base; }); if (bb.length) return bindFlow(Object.assign({}, v, { batches: [Object.assign({}, bb[0], { qty: Math.max(1, bb[0].qty) })] }), t.to, t.bc, t.id); }
+              bindFlow(v, t.to, t.bc, t.id);
+            }, fail); };
+            if (t.item) return withItem(t.item);
+            var q0 = String(t.desc || '').replace(/[0-9.]+\s*(ML|G|KG|L|克|毫升)\b.*$/i, '').slice(0, 8);
+            pickItem(q0, (t.bc ? '系统认不出 DO 上的条码 ' + t.bc + '。' : '') + '“' + (t.desc || '') + '”是哪个商品？选了以后系统记住这个条码。', function (it) {
+              if (!it.isNewName) return withItem(it.item);
+              var go2 = function (c) { save({ act: 'bind', newName: it.desc, barcode: t.bc, loc: c, taskId: t.id }, '已记住新商品，库位 ' + c); };
+              if (t.to) go2(t.to); else askLoc('放在哪个库位？', '', go2);
+            }, null, t.bc || '');
+          };
+        });
+      }, fail);
+    }
+    draw();
+  }
+  var lmLast = null;
   // 焦点不在输入框时，扫描头的按键送到点货扫描框
   document.addEventListener('keydown', function (e) {
     if (!camOpen && /^#\/pk\/[^/]+\/i\/\d+$/.test(location.hash) && kpKey(e)) return;     // v1.5.2 拣货 SKU 页：数字键 / 扫描枪
-    if (!/^#\/(ld|pk)\/[^/]+(\/i\/\d+)?$/.test(location.hash) || !$('#modal').hidden || camOpen) return;
+    var isLm = /^#\/lm(\/|$)/.test(location.hash);
+    if ((!isLm && !/^#\/(ld|pk)\/[^/]+(\/i\/\d+)?$/.test(location.hash)) || !$('#modal').hidden || camOpen) return;
     var a = document.activeElement;
     if (a && (a.tagName === 'INPUT' || a.tagName === 'SELECT' || a.tagName === 'TEXTAREA')) return;
-    if (e.key && e.key.length === 1 && !e.ctrlKey && !e.altKey && !e.metaKey) { var t = $('#ldIn'); if (t) t.focus(); }
+    if (e.key && e.key.length === 1 && !e.ctrlKey && !e.altKey && !e.metaKey) { var t = $(isLm ? '#lmIn' : '#ldIn'); if (t) t.focus(); }
   }, true);
 
   var cam = null, camOpen = false, camState = null;
