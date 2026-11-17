@@ -625,3 +625,8 @@ body.wcon header#bar { display: none; }
 @media print { .wcnav, #wcTop, .wcbar .tbtn { display: none !important; } .wc { display: block; } }
 .wct td.mono { white-space: nowrap; }
 .wcwho { font-size: 14px; color: #334155; font-weight: 600; padding: 0 4px; }
+/* v1.9.2 移库：箱码不认识 → 当场选商品 */
+.tunk { color: #b42318; font-weight: 600; font-size: 14px; margin-top: 2px; }
+.tunkc { background: #fef3f2; border: 1px solid #fda29b; border-radius: 12px; padding: 12px; margin: 10px 0; display: flex; flex-direction: column; gap: 6px; }
+.tunkc b { color: #b42318; } .tunkc span { font-size: 14px; color: #475467; }
+.tunkm .lmpick { max-height: 46vh; overflow: auto; margin: 6px 0; }
