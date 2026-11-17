@@ -3,7 +3,7 @@
  * 原则：只采集原始资料，不做任何核对。先存手机（离线队列），再上传云端。 */
 (function () {
   'use strict';
-  var VERSION = '1.9.4';
+  var VERSION = '1.9.5';
   var $ = function (s, el) { return (el || document).querySelector(s); };
   var app = $('#app');
 
@@ -3211,7 +3211,8 @@
           '<div class="hint">' + (x.status === '已核实' ? '● 受控' : '○ 未受控（' + esc(x.status) + '）') + ' · ' + esc(x.by || x.src || '') + ' ' + esc(x.at || '') + '</div></div>' +
           '<div class="wcracts">' + (x.status !== '已核实' ? '<button class="btn save" data-ver="' + esc(x.id) + '">已核实</button>' : '') + '<button class="tbtn" data-mv="' + esc(x.id) + '">改库位</button><button class="tbtn red" data-rm="' + esc(x.id) + '" data-what="' + esc(x.desc + ' ' + x.base) + '">不在这里了</button></div></div>'; }).join('');
       if (c.tasks.length) h += '<div class="wcpt"><b>这个库位的待处理</b>' + c.tasks.map(function (t) { return '<div class="hint">◐ ' + esc(t.type) + ' · ' + esc(t.desc || t.bc) + ' · ' + esc(t.from || '—') + ' → ' + esc(t.to || '—') + '</div>'; }).join('') + '</div>';
-      return h + '<p class="hint">货真的搬了请用手机【库位转移】；这里只改正记录（货没动、系统记错了）。</p></div>';
+      h += '<div class="wcadd"><button class="btn save" data-add="' + l + '">＋ 登记商品在这个库位</button></div>';
+      return h + '<p class="hint">货真的搬了请用手机【库位转移】；这里只改正记录、登记货在哪里。</p></div>';
     }
     function vInv() {
       var h = '<div class="wcsearch"><input id="wcQ" placeholder="扫码或输入 箱码 / Item Code / 品名（几个词用空格分开）" value="' + esc(W.q) + '"><button class="btn save" id="wcGo">查询</button></div>';
@@ -3228,8 +3229,8 @@
           '<table class="wct"><thead><tr><th>批次</th><th>到期（先到先出）</th><th>生产</th><th class="n">库存</th><th>系统库位</th></tr></thead><tbody>' +
           bs.map(function (b) { var rl = recs.filter(function (x) { return x.base === b.base; }), dl = daysLeft(b.exp);
             return '<tr><td class="mono">' + esc(b.base || '（不分批次）') + (b.src === '入库单' ? ' <span class="chip c-info">入库单</span>' : '') + '</td><td><b' + (dl != null && dl < 60 ? ' class="red"' : '') + '>' + esc(b.exp || '—') + '</b>' + (dl != null ? ' <span class="hint">' + (dl < 0 ? '已过期' : dl + ' 天') + '</span>' : '') + '</td><td>' + esc(b.mfg || '—') + '</td><td class="n"><b>' + b.qty + '</b> ' + esc(b.uom) + '</td><td>' +
-              (rl.length ? rl.map(function (x) { return '<button class="lnk mono" data-goloc="' + esc(x.loc) + '">' + esc(x.loc) + '</button>' + (x.status === '已核实' ? '' : ' <span class="hint">○</span>'); }).join(' ') : '<span class="hint">没有库位' + (Object.keys(b.acLocs).length ? '（AutoCount：' + esc(Object.keys(b.acLocs).join(' ')) + '）' : '') + '</span>') + '</td></tr>'; }).join('') +
-          '</tbody></table>' + (recs.filter(function (x) { return !x.base; }).length ? '<p class="hint">不分批次的库位：' + recs.filter(function (x) { return !x.base; }).map(function (x) { return esc(x.loc); }).join(' ') + '</p>' : '') + '</div>';
+              (rl.length ? rl.map(function (x) { return '<button class="lnk mono" data-goloc="' + esc(x.loc) + '">' + esc(x.loc) + '</button>' + (x.status === '已核实' ? '' : ' <span class="hint">○</span>'); }).join(' ') : '<span class="hint">没有库位' + (Object.keys(b.acLocs).length ? '（AutoCount：' + esc(Object.keys(b.acLocs).join(' ')) + '）' : '') + '</span>') + ' <button class="tbtn" data-bind="' + esc(b.base) + '">＋ 登记库位</button></td></tr>'; }).join('') +
+          '</tbody></table>' + (bs.length ? '' : '<p class="hint">AutoCount 没有这个商品的库存批次。 <button class="tbtn" data-bind="">＋ 登记库位（不分批次）</button></p>') + (recs.filter(function (x) { return !x.base; }).length ? '<p class="hint">不分批次的库位：' + recs.filter(function (x) { return !x.base; }).map(function (x) { return esc(x.loc); }).join(' ') + '</p>' : '') + '</div>';
       }
       return h;
     }
@@ -3303,6 +3304,8 @@
           var go = function () { var v = normLocAny($('#wcMv', m).value); if (!lmParts(v)) return toast('库位格式不对', 2500); closeModal(); act({ act: 'move', id: b.dataset.mv, loc: v }, '已改到 ' + v).then(function () { var p = lmParts(v); W.aisle = p.a; W.loc = v; draw(); }); };
           $('#wcMvN', m).onclick = closeModal; $('#wcMvY', m).onclick = go; $('#wcMv', m).addEventListener('keydown', function (e) { if (e.key === 'Enter') go(); }); setTimeout(function () { $('#wcMv', m).focus(); }, 50);
         }); }; });
+      all('[data-add]', function (b) { b.onclick = function () { addAt(b.dataset.add); }; });
+      all('[data-bind]', function (b) { b.onclick = function () { bindTo(W.item, b.dataset.bind); }; });
       all('[data-sk]', function (b) { b.onclick = function () { skip(W.snap.tasks[+b.dataset.sk]); }; });
       all('[data-res]', function (b) { b.onclick = function () { var t = W.snap.tasks[+b.dataset.res]; confirmBox('箱码 ' + t.bc + ' 是“' + b.textContent + '”？系统会记住这个箱码，并把库位改到 ' + t.to + '。', '确定', function () { act({ act: 'resolve', taskId: t.id, recId: b.dataset.rec }, '已记住，库位已更新'); }); }; });
       all('[data-days]', function (b) { b.onclick = function () { W.days = +b.dataset.days; draw(); }; });
@@ -3313,6 +3316,49 @@
       var lf = $('#wcLf'); if (lf) lf.oninput = function () { W.lf = lf.value; var p = lf.selectionStart; draw(); var n = $('#wcLf'); n.focus(); n.setSelectionRange(p, p); };
       var pr = $('#wcPrint'); if (pr) pr.onclick = function () { window.print(); };
       var rt = $('#wcRetry'); if (rt) rt.onclick = function () { W.sb = null; load(); };
+    }
+    /** v1.9.5 登记：商品 + 批次 → 库位（记为已核实） */
+    function doBind(item, base, loc) {
+      var D = W.snap; closeModal();
+      return act({ act: 'bind', item: item, base: base, loc: loc, desc: D.items[item] || '', note: '中控台登记' }, '已登记 ' + loc).then(function () { var p = lmParts(loc); W.view = 'map'; W.aisle = p.a; W.loc = loc; draw(); });
+    }
+    function batchesOf(it) {
+      var D = W.snap; return Object.keys(D.bat).map(function (k) { return D.bat[k]; }).filter(function (b) { return b.item === it; })
+        .sort(function (a, b) { var x = dmy(a.exp), y = dmy(b.exp); return (x ? x.getTime() : 9e15) - (y ? y.getTime() : 9e15); });
+    }
+    /** 从库存查询：这个批次放在哪个库位 */
+    function bindTo(item, base) {
+      var D = W.snap;
+      modal('<div class="tmiss"><h3>登记库位</h3><p><b>' + esc(D.items[item] || item) + '</b><br><span class="hint mono">' + esc(item) + ' · ' + (base ? '批次 ' + esc(base) : '不分批次') + '</span></p>' +
+        '<input id="wcBl" class="tqtyin" placeholder="库位，例如 08-C-02" autocomplete="off" style="text-transform:uppercase"><div class="row" style="margin-top:10px"><button class="btn ghost" id="wcBlN">取消</button><button class="btn save" id="wcBlY">登记</button></div></div>', function (m) {
+        var go = function () { var v = normLocAny($('#wcBl', m).value); if (!lmParts(v)) return toast('库位格式不对', 2500); doBind(item, base, v); };
+        $('#wcBlN', m).onclick = closeModal; $('#wcBlY', m).onclick = go; $('#wcBl', m).addEventListener('keydown', function (e) { if (e.key === 'Enter') go(); }); setTimeout(function () { var e = $('#wcBl', m); if (e) e.focus(); }, 50);
+      });
+    }
+    /** 从库位图：这个库位放了什么（搜商品 → 选批次） */
+    function addAt(loc) {
+      var D = W.snap;
+      modal('<div class="tmiss wcaddm"><h3>登记商品在 <span class="mono">' + loc + '</span></h3><div class="wcsearch"><input id="wcAq" placeholder="扫箱码或输入 Item Code / 品名" autocomplete="off"><button class="btn save" id="wcAgo">查询</button></div><div id="wcAr"></div><div class="row" style="margin-top:10px"><button class="btn ghost" id="wcAx">取消</button></div></div>', function (m) {
+        var box = $('#wcAr', m), q = $('#wcAq', m);
+        var pick = function (it) {
+          var bs = batchesOf(it);
+          box.innerHTML = '<p><b>' + esc(D.items[it] || it) + '</b> <span class="hint mono">' + esc(it) + '</span></p><p class="hint">选批次（按到期先后）：</p><div class="wclist">' +
+            bs.map(function (b) { return '<button class="wcli" data-ab="' + esc(b.base) + '"><b class="mono">' + esc(b.base || '（不分批次）') + '</b><span class="hint">库存 ' + b.qty + ' ' + esc(b.uom) + ' · 到期 ' + esc(b.exp || '—') + '</span></button>'; }).join('') +
+            (bs.some(function (b) { return !b.base; }) ? '' : '<button class="wcli" data-ab=""><b>不分批次</b><span class="hint">不知道批次 / 没有批次</span></button>') + '</div>';
+          Array.prototype.forEach.call(box.querySelectorAll('[data-ab]'), function (b) { b.onclick = function () { doBind(it, b.dataset.ab, loc); }; });
+        };
+        var go = function () {
+          var v = q.value.trim(); if (!v) return; box.innerHTML = '<p class="hint">查询中…</p>';
+          rpc('wc_find', { p_token: cfg.d, p_q: v }).then(function (d) {
+            var f = (d.items || []).map(function (x) { return Array.isArray(x) ? x : [x, D.items[x] || '']; });
+            if (!f.length) { box.innerHTML = '<p class="hint">没有找到。新商品请先用手机【📍库位】登记。</p>'; return; }
+            if (f.length === 1) return pick(f[0][0]);
+            box.innerHTML = '<div class="wclist">' + f.map(function (x) { return '<button class="wcli" data-ai2="' + esc(x[0]) + '"><b>' + esc(x[1] || D.items[x[0]] || '') + '</b><span class="mono hint">' + esc(x[0]) + '</span></button>'; }).join('') + '</div>';
+            Array.prototype.forEach.call(box.querySelectorAll('[data-ai2]'), function (b) { b.onclick = function () { pick(b.dataset.ai2); }; });
+          }, function (e) { box.innerHTML = '<p class="hint red">' + esc(e.message) + '</p>'; });
+        };
+        $('#wcAx', m).onclick = closeModal; $('#wcAgo', m).onclick = go; q.addEventListener('keydown', function (e) { if (e.key === 'Enter') go(); }); setTimeout(function () { if (q.isConnected) q.focus(); }, 50);
+      });
     }
     function normLocAny(v) { var s = String(v || '').trim().toUpperCase(); return s.replace(/^(\d{2})-?([A-Z])-?(\d{2})$/, '$1-$2-$3'); }
     currentRedraw = function () { if (location.hash === '#/wc') draw(); };
