@@ -109,7 +109,9 @@
     $('#log').insertBefore(e, $('#log').firstChild);
     while ($('#log').children.length > 120) $('#log').lastChild.remove();
   }
-  function stat() { $('#stat').textContent = '已成功 ' + ok + ' 次' + (bad ? ' · 丢弃不一致的读数 ' + bad + ' 次' : '') + ' · 画质 ' + (hd ? '4K' : '1080p') + (zoomOn ? ' · 放大中' : ''); }
+  var res = '';
+  function stat() { $('#stat').innerHTML = '已成功 ' + ok + ' 次' + (bad ? ' · 丢弃不一致的读数 ' + bad + ' 次' : '') + ' · 要求 ' + (useHd() ? '最高清' : '1080p') + (res ? ' · <b>摄像头实际 ' + res + '</b>' : '') + (zoomOn ? ' · 放大中' : ''); }
+  function useHd() { return hd || mode === 'loc'; }        // 库位模式默认要最高清晰度（手机给不了会自动降）
   function setMode(m) {
     mode = m; hist = [];
     Array.prototype.forEach.call(document.querySelectorAll('[data-m]'), function (b) { b.classList.toggle('on', b.dataset.m === m); });
@@ -180,9 +182,10 @@
     applyZoom(MODES[mode].zoom);
     var s = track && track.getSettings ? track.getSettings() : {};
     if (!track && zx) { try { s = zx.getRunningTrackSettings(); } catch (e) { } }
+    res = s.width ? s.width + '×' + s.height : ''; stat();
     log('i', '摄像头已打开' + (s.width ? '：' + s.width + '×' + s.height : '') + (caps.zoom ? '，可放大到 ' + caps.zoom.max + ' 倍' : '，不支持放大'));
   }
-  function constraints() { return { facingMode: { ideal: 'environment' }, width: { ideal: hd ? 3840 : 1920 }, height: { ideal: hd ? 2160 : 1080 } }; }
+  function constraints() { return { facingMode: { ideal: 'environment' }, width: { ideal: useHd() ? 3840 : 1920 }, height: { ideal: useHd() ? 2160 : 1080 } }; }
   function start() {
     stop(true); msg('正在打开摄像头…<br><small>如果弹出“允许使用相机”，请点允许</small>'); running = true; $('#go').textContent = '停止'; t0 = Date.now(); hist = [];
     var useNative = function (fs, d, name) {
@@ -202,7 +205,7 @@
     // 库位 / 高清模式：把组件的画面在网页上排成摄像头原始宽度，再缩小显示 → 按原始清晰度识别，离远一点也能读。
     var useZx = function () {
       if (!window.Html5Qrcode) return fail('扫码组件没加载，请联网后刷新');
-      var big = !MODES[mode].live, cam = $('#cam'), R = $('#reader'), W = cam.clientWidth, RW = big ? (hd ? 2160 : 1080) : W, k = W / RW;
+      var big = !MODES[mode].live, cam = $('#cam'), R = $('#reader'), W = cam.clientWidth, RW = big ? (useHd() ? 2160 : 1080) : W, k = W / RW;
       $('#v').hidden = true; R.hidden = false; cam.classList.add('zx'); cam.classList.toggle('big', big);
       R.style.width = RW + 'px'; R.style.transform = big ? 'scale(' + k + ')' : '';
       var fit = function () { if (R.offsetHeight) cam.style.height = Math.round(R.offsetHeight * k) + 'px'; };
