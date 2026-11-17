@@ -3,7 +3,7 @@
  * 原则：只采集原始资料，不做任何核对。先存手机（离线队列），再上传云端。 */
 (function () {
   'use strict';
-  var VERSION = '1.9.0';
+  var VERSION = '1.9.1';
   var $ = function (s, el) { return (el || document).querySelector(s); };
   var app = $('#app');
 
@@ -130,9 +130,9 @@
       var json = decodeURIComponent(Array.prototype.map.call(atob(b), function (c) { return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2); }).join(''));
       var o = JSON.parse(json);
       if (o.u && TOKEN_RE.test(o.d || '')) {
-        cfg = { u: o.u, d: o.d, r: o.r === 'up' || o.r === 'rc' ? o.r : '' }; CFGK.save(cfg); authMsg = ''; cfgHold = false;
+        cfg = { u: o.u, d: o.d, r: o.r === 'up' || o.r === 'rc' || o.r === 'wc' ? o.r : '' }; CFGK.save(cfg); authMsg = ''; cfgHold = false;
         if (inAppBrowser()) setTimeout(function () { modal('<h3>请用 Chrome 打开</h3><p>现在是在聊天软件（WhatsApp / 微信等）里面打开的。设置只保存在这里，以后从桌面图标或 Chrome 打开会找不到。</p><p>请点右上角 <b>⋮</b> →「<b>在 Chrome 中打开</b>」（或复制链接到 Chrome 打开）。</p><div class="row"><button class="btn save" id="iaOk">知道了</button></div>', function (m) { $('#iaOk', m).onclick = closeModal; }); }, 300);
-        setSession(null); toast(cfg.r === 'up' ? '设置已保存：这台电脑用来上传 DO' : cfg.r === 'rc' ? '设置已保存：这台电脑用来查看库位记录' : '设置已保存，请登录');
+        setSession(null); toast(cfg.r === 'up' ? '设置已保存：这台电脑用来上传 DO' : cfg.r === 'rc' ? '设置已保存：这台电脑用来查看库位记录' : cfg.r === 'wc' ? '设置已保存：库位中控台平板，请登录' : '设置已保存，请登录');
       } else if (o.k) { authMsg = '这是旧版设置链接，已停用。请找办公室在【PDA 设备管理】生成本设备的新链接。'; toast('旧版链接已停用', 3000); }
       else toast('设置链接无效');
     } catch (e) { toast('设置链接无效'); }
@@ -774,6 +774,17 @@
     if (cfg.r === 'up') return viewUpload();          // 装车点货：办公室上传电脑，不用员工登录
     document.body.classList.remove('wcon');
     if (cfg.r === 'rc') return location.hash === '#/wc' ? viewConsole() : viewRecords();         // v1.6 库位记录后台电脑；v1.9 #/wc 平板中控台
+    if (cfg.r === 'wc') {                             // v1.9.1 库位中控台平板：员工登录（和 PDA 一样），只有中控台
+      if (!sess) return viewLogin();
+      if (myMods().indexOf('wc') < 0) {
+        setBar('库位中控台', false);
+        app.innerHTML = '<div class="empty">员工 ' + esc(operator) + ' 没有【库位中控台】的权限。<br>请找办公室在【员工 / PIN 管理】勾选“中控台（平板）”。<br><br><button class="btn ghost" id="wcNoOut">退出登录</button></div>';
+        $('#wcNoOut').onclick = function () { api({ action: 'logout' }).catch(function () { }); setSession(null); route(); };
+        return;
+      }
+      if (location.hash !== '#/wc') { history.replaceState(null, '', '#/wc'); }
+      return viewConsole();
+    }
     if (!sess) return viewLogin();
     var h = location.hash || '#/';
     var m;
@@ -2959,18 +2970,21 @@
   function viewConsole() {
     document.body.classList.add('wide', 'wcon');
     setBar('库位中控台', false);
+    var PF = cfg.r === 'wc' ? 'wc' : 'rc';          // v1.9.1 平板（员工登录）用 wc*，后台电脑用 rc*
     var W = WC || (WC = { view: LS.get('wcView', 'map'), aisle: '', loc: '', q: '', found: null, item: '', days: 60, lf: '', snap: null, sb: null, err: '', busy: false, at: 0 });
     var NAV = [['map', '库位图'], ['inv', '库存查询'], ['tasks', '待处理'], ['empty', '空库位'], ['exp', '快到期'], ['log', '库位调整记录'], ['tr', '移库记录']];
     var ST = { ok: ['● 受控', 'c-ok'], todo: ['○ 未受控', 'c-neu'], task: ['◐ 待核验', 'c-warn'], empty: ['空', 'c-empty'] };
     function rpc(fn, args) {
+      if (PF === 'wc') args = Object.assign({ p_sess: sess ? sess.t : '' }, args);
       var h = { 'Content-Type': 'application/json', apikey: W.sb.anon }; if (!/^sb_publishable_/.test(W.sb.anon)) h.Authorization = 'Bearer ' + W.sb.anon;
       return fetch(W.sb.url + '/rest/v1/rpc/' + fn, { method: 'POST', headers: h, body: JSON.stringify(args) }).then(function (r) {
         if (!r.ok) throw new Error('数据库 ' + r.status); return r.json();
-      }).then(function (d) { if (d && d.error === 'DEVICE') throw new Error('这台设备没有中控台权限（或已被撤销）'); return d; });
+      }).then(function (d) { if (d && d.error === 'DEVICE') throw new Error(PF === 'wc' ? '数据库还没认得这次登录（刚登录请等 1 分钟再点重试），或登录已过期请重新登录' : '这台设备没有中控台权限（或已被撤销）'); return d; });
     }
     function load(force) {
+      if (PF === 'wc' && !sess) return Promise.resolve();
       W.busy = true; paintTop();
-      var cfgP = W.sb ? Promise.resolve(W.sb) : api({ action: 'rcSbCfg' }, true).then(function (c) { if (!c.url) throw new Error('还没设置中控台数据库：请在表格菜单【中控台数据库（Supabase）设置】'); W.sb = c; return c; });
+      var cfgP = W.sb ? Promise.resolve(W.sb) : api({ action: PF + 'SbCfg' }, true).then(function (c) { if (!c.url) throw new Error('还没设置中控台数据库：请在表格菜单【中控台数据库（Supabase）设置】'); W.sb = c; return c; });
       return cfgP.then(function () { return rpc('wc_snapshot', { p_token: cfg.d }); }).then(function (s) { W.snap = build(s); W.err = ''; W.busy = false; W.at = Date.now(); draw(); },
         function (e) { W.busy = false; W.err = e.network ? '网络不可用' : e.message; draw(); });
     }
@@ -3003,14 +3017,14 @@
     function chip(st) { return '<span class="chip ' + ST[st][1] + '">' + ST[st][0] + '</span>'; }
     function act(p, okMsg) {
       if (W.busy) return; W.busy = true; paintTop(); toast('处理中…', 3000);
-      return api(Object.assign({ action: 'rcLmSave' }, p), true).then(function (r) {
+      return api(Object.assign({ action: PF + 'LmSave' }, p), true).then(function (r) {
         W.busy = false; if (r.status && r.status !== 'ok') { toast(r.message || '处理不了', 4000); paintTop(); return; }
         toast(okMsg, 2000); return load();
       }, function (e) { W.busy = false; paintTop(); toast(e.network ? '没有网络' : e.message, 4000); });
     }
     function skip(t) {
       confirmBox('“' + (t.desc || t.bc || t.type) + '”这条待处理标为已处理 / 忽略？', '确定', function () {
-        api({ action: 'rcLmTaskSkip', id: t.id, note: '中控台处理' }, true).then(function () { toast('已处理', 1500); load(); }, function (e) { toast(e.message, 4000); });
+        api({ action: PF + 'LmTaskSkip', id: t.id, note: '中控台处理' }, true).then(function () { toast('已处理', 1500); load(); }, function (e) { toast(e.message, 4000); });
       });
     }
     // ---------- 各页面 ----------
@@ -3108,11 +3122,12 @@
     function paintTop() {
       var t = $('#wcTop'); if (!t) return;
       var age = W.at ? Math.round((Date.now() - W.at) / 1000) : null, m = W.snap && W.snap.meta['sync:wms_locations'];
-      t.innerHTML = '<span class="hint">' + (W.busy ? '读取中…' : W.snap ? '数据库 ' + esc(W.snap.at) + (m ? ' · 表格同步 ' + esc(m[1]) : '') : '') + '</span><button class="tbtn" id="wcRe"' + (W.busy ? ' disabled' : '') + '>⟳ 刷新</button><a class="tbtn" href="#/">后台 ›</a>';
-      var b = $('#wcRe'); if (b) b.onclick = function () { W.busy = true; paintTop(); api({ action: 'rcSbSync' }, true).then(function () { load(true); }, function () { load(true); }); };
+      t.innerHTML = '<span class="hint">' + (W.busy ? '读取中…' : W.snap ? '数据库 ' + esc(W.snap.at) + (m ? ' · 表格同步 ' + esc(m[1]) : '') : '') + '</span><button class="tbtn" id="wcRe"' + (W.busy ? ' disabled' : '') + '>⟳ 刷新</button>' + (PF === 'wc' ? '<span class="wcwho">' + esc(operator) + '</span><button class="tbtn" id="wcOut">退出</button>' : '<a class="tbtn" href="#/">后台 ›</a>');
+      var o = $('#wcOut'); if (o) o.onclick = function () { confirmBox('退出登录？', '退出', function () { clearInterval(W.timer); api({ action: 'logout' }).catch(function () { }); setSession(null); WC = null; route(); }); };
+      var b = $('#wcRe'); if (b) b.onclick = function () { W.busy = true; paintTop(); api({ action: PF + 'SbSync' }, true).then(function () { load(true); }, function () { load(true); }); };
     }
     function draw() {
-      if (location.hash !== '#/wc') return;
+      if (location.hash !== '#/wc' || (PF === 'wc' && !sess)) return;
       LS.set('wcView', W.view);
       var D = W.snap, nT = D ? D.tasks.length : 0;
       var body = W.err ? '<div class="wcerr"><b>读不到数据</b><p>' + esc(W.err) + '</p><button class="btn save" id="wcRetry">重试</button></div>' : !D ? '<p class="hint">读取中…</p>' :
