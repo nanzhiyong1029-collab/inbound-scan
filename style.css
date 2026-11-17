@@ -544,3 +544,4 @@ body.lang-my .pkfil .hint { font-size: 12px; }
 .tover { list-style: none; margin: 10px 0; padding: 0; max-height: 40vh; overflow: auto; }
 .tover li { padding: 8px 10px; border: 1px solid #f5c2a8; background: #fff7ed; border-radius: 8px; margin-bottom: 6px; } .tover li b { display: block; } .tover li span { font-size: 13px; color: #475467; } .tover li span b { display: inline; color: #b42318; }
 .tovb { display: flex; flex-direction: column; gap: 8px; } .tovb .btn { width: 100%; }
+.inb-bt { margin: 10px 0; padding: 8px 10px; border: 1px dashed #c9d1dc; border-radius: 10px; } .inb-bh { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; } .inb-bh input { font: 600 15px/1.2 inherit; padding: 6px 8px; width: 9em; text-transform: uppercase; }
