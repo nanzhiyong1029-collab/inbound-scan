@@ -3,7 +3,7 @@
  * 原则：只采集原始资料，不做任何核对。先存手机（离线队列），再上传云端。 */
 (function () {
   'use strict';
-  var VERSION = '1.9.2';
+  var VERSION = '1.9.3';
   var $ = function (s, el) { return (el || document).querySelector(s); };
   var app = $('#app');
 
@@ -1322,6 +1322,28 @@
     if (x) return { itemCode: x[1], desc: x[2], match: 'Item Code' };
     return null;
   }
+  /** v1.9.3 各库位上记着的货（手机里存一份，扫码 / 提交不用等后台）：{ at, locs: [[库位, Item Code, 品名, 批次, 状态]] } */
+  var trSnap = null, trSnapTimer = null;
+  function trSnapLoad(fresh) {
+    var local = trSnap ? Promise.resolve(trSnap) : IDB.get('trsnap').then(function (d) { if (d && !trSnap) trSnap = d; return trSnap; }, function () { return null; });
+    if (!fresh) return local;
+    return local.then(function () {
+      if (!cfg || !sess || navigator.onLine === false) return trSnap;
+      return api({ action: 'trSnap' }, true).then(function (d) { if (d && Array.isArray(d.locs)) { trSnap = d; IDB.set('trsnap', d).catch(function () { }); } return trSnap; }, function () { return trSnap; });
+    });
+  }
+  function trSnapAt(loc) { return trSnap ? trSnap.locs.filter(function (x) { return x[0] === loc; }) : null; }
+  /** 提交后手机自己先改（后台稍后会给最新的） */
+  function trSnapApply(src, dst, item, desc, base, over, seenItems) {
+    if (!trSnap || !item) return;
+    var L = trSnap.locs, b = base == null ? null : base;
+    if (over === true) L = L.filter(function (x) { return !(x[0] === dst && !(x[1] === item && (b == null || x[3] === b))); });
+    var mv = src ? L.filter(function (x) { return x[0] === src && x[1] === item && (b == null || x[3] === b); })[0] : null;
+    if (mv) { mv[0] = dst; mv[4] = '已核实'; }
+    else if (!L.some(function (x) { return x[0] === dst && x[1] === item && (b == null || x[3] === b); })) L.push([dst, item, desc || '', b || '', '已核实', '']);
+    else L.forEach(function (x) { if (x[0] === dst && x[1] === item && (b == null || x[3] === b)) x[4] = '已核实'; });
+    trSnap.locs = L; IDB.set('trsnap', trSnap).catch(function () { });
+  }
   /** v1.8.2 移库选批次：这个商品有库存的批次。先用本机资料（离线也能选），联网时再读最新的（库位是最新的）。
    *  cb(list, fresh, item, desc)：list = [{ base, mfg, exp, qty, uom, locs: [] }]，到期早的在前 */
   function trBatches(code, item, cb) {
@@ -1448,7 +1470,7 @@
     function mkSteps() {
       var a = [['src', '来源库位', '扫描原来的库位条码'], ['bc', '商品箱码', '扫描箱子上的条码']];
       if (needBatch()) a.push(['batch', '选批次', '看箱子上的到期日，在下面点对应的批次']);
-      a.push(['dst', '目的库位', '扫描新的库位条码'], ['photo', '拍照确认', '拍下货物在新库位的照片']);
+      a.push(['dst', '目的库位', '扫描新的库位条码'], ['photo', '拍照（选填）', '想留证据可以拍一张，不拍也能提交']);
       STEPS = a.map(function (x, i) { return [x[0], (i + 1) + '. ' + x[1], x[2]]; });
       return STEPS;
     }
@@ -1458,16 +1480,20 @@
     var photoBusy = false, showNeed = false;
     function has(k) { return k === 'batch' ? st.bok : k === 'bc' ? !!st.bc && !!(st.item || st.newName) : !!st[k]; }
     function unknownBc() { return !!st.bc && !st.item && !st.newName && st.bst !== 'load'; }
-    function missing() { return (needBatch() ? ['bc', 'batch', 'dst', 'photo'] : ['bc', 'dst', 'photo']).filter(function (k) { return !has(k); }); }
+    function missing() { return (needBatch() ? ['bc', 'batch', 'dst'] : ['bc', 'dst']).filter(function (k) { return !has(k); }); }     // v1.9.3 照片选填
     /** 扫了箱码 → 读这个商品的批次：1 个自动选；2 个以上要选；没有批次（新商品）就不用选 */
-    function loadBatches() {
-      var code = st.bc, item = st.item;
-      st.bst = st.bc ? 'load' : ''; st.bopts = []; st.batch = ''; st.bexp = ''; st.bok = false;
+    function loadBatches(keepBatch) {
+      var code = st.bc, item = st.item, kb = keepBatch ? { b: st.batch, e: st.bexp } : null;
+      st.bst = st.bc ? (item ? 'load' : 'none') : ''; st.bopts = []; st.batch = ''; st.bexp = ''; st.bok = false;      // v1.9.3 手机里不认识：马上问，不等后台
       if (!code) return;
       trBatches(code, item, function (list, fresh, it, desc) {
         if (st.bc !== code) return;                                 // 已经换了别的箱码
-        if (it && !st.item) { st.item = it; st.desc = desc || st.desc; st.match = '库位主档'; }   // 只有旧主档没有、库位主档认得的才补上
-        var keep = st.bst === 'need' && st.bok && list.some(function (b) { return b.base === st.batch; });
+        if (it && !st.item && !st.newName) {                         // 后台认得（别的手机刚记住的）：补上，关掉“不认识”的弹窗
+          st.item = it; st.desc = desc || st.desc; st.match = '库位主档'; st.learn = false;
+          if ($('.tunkm')) { closeModal(); toast('后台认出：' + it + ' ' + (desc || ''), 2500); }
+        }
+        if (kb && !st.bok && list.some(function (b) { return b.base === kb.b; })) { st.batch = kb.b; st.bexp = kb.e; st.bok = true; }
+        var keep = (st.bst === 'need' || kb) && st.bok && list.some(function (b) { return b.base === st.batch; });
         st.bopts = list;
         if (list.length === 1) { st.bst = 'one'; st.batch = list[0].base; st.bexp = list[0].exp; st.bok = true; }
         else if (list.length > 1) { st.bst = 'need'; if (!keep) { st.batch = ''; st.bexp = ''; st.bok = false; } }
@@ -1475,6 +1501,26 @@
         if (!fresh && st.bst === 'load') st.bst = 'none';
         mkSteps(); if (location.hash === '#/t') { draw(); if (unknownBc() && $('#modal').hidden) askUnknown(); }      // v1.9.2 不认识：当场选商品
       });
+    }
+    /** v1.9.3 扫了来源库位：手机里马上列出这个货架上记着的货，点一下就是要搬的这一托（不用再扫箱码） */
+    function shelfHtml() {
+      if (step() !== 'bc' || !st.src || st.bc) return '';
+      var rows = trSnapAt(st.src);
+      if (!rows) return '<div class="tshelf"><p class="hint">正在读取库位资料…（也可以直接扫箱码）</p></div>';
+      if (!rows.length) return '<div class="tshelf"><p class="hint">系统里 ' + esc(st.src) + ' 没有记录：请扫箱码</p></div>';
+      return '<div class="tshelf"><p class="hint">系统里 <b>' + esc(st.src) + '</b> 放的货：点要搬的那托，或直接扫箱码</p>' + rows.map(function (x, i) {
+        var bb = masters && masters.batches && (masters.batches[x[1]] || []).filter(function (b) { return b[0] === x[3]; })[0];
+        return '<button class="tshelfb" data-sh="' + i + '"><b data-nt>' + esc(x[2] || x[1]) + '</b><span data-nt>' + esc(x[1]) + (x[3] ? ' · 批次 ' + esc(x[3]) : '') + (bb && bb[2] ? ' · 到期 <b>' + esc(bb[2]) + '</b>' : '') + (x[4] !== '已核实' ? ' · 待核实' : '') + '</span></button>';
+      }).join('') + '</div>';
+    }
+    function pickShelf(i) {
+      var x = (trSnapAt(st.src) || [])[i]; if (!x) return;
+      st.bc = x[1]; st.item = x[1]; st.desc = x[2]; st.match = '库位记录'; st.learn = false; st.newName = ''; st.edit = '';
+      st.batch = x[3]; st.bexp = ''; st.bok = true;
+      beep(); msg = { cls: 'good', text: '✓ ' + x[1] + ' ' + (x[2] || '') + (x[3] ? '（批次 ' + x[3] + '）' : '') };
+      loadBatches(true); st.batch = x[3]; st.bok = true;
+      var bb = masters && masters.batches && (masters.batches[x[1]] || []).filter(function (b) { return b[0] === x[3]; })[0]; if (bb) st.bexp = bb[2];
+      mkSteps(); draw();
     }
     function batchHtml() {
       return '<div class="tbat">' + st.bopts.map(function (b, i) {
@@ -1497,7 +1543,8 @@
       };
       var items = li(st.src ? 'ok' : 'opt', st.src ? '✓' : '–', '来源库位', st.src ? esc(st.src) : '不填（选填，可以不扫）') +
         li(st.qty ? 'ok' : 'opt', st.qty ? '✓' : '–', '数量', st.qty ? esc(st.qty) : '不填（选填）') +
-        (needBatch() ? ['bc', 'batch', 'dst', 'photo'] : ['bc', 'dst', 'photo']).map(function (k) {
+        li(st.photo ? 'ok' : 'opt', st.photo ? '✓' : '–', '拍照', st.photo ? '已拍好' : '不拍（选填）') +
+        (needBatch() ? ['bc', 'batch', 'dst'] : ['bc', 'dst']).map(function (k) {
           if (has(k)) return li('ok', '✓', NEED[k][0], k === 'photo' ? '已拍好' : k === 'batch' ? '到期 ' + esc(st.bexp || '—') + ' · ' + esc(st.batch || '不分批次') : esc(k === 'bc' ? (st.item ? st.item + ' · ' + st.bc : st.bc) : st[k]));
           if (k === 'bc' && st.bc) return li('bad', '✗', '商品箱码 · 系统不认识', '箱码 ' + esc(st.bc) + '：先选是哪个商品', 'unk');
           return li('bad', '✗', NEED[k][0] + ' · ' + NEED[k][1], NEED[k][2], k);
@@ -1566,7 +1613,7 @@
         else if (k === 'src' && !v && srcOptional() && cur !== 'src') val = '<span class="tp" style="color:var(--mute)">不填（选填）</span>';
         else val = v ? '<b class="tv loc">' + esc(v) + '</b>' : '';
         if (k === 'bc' && v) val += st.bst === 'load' ? '<div class="hint">读取批次…</div>' : st.bst === 'one' ? '<div class="tb1">只有 1 个批次：到期 <b>' + esc(st.bexp || '—') + '</b>' + (st.batch ? ' · ' + esc(st.batch) : '') + '（自动选好）</div>' : '';
-        return '<button class="tstep' + (cur === k ? ' cur' : '') + (showNeed && k !== 'src' && !v ? ' need' : '') + (v ? ' ok' : '') + '" data-edit="' + k + '"><span class="tl">' + s[1] + '</span>' +
+        return '<button class="tstep' + (cur === k ? ' cur' : '') + (showNeed && k !== 'src' && k !== 'photo' && !v ? ' need' : '') + (v ? ' ok' : '') + '" data-edit="' + k + '"><span class="tl">' + s[1] + '</span>' +
           (val || '<span class="tp">' + (cur === k ? '👉 ' + s[2] : '—') + '</span>') + '</button>' +
           (k === 'batch' && cur === 'batch' ? '<div class="tbatc">' + batchHtml() + (st.edit ? '<div class="row tsub"><button class="tbtn" id="tCancelEdit">取消修改</button></div>' : '') + '</div>' : '');
       }).join('');
@@ -1578,6 +1625,7 @@
         '<div class="tqty"><label for="tQty"><span class="tl">数量 <small>（选填：新货入库核对用；托盘转移不用填）</small></span></label>' +
         '<input id="tQty" class="tqtyin" inputmode="decimal" autocomplete="off" maxlength="64" enterkeyhint="done" placeholder="不填" value="' + esc(st.qty || '') + '"></div></div>' +
         (msg.text ? '<div class="tmsg ' + msg.cls + '">' + esc(msg.text) + '</div>' : '') + batchPick +
+        shelfHtml() +
         (unknownBc() ? '<div class="tunkc"><b>箱码 ' + esc(st.bc) + ' 系统不认识</b><span>选出是哪个商品才能提交（系统会记住这个箱码）</span><button class="btn save" id="tUnk">选是哪个商品</button></div>' : '') +
         (scanning ? '<div class="bcrow tscan"><input id="tIn" data-step="' + cur + '" inputmode="' + im + '" maxlength="64" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="' +
           esc(STEPS.filter(function (s) { return s[0] === cur; })[0][2]) + '，或点这里手输"><button class="btn cam" id="tCam">📷 扫描</button></div>' +
@@ -1647,6 +1695,7 @@
       $('#tReset').onclick = function () { confirmBox('清空这一笔，重新开始？', '重新开始', function () { reset(false); }); };
       $('#tSubmit').onclick = submit;
       var ub = $('#tUnk'); if (ub) ub.onclick = askUnknown;
+      Array.prototype.forEach.call(app.querySelectorAll('[data-sh]'), function (b) { b.onclick = function () { pickShelf(+b.dataset.sh); }; });
       Array.prototype.forEach.call(app.querySelectorAll('[data-edit]'), function (b) {
         b.onclick = function () {          // 任何一栏随时可点：先扫哪个都行，点了已填的就是重扫
           var k = b.dataset.edit; if (step() === k) return;
@@ -1792,6 +1841,7 @@
       var code = st.bc; if (!code || st.item || st.newName) return;
       var srcItems = [], found = null, finding = false;
       var nameOf = function (it) { var x = masters && masters.byItem[it]; return x ? x[2] : ''; };
+      (trSnapAt(st.src) || []).forEach(function (x) { if (!srcItems.some(function (y) { return y.item === x[1]; })) srcItems.push({ item: x[1], desc: x[2] || nameOf(x[1]), exp: '' }); });
       if (st.src && masters && masters.batches) Object.keys(masters.batches).forEach(function (it) {
         (masters.batches[it] || []).forEach(function (b) { if (String(b[5] || '').split(' ').indexOf(st.src) >= 0 && !srcItems.some(function (y) { return y.item === it; })) srcItems.push({ item: it, desc: nameOf(it), exp: b[2] }); });
       });
@@ -1814,7 +1864,7 @@
         '<button class="tbtn lmnewb" id="ukNew">都不是：新商品（写品名）</button>' +
         '<div class="row"><button class="btn ghost" id="ukRe">扫错了，重扫箱码</button><button class="btn ghost" id="ukX">稍后再选</button></div></div>', function (m) {
           paint(m);
-          if (st.src && cfg && sess && navigator.onLine !== false) {        // 联网：后台最新的“这个库位上的货”
+          if (st.src && !trSnap && cfg && sess && navigator.onLine !== false) {        // 手机里还没有库位资料：问后台
             finding = true; paint(m);
             api({ action: 'trLoc', loc: st.src, item: '' }, true).then(function (d) {
               finding = false; (d && d.others || []).forEach(function (o) { if (!srcItems.some(function (y) { return y.item === o.item; })) srcItems.push({ item: o.item, desc: o.desc || nameOf(o.item), exp: o.exp }); });
@@ -1871,21 +1921,32 @@
       st.edit = ''; showNeed = false;                  // 正在重扫某一栏但资料都齐了：直接用现有资料提交
       busy = true;
       // v1.8.3 库位释放系统不知道：目的库位系统里还记着别的货 → 当场确认旧货还在不在（覆盖 / 一起放）。离线问不了：后台转仓管
-      if (!st.item || !cfg || !sess || navigator.onLine === false) return save(null, []);
+      if (!st.item) return save(null, []);
+      if (trSnap) {                                    // v1.9.3 用手机里的库位资料，马上问（不等后台）
+        var base0 = st.bok ? st.batch : null, it0 = st.item;
+        var o0 = trSnapAt(st.dst).filter(function (x) { return !(x[1] === it0 && (base0 == null || x[3] === base0)); }).map(function (x) {
+          var bb = masters && masters.batches && (masters.batches[x[1]] || []).filter(function (b) { return b[0] === x[3]; })[0];
+          return { id: x[5] || '', item: x[1], desc: x[2], base: x[3], exp: bb ? bb[2] : '' };
+        });
+        return askOver(o0, true);
+      }
+      if (!cfg || !sess || navigator.onLine === false) return save(null, []);
       var asked = false, tm = setTimeout(function () { if (!asked) { asked = true; save(null, []); } }, 6000);
       api({ action: 'trLoc', loc: st.dst, item: st.item, base: st.bok ? st.batch : null }, true).then(function (d) {
         if (asked) return; asked = true; clearTimeout(tm);
-        var o = (d && d.others) || [];
+        askOver((d && d.others) || [], false);
+      }, function () { if (asked) return; asked = true; clearTimeout(tm); save(null, []); });
+    }
+    function askOver(o, local) {
         if (!o.length) return save(null, []);
         busy = false; errBeep();
         modal('<div class="tmiss"><div class="tmiss-h"><span class="tmiss-ic">!</span><div><h3>库位 ' + esc(st.dst) + ' 系统里还有旧货</h3><div class="hint">新托盘放进去之前，请看一下这些货还在不在</div></div></div>' +
           '<ul class="tover">' + o.map(function (x) { return '<li><b>' + esc(x.desc || x.item) + '</b><span>' + esc(x.item) + (x.base ? ' · 批次 ' + esc(x.base) : '') + (x.exp ? ' · 到期 <b>' + esc(x.exp) + '</b>' : '') + '</span></li>'; }).join('') + '</ul>' +
           '<div class="tovb"><button class="btn save" id="ovY">旧货已经不在了（覆盖）</button><button class="btn ghost" id="ovN">旧货还在，一起放</button><button class="tbtn" id="ovC">取消，先不提交</button></div></div>', function (m) {
-            $('#ovY', m).onclick = function () { closeModal(); save(true, o.map(function (x) { return x.id; })); };
+            $('#ovY', m).onclick = function () { closeModal(); save(true, o.map(function (x) { return x.id; }).filter(Boolean)); };
             $('#ovN', m).onclick = function () { closeModal(); save(false, []); };
             $('#ovC', m).onclick = function () { closeModal(); draw(); };
           });
-      }, function () { if (asked) return; asked = true; clearTimeout(tm); save(null, []); });
     }
     function save(over, seen) {
       busy = true;
@@ -1894,7 +1955,8 @@
       if (st.bok) { r.batch = st.batch; r.bexp = st.bexp; }          // 没选（没有批次 / 还没读到）：后台自己判断，判断不了转仓管
       if (st.learn && st.item) r.learnItem = st.item; else if (st.newName) r.newName = st.newName;      // v1.9.2 当场认出：后台记住箱码
       if (r.learnItem && masters) masters.byBarcode[r.barcode] = [r.barcode, r.itemCode, r.desc];       // 这台手机马上认得
-      if (over === true || over === false) { r.over = over; r.seen = seen; }
+      if (over === true || over === false) { r.over = over; if (seen) r.seen = seen; }
+      trSnapApply(r.source, r.dest, r.itemCode, r.desc, r.batch != null ? r.batch : null, over);
       IDB.put(r).then(function () {
         recent.unshift({ id: r.transferId, src: r.source, dst: r.dest, bc: r.barcode, item: r.itemCode || (r.newName ? '新商品' : r.barcode), desc: r.itemCode || r.newName ? r.desc : '', qty: r.qty, batch: r.batch || '', bexp: r.bexp || '', t: hhmm(r.clientTime), status: '待上传' });
         LS.set('trecent', recent.slice(0, 20));
@@ -1903,11 +1965,13 @@
         var done = '✓ 已提交：' + (r.itemCode || (r.newName ? '新商品 ' + r.newName : r.barcode)) + (r.batch ? '（到期 ' + (r.bexp || '—') + '）' : '') + '  ' + (r.source || '（无来源）') + ' → ' + r.dest + (r.qty ? ' · 数量 ' + r.qty : '');
         reset(false);
         msg = { cls: 'good', text: done }; draw();
-        return refreshTq().then(flushTransfers).then(refreshRecent);
+        return refreshTq().then(flushTransfers).then(function () { trSnapLoad(true); return refreshRecent(); });
       }, function (e) { busy = false; draw(); infoBox('提交失败', '保存到手机失败（' + e.message + '）。请再点一次“提交”；如果一直这样，请清理手机空间后再试。已扫的资料还在。'); });
     }
     currentRedraw = function () { if (location.hash === '#/t') draw(); };
     draw();
+    trSnapLoad(true).then(function () { if (location.hash === '#/t' && step() === 'bc') draw(); });         // v1.9.3 库位资料（后台读，不挡操作）
+    clearInterval(trSnapTimer); trSnapTimer = setInterval(function () { if (location.hash === '#/t' && !document.hidden) trSnapLoad(true); }, 60e3);   // 每分钟后台刷新
     loadMasters().then(function () { if (location.hash === '#/t') draw(); },
       function (e) { if (location.hash === '#/t') { msg = { cls: 'bad', text: (e.network ? '离线：' : '') + '设置下载失败，' + (masters ? '使用本机旧资料' : '照样可以记录') }; draw(); } });
     Promise.resolve(flushTransfers()).then(refreshRecent, refreshRecent);
