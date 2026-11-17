@@ -527,3 +527,4 @@ body.lang-my .pkfil .hint { font-size: 12px; }
 .inbk.k1 { background: #dcfae6; color: #085d3a; } .inbk.k2 { background: #fee4e2; color: #b42318; } .inbk.k3 { background: #fff4d6; color: #8a5a00; } .inbk.k0 { background: #f2f4f7; color: #475467; }
 .inbw { max-height: 360px; overflow: auto; }
 .inb-act { display: flex; gap: 10px; align-items: center; justify-content: flex-end; margin-top: 8px; } .inb-act label { margin-right: auto; }
+.tkacts { white-space: nowrap; } .tkacts .tbtn { margin-left: 4px; }
