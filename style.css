@@ -630,3 +630,9 @@ body.wcon header#bar { display: none; }
 .tunkc { background: #fef3f2; border: 1px solid #fda29b; border-radius: 12px; padding: 12px; margin: 10px 0; display: flex; flex-direction: column; gap: 6px; }
 .tunkc b { color: #b42318; } .tunkc span { font-size: 14px; color: #475467; }
 .tunkm .lmpick { max-height: 46vh; overflow: auto; margin: 6px 0; }
+/* v1.9.3 移库：扫来源库位后直接点货架上的货 */
+.tshelf { margin: 10px 0; display: flex; flex-direction: column; gap: 6px; }
+.tshelf .hint { margin: 0; }
+.tshelfb { text-align: left; padding: 12px; border: 2px solid var(--line); border-radius: 12px; background: #fff; font: inherit; cursor: pointer; display: flex; flex-direction: column; gap: 2px; min-height: 56px; }
+.tshelfb b { font-size: 17px; } .tshelfb span { font-size: 13px; color: var(--mute); } .tshelfb span b { font-size: 13px; color: #b42318; }
+.tshelfb:active { border-color: var(--pri, #1f3864); background: #eef4ff; }
