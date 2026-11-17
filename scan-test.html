@@ -25,6 +25,11 @@
   .cam.loc .aim { inset: 38% 3%; border-color: #fdb022; }
   .cam .line { position: absolute; left: 3%; right: 3%; top: 50%; height: 0; border-top: 2px solid #f04438; display: none; pointer-events: none; }
   .cam.loc .line { display: block; }
+  /* ZXing（华为浏览器等）：画面由扫码组件自己画，框和红线要跟着它的扫描区，不然会对不上 */
+  .cam.zx { aspect-ratio: auto; max-height: none; }
+  .cam.zx #reader { position: relative; }
+  .cam.zx .aim { display: none; }
+  .cam.zx .line { z-index: 5; }
   #reader { position: absolute; inset: 0; }
   .camsg { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; text-align: center; color: #fff; padding: 20px; font-size: 16px; background: rgba(0,0,0,.6); }
   .camsg button { font: inherit; font-weight: 700; border: 0; border-radius: 10px; padding: 12px 18px; background: #c55a11; color: #fff; margin-top: 10px; }
@@ -83,7 +88,7 @@
 
   var $ = function (s) { return document.querySelector(s); };
   var MODES = {
-    loc: { tip: '库位模式：<b>红线压在要扫的那张标签的条码上</b>，离 20–40 厘米。上下层的标签也在画面里没关系：只认红线上的那张。只认库位码，商品条码会被忽略；连续 3 次读到一样的才算。', need: 3, zoom: false, loc: true },
+    loc: { tip: '库位模式：<b>红线压在要扫的那张标签的条码中间</b>，离 20–40 厘米。上下层的标签也在画面里没关系：只认红线上的那张。只认库位码，商品条码会被忽略；连续 3 次读到一样的才算。', need: 3, zoom: false, loc: true },
     prod: { tip: '商品（现在正式系统的做法）：离 10–20 厘米。商品条码（EAN-13）校验位对就算；其他条码读到 2 次一样才算。', need: 2, zoom: false, loc: false },
     zoom: { tip: '商品（放大）：自动放大 2 倍，<b>离 20–30 厘米</b>，小箱码不会因为太近而模糊。规则和“现在”一样。', need: 2, zoom: true, loc: false }
   };
@@ -109,7 +114,7 @@
     Array.prototype.forEach.call(document.querySelectorAll('[data-m]'), function (b) { b.classList.toggle('on', b.dataset.m === m); });
     $('#tip').innerHTML = MODES[m].tip; $('#cam').classList.toggle('loc', m === 'loc');
     log('i', '切换到：' + { loc: '库位模式', prod: '商品（现在）', zoom: '商品（放大）' }[m]);
-    if (running) applyZoom(MODES[m].zoom);
+    if (running) { if (zx) start(); else applyZoom(MODES[m].zoom); }
   }
   function show(v, fmt, ms) {
     var p = normLoc(v), h = '';
@@ -192,10 +197,10 @@
     };
     var useZx = function () {
       if (!window.Html5Qrcode) return fail('扫码组件没加载，请联网后刷新');
-      $('#eng').textContent = 'ZXing'; $('#v').hidden = true;
+      $('#eng').textContent = 'ZXing'; $('#v').hidden = true; $('#cam').classList.add('zx');
       var F = Html5QrcodeSupportedFormats;
       zx = new Html5Qrcode('reader', { verbose: false, formatsToSupport: [F.EAN_13, F.EAN_8, F.UPC_A, F.UPC_E, F.CODE_128, F.ITF, F.CODE_39, F.QR_CODE], experimentalFeatures: { useBarCodeDetectorIfSupported: true } });
-      zx.start({ facingMode: 'environment' }, { fps: 20, videoConstraints: constraints(), qrbox: function (w, h) { return mode === 'loc' ? { width: Math.floor(w * .94), height: Math.max(60, Math.floor(h * .22)) } : { width: Math.floor(w * .92), height: Math.max(80, Math.floor(Math.min(h * .45, w * .5))) }; } },
+      zx.start({ facingMode: 'environment' }, { fps: 20, videoConstraints: constraints(), qrbox: function (w, h) { return mode === 'loc' ? { width: Math.floor(w * .94), height: Math.max(50, Math.floor(h * .09)) } : { width: Math.floor(w * .92), height: Math.max(80, Math.floor(Math.min(h * .45, w * .5))) }; } },
         function (t, r) { accept(t, r && r.result && r.result.format && r.result.format.formatName); }, function () { }).then(function () { msg(''); controls(); }).catch(fail);
     };
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return fail('这个浏览器不能用摄像头（请用 Chrome）');
@@ -210,7 +215,7 @@
     running = false; clearTimeout(loopT); $('#go').textContent = '开始扫描';
     if (stream) stream.getTracks().forEach(function (t) { t.stop(); }); stream = null; track = null;
     if (zx) { var z = zx; zx = null; try { z.stop().catch(function () { }).then(function () { try { z.clear(); } catch (e) { } }); } catch (e) { try { z.clear(); } catch (e2) { } } }
-    $('#v').hidden = false;
+    $('#v').hidden = false; $('#cam').classList.remove('zx');
     if (!quiet) msg('已停止<br><button>开始扫描</button>');
   }
   function msg(html) { var m = $('#camsg'); if (!html) { m.hidden = true; return; } m.hidden = false; m.innerHTML = '<div>' + html + '</div>'; var b = m.querySelector('button'); if (b) b.onclick = start; }
