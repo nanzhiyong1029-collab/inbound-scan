@@ -636,3 +636,6 @@ body.wcon header#bar { display: none; }
 .tshelfb { text-align: left; padding: 12px; border: 2px solid var(--line); border-radius: 12px; background: #fff; font: inherit; cursor: pointer; display: flex; flex-direction: column; gap: 2px; min-height: 56px; }
 .tshelfb b { font-size: 17px; } .tshelfb span { font-size: 13px; color: var(--mute); } .tshelfb span b { font-size: 13px; color: #b42318; }
 .tshelfb:active { border-color: var(--pri, #1f3864); background: #eef4ff; }
+
+/* v1.9.5 中控台登记库位 */
+.wcadd{margin:10px 0 4px}.wcaddm .wcsearch{display:flex;gap:8px;max-width:100%}.wcaddm .wcsearch input{flex:1;min-width:0;width:auto}.wcaddm .wclist{grid-template-columns:1fr;max-height:46vh;overflow:auto}
