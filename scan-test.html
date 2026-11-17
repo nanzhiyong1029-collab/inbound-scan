@@ -1,0 +1,226 @@
+<!doctype html>
+<html lang="zh-CN" translate="no">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="google" content="notranslate">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; connect-src 'self' https://cdn.jsdelivr.net; img-src 'self' data: blob:; media-src 'self' blob: mediastream:; style-src 'self' 'unsafe-inline'; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'none'">
+<meta name="robots" content="noindex">
+<title>扫码测试</title>
+<style>
+  :root { --brand: #1f3864; --line: #d9dee6; --mute: #667085; --ok: #1a7f37; --bad: #c4320a; --bg: #f2f4f7; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 15px/1.45 -apple-system, "PingFang SC", "Noto Sans CJK SC", "Microsoft YaHei", sans-serif; background: var(--bg); color: #101828; }
+  header { background: var(--brand); color: #fff; padding: 12px 14px; font-weight: 700; font-size: 17px; display: flex; justify-content: space-between; align-items: center; }
+  header small { font-weight: 400; font-size: 12px; opacity: .8; }
+  main { padding: 10px 12px 40px; max-width: 560px; margin: 0 auto; }
+  .modes { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+  .modes button, .opts button { font: inherit; border: 1px solid var(--line); background: #fff; border-radius: 10px; padding: 9px 4px; font-weight: 600; font-size: 13.5px; color: inherit; }
+  .modes button.on, .opts button.on { background: var(--brand); color: #fff; border-color: var(--brand); }
+  .tip { background: #fff4d6; border-radius: 10px; padding: 8px 10px; margin: 8px 0; font-size: 13.5px; }
+  .cam { position: relative; background: #000; border-radius: 12px; overflow: hidden; aspect-ratio: 3 / 4; max-height: 52vh; width: 100%; }
+  .cam video { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .cam .aim { position: absolute; inset: 22% 6%; border: 2px solid rgba(255,255,255,.8); border-radius: 10px; pointer-events: none; }
+  .cam.loc .aim { inset: 38% 3%; border-color: #fdb022; }
+  .cam .line { position: absolute; left: 3%; right: 3%; top: 50%; height: 0; border-top: 2px solid #f04438; display: none; pointer-events: none; }
+  .cam.loc .line { display: block; }
+  #reader { position: absolute; inset: 0; }
+  .opts { display: flex; gap: 6px; margin: 8px 0; flex-wrap: wrap; }
+  .opts button { padding: 6px 10px; font-size: 13px; }
+  .res { background: #fff; border-radius: 12px; padding: 10px 12px; margin: 8px 0; min-height: 76px; border: 2px solid var(--line); }
+  .res.ok { border-color: var(--ok); }
+  .res b { font-size: 26px; display: block; letter-spacing: 1px; }
+  .res .lv { font-size: 18px; color: var(--brand); font-weight: 700; }
+  .res small { color: var(--mute); display: block; }
+  .log { background: #fff; border-radius: 12px; padding: 6px 10px; font-size: 12.5px; max-height: 260px; overflow: auto; }
+  .log div { border-bottom: 1px solid #eef1f5; padding: 3px 0; display: flex; gap: 6px; }
+  .log .a { color: var(--ok); font-weight: 700; } .log .r { color: var(--bad); } .log .i { color: var(--mute); }
+  .row { display: flex; gap: 6px; margin-top: 8px; }
+  .row button { flex: 1; font: inherit; border: 0; border-radius: 10px; padding: 11px; font-weight: 700; background: #e4e7ec; }
+  .row button.p { background: #c55a11; color: #fff; }
+  .stat { font-size: 12.5px; color: var(--mute); margin-top: 4px; }
+</style>
+</head>
+<body>
+<header>扫码测试（不影响正式系统）<small id="eng"></small></header>
+<main>
+  <div class="modes">
+    <button data-m="loc" class="on">库位模式</button>
+    <button data-m="prod">商品（现在）</button>
+    <button data-m="zoom">商品（放大）</button>
+  </div>
+  <div class="tip" id="tip"></div>
+  <div class="cam" id="cam"><video id="v" playsinline muted autoplay></video><div id="reader"></div><div class="aim"></div><div class="line"></div></div>
+  <div class="opts"><button id="hd">4K 画质</button><button id="torch" hidden>🔦 手电筒</button><button id="z" hidden>🔍 放大</button></div>
+  <div class="res" id="res"><small>对准条码…</small></div>
+  <div class="stat" id="stat"></div>
+  <div class="row"><button class="p" id="go">开始扫描</button><button id="copy">复制记录发给我</button></div>
+  <div class="log" id="log"></div>
+</main>
+<script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js" integrity="sha384-c9d8RFSL+u3exBOJ4Yp3HUJXS4znl9f+z66d1y54ig+ea249SpqR+w1wyvXz/lk+" crossorigin="anonymous"></script>
+<script>
+(function () {
+  'use strict';
+  // 这个页面和 APP 在同一个网站下：APP 的离线缓存会把打开过的页面存成“首页”。打开后马上把 APP 首页放回缓存，避免离线时打开 APP 变成这个测试页。
+  function fixAppCache() {
+    if (!window.caches) return;
+    fetch('./', { cache: 'no-store' }).then(function (r) {
+      if (!r.ok) return;
+      return r.text().then(function (html) {
+        if (html.indexOf('app.js') < 0) return;
+        return caches.keys().then(function (ks) {
+          return Promise.all(ks.filter(function (k) { return /^inbound-scan-v/.test(k); }).map(function (k) {
+            return caches.open(k).then(function (c) { return c.put('./', new Response(html, { headers: { 'Content-Type': 'text/html; charset=utf-8' } })); });
+          }));
+        });
+      });
+    }).catch(function () { });
+  }
+  setTimeout(fixAppCache, 1500); setTimeout(fixAppCache, 6000);
+
+  var $ = function (s) { return document.querySelector(s); };
+  var MODES = {
+    loc: { tip: '库位模式：<b>红线压在要扫的那张标签的条码上</b>，离 20–40 厘米。上下层的标签也在画面里没关系：只认红线上的那张。只认库位码，商品条码会被忽略；连续 3 次读到一样的才算。', need: 3, zoom: false, loc: true },
+    prod: { tip: '商品（现在正式系统的做法）：离 10–20 厘米。商品条码（EAN-13）校验位对就算；其他条码读到 2 次一样才算。', need: 2, zoom: false, loc: false },
+    zoom: { tip: '商品（放大）：自动放大 2 倍，<b>离 20–30 厘米</b>，小箱码不会因为太近而模糊。规则和“现在”一样。', need: 2, zoom: true, loc: false }
+  };
+  var mode = 'loc', hd = false, running = false, stream = null, track = null, det = null, zx = null, loopT = 0, t0 = 0, hist = [], logs = [], ok = 0, bad = 0, pauseUntil = 0, zoomOn = false, caps = {};
+  var LOC = /^(\d{2})-?([A-Z])-?(\d{2})$/;
+  function normLoc(v) { var m = LOC.exec(String(v || '').trim().toUpperCase()); return m ? m[1] + '-' + m[2] + '-' + m[3] : ''; }
+  function eanOk(v) {
+    if (!/^\d{8}$|^\d{12,14}$/.test(v)) return false;
+    var d = v.split('').map(Number), c = d.pop(), s = 0;
+    d.reverse().forEach(function (x, i) { s += x * (i % 2 ? 1 : 3); });
+    return (10 - s % 10) % 10 === c;
+  }
+  function now() { var d = new Date(); return ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2) + ':' + ('0' + d.getSeconds()).slice(-2); }
+  function log(cls, text) {
+    logs.unshift(now() + ' ' + text);
+    var e = document.createElement('div'); e.innerHTML = '<span class="i">' + now() + '</span><span class="' + cls + '"></span>'; e.lastChild.textContent = text;
+    $('#log').insertBefore(e, $('#log').firstChild);
+    while ($('#log').children.length > 120) $('#log').lastChild.remove();
+  }
+  function stat() { $('#stat').textContent = '已成功 ' + ok + ' 次' + (bad ? ' · 丢弃不一致的读数 ' + bad + ' 次' : '') + ' · 画质 ' + (hd ? '4K' : '1080p') + (zoomOn ? ' · 放大中' : ''); }
+  function setMode(m) {
+    mode = m; hist = [];
+    Array.prototype.forEach.call(document.querySelectorAll('[data-m]'), function (b) { b.classList.toggle('on', b.dataset.m === m); });
+    $('#tip').innerHTML = MODES[m].tip; $('#cam').classList.toggle('loc', m === 'loc');
+    log('i', '切换到：' + { loc: '库位模式', prod: '商品（现在）', zoom: '商品（放大）' }[m]);
+    if (running) applyZoom(MODES[m].zoom);
+  }
+  function show(v, fmt, ms) {
+    var p = normLoc(v), h = '';
+    if (p) { var x = p.split('-'); h = '<b>' + p + '</b><span class="lv">第 ' + x[0] + ' 排 · ' + x[1] + ' 位 · 第 ' + x[2] + ' 层</span>'; }
+    else h = '<b>' + v.replace(/[<>&]/g, '') + '</b>';
+    $('#res').innerHTML = h + '<small>' + fmt + ' · 用了 ' + (ms / 1000).toFixed(1) + ' 秒</small>';
+    $('#res').classList.add('ok');
+  }
+  function accept(raw, fmt) {
+    if (Date.now() < pauseUntil) return;
+    var v = String(raw || '').replace(/[\r\n\t]/g, '').trim(); if (!v) return;
+    var f = String(fmt || '').toLowerCase().replace(/[^a-z0-9]/g, ''), M = MODES[mode];
+    if (M.loc) {
+      var l = normLoc(v);
+      if (!l) { if (!hist.ign || hist.ign !== v) { log('i', '忽略（不是库位码）：' + v); hist.ign = v; } return; }
+      var last = hist[hist.length - 1];
+      if (last && last.v !== l) { bad++; log('r', '读到不一样：' + last.v + ' ×' + hist.length + ' → ' + l + '（丢弃，重新数）'); hist = []; }
+      hist.push({ v: l, t: Date.now() });
+      hist = hist.filter(function (x) { return Date.now() - x.t < 2500; });
+      if (hist.length < M.need) return;
+      done(l, f);
+      return;
+    }
+    if (/^(ean13|ean8|upca|upce)$/.test(f)) { if (!eanOk(v)) { bad++; log('r', '校验位不对，丢弃：' + v); return; } return done(v, f); }
+    var lst = hist[hist.length - 1];
+    if (lst && lst.v === v && Date.now() - lst.t < 1500) return done(v, f);
+    hist = [{ v: v, t: Date.now() }];
+  }
+  /** 库位模式：画面里可能同时有上下几层的标签 → 只要红线（画面正中横线）压着的那一个 */
+  function pick(rs, vw, vh) {
+    if (!MODES[mode].loc || !vw) return rs;
+    var locs = rs.filter(function (r) { return normLoc(r.rawValue); }), cy = vh / 2, cx = vw / 2;
+    if (locs.length <= 1 && !locs.some(function (r) { return r.boundingBox; })) return locs;
+    // 视频是 object-fit: cover 显示的：画面中线就是视频中线
+    var on = locs.filter(function (r) { var b = r.boundingBox; return b && b.y <= cy && b.y + b.height >= cy && b.x <= cx && b.x + b.width >= cx; });
+    if (locs.length > 1) log('i', '画面里有 ' + locs.length + ' 个库位码（' + locs.map(function (r) { return normLoc(r.rawValue); }).join('、') + '），' + (on.length === 1 ? '只用红线上的 ' + normLoc(on[0].rawValue) : '红线上没有，等对准'));
+    return on.length === 1 ? on : [];
+  }
+  function done(v, f) {
+    var ms = Date.now() - t0; ok++;
+    show(v, f || '?', ms); log('a', '✓ ' + v + '（' + (f || '?') + '，' + (ms / 1000).toFixed(1) + ' 秒）');
+    try { navigator.vibrate && navigator.vibrate(80); } catch (e) { }
+    beep(); hist = []; pauseUntil = Date.now() + 1200; t0 = pauseUntil; stat();
+  }
+  var actx = null;
+  function beep() { try { var A = window.AudioContext || window.webkitAudioContext; actx = actx || new A(); var o = actx.createOscillator(), g = actx.createGain(); o.frequency.value = 1800; g.gain.value = .15; o.connect(g); g.connect(actx.destination); o.start(); o.stop(actx.currentTime + .09); } catch (e) { } }
+  function applyZoom(on) {
+    zoomOn = false;
+    if (!caps.zoom || caps.zoom.max < 1.5) { $('#z').hidden = true; stat(); return; }
+    $('#z').hidden = false;
+    var z = on ? Math.min(2, caps.zoom.max) : (caps.zoom.min || 1);
+    var p = track ? track.applyConstraints({ advanced: [{ zoom: z }] }) : zx ? zx.applyVideoConstraints({ advanced: [{ zoom: z }] }) : null;
+    if (p) p.then(function () { zoomOn = on; $('#z').classList.toggle('on', on); stat(); }).catch(function () { });
+  }
+  function controls() {
+    try { caps = track ? (track.getCapabilities ? track.getCapabilities() : {}) : zx.getRunningTrackCapabilities() || {}; } catch (e) { caps = {}; }
+    var ap = function (c) { return track ? track.applyConstraints(c) : zx.applyVideoConstraints(c); };
+    if (caps.focusMode && caps.focusMode.indexOf('continuous') >= 0) ap({ advanced: [{ focusMode: 'continuous' }] }).catch(function () { });
+    $('#torch').hidden = !caps.torch; var tOn = false;
+    $('#torch').onclick = function () { tOn = !tOn; ap({ advanced: [{ torch: tOn }] }).catch(function () { }); $('#torch').classList.toggle('on', tOn); };
+    $('#z').onclick = function () { applyZoom(!zoomOn); };
+    applyZoom(MODES[mode].zoom);
+    var s = track && track.getSettings ? track.getSettings() : {};
+    log('i', '摄像头已打开' + (s.width ? '：' + s.width + '×' + s.height : '') + (caps.zoom ? '，可放大到 ' + caps.zoom.max + ' 倍' : '，不支持放大'));
+  }
+  function constraints() { return { facingMode: { ideal: 'environment' }, width: { ideal: hd ? 3840 : 1920 }, height: { ideal: hd ? 2160 : 1080 } }; }
+  function start() {
+    stop(); running = true; $('#go').textContent = '停止'; t0 = Date.now(); hist = [];
+    var useNative = function (fs) {
+      det = new BarcodeDetector({ formats: fs }); $('#eng').textContent = '手机自带识别';
+      navigator.mediaDevices.getUserMedia({ audio: false, video: constraints() }).then(function (s) {
+        stream = s; track = s.getVideoTracks()[0]; $('#v').srcObject = s; controls(); return $('#v').play();
+      }).then(function () {
+        (function loop() {
+          if (!running) return;
+          var v = $('#v'); if (v.readyState < 2) { loopT = setTimeout(loop, 80); return; }
+          det.detect(v).then(function (rs) { pick(rs || [], v.videoWidth, v.videoHeight).forEach(function (r) { accept(r.rawValue, r.format); }); }).catch(function () { }).then(function () { if (running) loopT = setTimeout(loop, 40); });
+        })();
+      }).catch(fail);
+    };
+    var useZx = function () {
+      if (!window.Html5Qrcode) return fail('扫码组件没加载，请联网后刷新');
+      $('#eng').textContent = 'ZXing'; $('#v').hidden = true;
+      var F = Html5QrcodeSupportedFormats;
+      zx = new Html5Qrcode('reader', { verbose: false, formatsToSupport: [F.EAN_13, F.EAN_8, F.UPC_A, F.UPC_E, F.CODE_128, F.ITF, F.CODE_39, F.QR_CODE], experimentalFeatures: { useBarCodeDetectorIfSupported: true } });
+      zx.start({ facingMode: 'environment' }, { fps: 20, videoConstraints: constraints(), qrbox: function (w, h) { return mode === 'loc' ? { width: Math.floor(w * .94), height: Math.max(60, Math.floor(h * .22)) } : { width: Math.floor(w * .92), height: Math.max(80, Math.floor(Math.min(h * .45, w * .5))) }; } },
+        function (t, r) { accept(t, r && r.result && r.result.format && r.result.format.formatName); }, function () { }).then(controls).catch(fail);
+    };
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return fail('这个浏览器不能用摄像头（请用 Chrome）');
+    if ('BarcodeDetector' in window && BarcodeDetector.getSupportedFormats) {
+      BarcodeDetector.getSupportedFormats().then(function (all) {
+        var fs = ['ean_13', 'ean_8', 'upc_a', 'upc_e', 'code_128', 'itf', 'code_39', 'qr_code'].filter(function (x) { return all.indexOf(x) >= 0; });
+        if (fs.indexOf('ean_13') >= 0) useNative(fs); else useZx();
+      }, useZx);
+    } else useZx();
+  }
+  function stop() {
+    running = false; clearTimeout(loopT); $('#go').textContent = '开始扫描';
+    if (stream) stream.getTracks().forEach(function (t) { t.stop(); }); stream = null; track = null;
+    if (zx) { var z = zx; zx = null; z.stop().catch(function () { }).then(function () { try { z.clear(); } catch (e) { } }); }
+    $('#v').hidden = false;
+  }
+  function fail(e) { stop(); log('r', '打不开摄像头：' + (e && (e.message || e.name) || e)); }
+  Array.prototype.forEach.call(document.querySelectorAll('[data-m]'), function (b) { b.onclick = function () { setMode(b.dataset.m); }; });
+  $('#go').onclick = function () { running ? stop() : start(); };
+  $('#hd').onclick = function () { hd = !hd; $('#hd').classList.toggle('on', hd); log('i', '画质：' + (hd ? '4K' : '1080p')); stat(); if (running) start(); };
+  $('#copy').onclick = function () {
+    var text = '扫码测试 ' + new Date().toLocaleString() + '\n' + navigator.userAgent + '\n成功 ' + ok + ' 次，丢弃 ' + bad + ' 次\n' + logs.slice(0, 200).join('\n');
+    var fb = function () { var t = document.createElement('textarea'); t.value = text; document.body.appendChild(t); t.select(); try { document.execCommand('copy'); } catch (e) { } t.remove(); };
+    if (navigator.clipboard) navigator.clipboard.writeText(text).then(function () { log('a', '已复制，可以粘贴发给我'); }, function () { fb(); log('a', '已复制'); }); else { fb(); log('a', '已复制'); }
+  };
+  document.addEventListener('visibilitychange', function () { if (document.hidden && running) stop(); });
+  setMode('loc'); stat();
+})();
+</script>
+</body>
+</html>
