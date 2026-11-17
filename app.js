@@ -3,7 +3,7 @@
  * 原则：只采集原始资料，不做任何核对。先存手机（离线队列），再上传云端。 */
 (function () {
   'use strict';
-  var VERSION = '1.8.3';
+  var VERSION = '1.8.4';
   var $ = function (s, el) { return (el || document).querySelector(s); };
   var app = $('#app');
 
@@ -1193,7 +1193,7 @@
         $('#t_' + k).textContent = '📷 扫描 ' + hhmm(scanTimes[k]); onEdit();
         var bi = BC.findIndex ? BC.findIndex(function (x) { return x[0] === k; }) : 0;
         if (prefs.pda && bi < BC.length - 1) F[BC[bi + 1][0]].focus();
-      });
+      }, { line: true });          // v1.8.4 入库：画面里同时有几个条码（单品码 / 箱码）→ 只要红线上的那个
     };
     markHas();
     // 进入页面：PDA 模式自动聚焦第一个空的条码框（不弹键盘），扫描头可直接扫
@@ -4120,6 +4120,18 @@
       var t = $('#camTip'); if (t && camState === st) t.textContent = '还没扫到？光线暗→开手电筒；条码小→点放大或靠近一点；反光→手机稍微斜一点';
     }, 8000);
     var video = $('#camVideo');
+    /** v1.8.4 红线规则（入库）：同时读到 2 个以上条码时，只要离红线（画面中间横线）最近的那个；只有 1 个时照旧 */
+    function pickLine(rs, vw, vh) {
+      if (!opts.line || rs.length < 2 || !vw) return rs;
+      var cy = vh / 2, cx = vw / 2, best = null, bd = 1e9;
+      rs.forEach(function (r) {
+        var b = r.boundingBox; if (!b) return;
+        var d = Math.abs(b.y + b.height / 2 - cy) + 0.3 * Math.abs(b.x + b.width / 2 - cx);
+        if (b.y <= cy && b.y + b.height >= cy) d -= vh;          // 红线正好压着的优先
+        if (d < bd) { bd = d; best = r; }
+      });
+      return best ? [best] : rs;
+    }
     var hi = { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } };
     function startNative(formats) {
       var det = new BarcodeDetector({ formats: formats });
@@ -4134,7 +4146,7 @@
           if (camState !== st) return;
           if (video.readyState < 2) { st.loopT = setTimeout(loop, 80); return; }
           det.detect(video).then(function (rs) {
-            (rs || []).forEach(function (r) { accept(r.rawValue, r.format); });
+            pickLine(rs || [], video.videoWidth, video.videoHeight).forEach(function (r) { accept(r.rawValue, r.format); });
           }).catch(function () { }).then(function () { if (camState === st && !st.done) st.loopT = setTimeout(loop, 40); });
         })();
       }).catch(fail);
