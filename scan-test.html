@@ -22,8 +22,10 @@
   .cam { position: relative; background: #000; border-radius: 12px; overflow: hidden; aspect-ratio: 3 / 4; max-height: 52vh; width: 100%; }
   .cam video { width: 100%; height: 100%; object-fit: cover; display: block; }
   .cam .aim { position: absolute; inset: 22% 6%; border: 2px solid rgba(255,255,255,.8); border-radius: 10px; pointer-events: none; }
-  .cam.loc .aim { inset: 44% 3%; border-color: #fdb022; }
-  .cam .line { position: absolute; left: 3%; right: 3%; top: 50%; height: 0; border-top: 2px solid #f04438; display: none; pointer-events: none; }
+  .cam.loc .aim { display: none; }
+  /* 库位模式：红框 = 识别范围（加厚到画面高度的 18%），中间细线 = 对准用；框里有几个码时取离中线最近的 */
+  .cam .line { position: absolute; left: 3%; right: 3%; top: 41%; height: 18%; border: 3px solid #f04438; border-radius: 8px; background: rgba(240,68,56,.08); display: none; pointer-events: none; box-sizing: border-box; }
+  .cam .line::after { content: ''; position: absolute; left: 0; right: 0; top: 50%; border-top: 1px dashed rgba(240,68,56,.9); }
   .cam.loc .line { display: block; }
   /* ZXing（华为浏览器等）：画面由扫码组件自己画，框和红线要跟着它的扫描区，不然会对不上 */
   .cam.zx { aspect-ratio: auto; max-height: none; }
@@ -60,7 +62,7 @@
   </div>
   <div class="tip" id="tip"></div>
   <div class="cam" id="cam"><video id="v" playsinline muted autoplay></video><div id="reader" hidden></div><div class="aim"></div><div class="line"></div><div class="camsg" id="camsg"><div>正在打开摄像头…<br><small>如果弹出“允许使用相机”，请点允许</small></div></div></div>
-  <div class="opts"><button id="hd">4K 画质</button><button id="torch" hidden>🔦 手电筒</button><button id="z" hidden>🔍 放大</button></div>
+  <div class="opts"><button id="hd">2K 画质</button><button id="torch" hidden>🔦 手电筒</button><button id="z" hidden>🔍 放大</button></div>
   <div class="res" id="res"><small>对准条码…</small></div>
   <div class="stat" id="stat"></div>
   <div class="row"><button class="p" id="go">开始扫描</button><button id="copy">复制记录发给我</button></div>
@@ -89,7 +91,7 @@
 
   var $ = function (s) { return document.querySelector(s); };
   var MODES = {
-    loc: { tip: '库位模式：<b>红线压在要扫的那张标签的条码中间</b>，离 20–40 厘米。上下层的标签也在画面里没关系：只认红线上的那张。只认库位码，商品条码会被忽略；连续 3 次读到一样的才算。', need: 3, zoom: false, loc: true },
+    loc: { tip: '库位模式：<b>把要扫的那张标签放进红框，尽量靠中间虚线</b>，离 20–40 厘米。上下层的标签也在画面里没关系：只认红框里离中线最近的那张。只认库位码，商品条码会被忽略；连续 3 次读到一样的才算。', need: 3, zoom: false, loc: true },
     prod: { tip: '商品（现在）：和正式系统现在一模一样（同样的识别组件、同样的设置），用来对比。', need: 2, zoom: false, loc: false, live: true },
     zoom: { tip: '商品（高清）：识别速度和“现在”一样，但按摄像头原始清晰度识别，<b>可以离 20–30 厘米</b>，小箱码不用凑近也不会模糊。', need: 2, zoom: false, loc: false }
   };
@@ -110,8 +112,9 @@
     while ($('#log').children.length > 120) $('#log').lastChild.remove();
   }
   var res = '';
-  function stat() { $('#stat').innerHTML = '已成功 ' + ok + ' 次' + (bad ? ' · 丢弃不一致的读数 ' + bad + ' 次' : '') + ' · 要求 ' + (useHd() ? '最高清' : '1080p') + (res ? ' · <b>摄像头实际 ' + res + '</b>' : '') + (zoomOn ? ' · 放大中' : ''); }
-  function useHd() { return hd || mode === 'loc'; }        // 库位模式默认要最高清晰度（手机给不了会自动降）
+  function stat() { $('#stat').innerHTML = '已成功 ' + ok + ' 次' + (bad ? ' · 丢弃不一致的读数 ' + bad + ' 次' : '') + ' · 要求 ' + (useHd() ? '2K' : '1080p') + (res ? ' · <b>摄像头实际 ' + res + '</b>' : '') + (zoomOn ? ' · 放大中' : ''); }
+  function useHd() { return hd || mode === 'loc'; }        // 库位模式要 2K（4K 太卡）
+  var BAND = 0.18;                                          // 红框高度（占画面高度）
   function setMode(m) {
     mode = m; hist = [];
     Array.prototype.forEach.call(document.querySelectorAll('[data-m]'), function (b) { b.classList.toggle('on', b.dataset.m === m); });
@@ -151,10 +154,14 @@
     if (!MODES[mode].loc || !vw) return rs;
     var locs = rs.filter(function (r) { return normLoc(r.rawValue); }), cy = vh / 2, cx = vw / 2;
     if (locs.length <= 1 && !locs.some(function (r) { return r.boundingBox; })) return locs;
-    // 视频是 object-fit: cover 显示的：画面中线就是视频中线
-    var on = locs.filter(function (r) { var b = r.boundingBox; return b && b.y <= cy && b.y + b.height >= cy && b.x <= cx && b.x + b.width >= cx; });
-    if (locs.length > 1) log('i', '画面里有 ' + locs.length + ' 个库位码（' + locs.map(function (r) { return normLoc(r.rawValue); }).join('、') + '），' + (on.length === 1 ? '只用红线上的 ' + normLoc(on[0].rawValue) : '红线上没有，等对准'));
-    return on.length === 1 ? on : [];
+    // 视频是 object-fit: cover 显示的：画面中线就是视频中线；红框的半高换算成视频像素
+    var c = $('#cam'), sc = Math.max(c.clientWidth / vw, c.clientHeight / vh) || 1, half = c.clientHeight * BAND / 2 / sc;
+    var on = locs.filter(function (r) { var b = r.boundingBox; return b && b.y <= cy + half && b.y + b.height >= cy - half; })
+      .map(function (r) { var b = r.boundingBox; return { r: r, d: Math.abs(b.y + b.height / 2 - cy) + 0.5 * Math.abs(b.x + b.width / 2 - cx) }; })
+      .sort(function (a, b) { return a.d - b.d; });
+    var best = on.length ? [on[0].r] : [];
+    if (locs.length > 1) log('i', '画面里有 ' + locs.length + ' 个库位码（' + locs.map(function (r) { return normLoc(r.rawValue); }).join('、') + '），' + (best.length ? '用离中线最近的 ' + normLoc(best[0].rawValue) : '红框里没有，等对准'));
+    return best;
   }
   function done(v, f) {
     var ms = Date.now() - t0; ok++;
@@ -185,7 +192,7 @@
     res = s.width ? s.width + '×' + s.height : ''; stat();
     log('i', '摄像头已打开' + (s.width ? '：' + s.width + '×' + s.height : '') + (caps.zoom ? '，可放大到 ' + caps.zoom.max + ' 倍' : '，不支持放大'));
   }
-  function constraints() { return { facingMode: { ideal: 'environment' }, width: { ideal: useHd() ? 3840 : 1920 }, height: { ideal: useHd() ? 2160 : 1080 } }; }
+  function constraints() { return { facingMode: { ideal: 'environment' }, width: { ideal: useHd() ? 2560 : 1920 }, height: { ideal: useHd() ? 1440 : 1080 } }; }
   function start() {
     stop(true); msg('正在打开摄像头…<br><small>如果弹出“允许使用相机”，请点允许</small>'); running = true; $('#go').textContent = '停止'; t0 = Date.now(); hist = [];
     var useNative = function (fs, d, name) {
@@ -205,7 +212,7 @@
     // 库位 / 高清模式：把组件的画面在网页上排成摄像头原始宽度，再缩小显示 → 按原始清晰度识别，离远一点也能读。
     var useZx = function () {
       if (!window.Html5Qrcode) return fail('扫码组件没加载，请联网后刷新');
-      var big = !MODES[mode].live, cam = $('#cam'), R = $('#reader'), W = cam.clientWidth, RW = big ? (useHd() ? 2160 : 1080) : W, k = W / RW;
+      var big = !MODES[mode].live, cam = $('#cam'), R = $('#reader'), W = cam.clientWidth, RW = big ? (useHd() ? 1440 : 1080) : W, k = W / RW;
       $('#v').hidden = true; R.hidden = false; cam.classList.add('zx'); cam.classList.toggle('big', big);
       R.style.width = RW + 'px'; R.style.transform = big ? 'scale(' + k + ')' : '';
       var fit = function () { if (R.offsetHeight) cam.style.height = Math.round(R.offsetHeight * k) + 'px'; };
@@ -216,7 +223,7 @@
       zx.start({ facingMode: 'environment' }, {
         fps: 20, videoConstraints: constraints(),
         qrbox: function (vw, vh) {
-          if (mode === 'loc') return { width: Math.floor(vw * .94), height: Math.max(Math.round(50 / k), Math.floor(vh * .09)) };      // 红线那一条
+          if (mode === 'loc') return { width: Math.floor(vw * .94), height: Math.max(Math.round(60 / k), Math.floor(vh * BAND)) };      // 红框那一条
           return { width: Math.floor(vw * 0.92), height: Math.max(Math.round(80 / k), Math.floor(Math.min(vh * 0.45, vw * 0.5))) };   // 和正式系统一样的框
         }
       }, function (t, r) { accept(t, r && r.result && r.result.format && r.result.format.formatName); }, function () { })
@@ -249,7 +256,7 @@
   }
   Array.prototype.forEach.call(document.querySelectorAll('[data-m]'), function (b) { b.onclick = function () { setMode(b.dataset.m); }; });
   $('#go').onclick = function () { running ? stop() : start(); };
-  $('#hd').onclick = function () { hd = !hd; $('#hd').classList.toggle('on', hd); log('i', '画质：' + (hd ? '4K' : '1080p')); stat(); if (running) start(); };
+  $('#hd').onclick = function () { hd = !hd; $('#hd').classList.toggle('on', hd); log('i', '画质：' + (hd ? '2K' : '1080p')); stat(); if (running) start(); };
   $('#copy').onclick = function () {
     var text = '扫码测试 ' + new Date().toLocaleString() + '\n' + navigator.userAgent + '\n成功 ' + ok + ' 次，丢弃 ' + bad + ' 次\n' + logs.slice(0, 200).join('\n');
     var fb = function () { var t = document.createElement('textarea'); t.value = text; document.body.appendChild(t); t.select(); try { document.execCommand('copy'); } catch (e) { } t.remove(); };
