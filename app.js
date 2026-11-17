@@ -3,7 +3,7 @@
  * 原则：只采集原始资料，不做任何核对。先存手机（离线队列），再上传云端。 */
 (function () {
   'use strict';
-  var VERSION = '1.8.2';
+  var VERSION = '1.8.3';
   var $ = function (s, el) { return (el || document).querySelector(s); };
   var app = $('#app');
 
@@ -1344,6 +1344,7 @@
         var r = mine[i];
         var body = { transferId: r.transferId, source: r.source, dest: r.dest, barcode: r.barcode, qty: r.qty || '', photo: r.photo, clientTime: r.clientTime };
         if (r.batch != null) body.batch = r.batch;
+        if (r.over === true || r.over === false) { body.over = r.over; body.seen = r.seen || []; }
         return api({ action: 'transfer', transfer: body }, true).then(function (d) {
           if (d.status === 'saved' || d.status === 'duplicate') { done++; return IDB.del(r.transferId); }
           r.rejected = d.message || '被服务器退回'; toast('有一笔库位转移被退回：' + r.rejected, 4000);
@@ -1776,9 +1777,29 @@
       if (st.qty && !(Number(st.qty) > 0)) return infoBox('数量不对', '数量要大于 0；不需要数量请留空。');
       st.edit = ''; showNeed = false;                  // 正在重扫某一栏但资料都齐了：直接用现有资料提交
       busy = true;
+      // v1.8.3 库位释放系统不知道：目的库位系统里还记着别的货 → 当场确认旧货还在不在（覆盖 / 一起放）。离线问不了：后台转仓管
+      if (!st.item || !cfg || !sess || navigator.onLine === false) return save(null, []);
+      var asked = false, tm = setTimeout(function () { if (!asked) { asked = true; save(null, []); } }, 6000);
+      api({ action: 'trLoc', loc: st.dst, item: st.item, base: st.bok ? st.batch : null }, true).then(function (d) {
+        if (asked) return; asked = true; clearTimeout(tm);
+        var o = (d && d.others) || [];
+        if (!o.length) return save(null, []);
+        busy = false; errBeep();
+        modal('<div class="tmiss"><div class="tmiss-h"><span class="tmiss-ic">!</span><div><h3>库位 ' + esc(st.dst) + ' 系统里还有旧货</h3><div class="hint">新托盘放进去之前，请看一下这些货还在不在</div></div></div>' +
+          '<ul class="tover">' + o.map(function (x) { return '<li><b>' + esc(x.desc || x.item) + '</b><span>' + esc(x.item) + (x.base ? ' · 批次 ' + esc(x.base) : '') + (x.exp ? ' · 到期 <b>' + esc(x.exp) + '</b>' : '') + '</span></li>'; }).join('') + '</ul>' +
+          '<div class="tovb"><button class="btn save" id="ovY">旧货已经不在了（覆盖）</button><button class="btn ghost" id="ovN">旧货还在，一起放</button><button class="tbtn" id="ovC">取消，先不提交</button></div></div>', function (m) {
+            $('#ovY', m).onclick = function () { closeModal(); save(true, o.map(function (x) { return x.id; })); };
+            $('#ovN', m).onclick = function () { closeModal(); save(false, []); };
+            $('#ovC', m).onclick = function () { closeModal(); draw(); };
+          });
+      }, function () { if (asked) return; asked = true; clearTimeout(tm); save(null, []); });
+    }
+    function save(over, seen) {
+      busy = true;
       var r = { transferId: uuid(), source: st.src, dest: st.dst, barcode: st.bc, itemCode: st.item, desc: st.desc, photo: st.photo, qty: st.qty || '',
         clientTime: new Date().toISOString(), operator: operator };
       if (st.bok) { r.batch = st.batch; r.bexp = st.bexp; }          // 没选（没有批次 / 还没读到）：后台自己判断，判断不了转仓管
+      if (over === true || over === false) { r.over = over; r.seen = seen; }
       IDB.put(r).then(function () {
         recent.unshift({ id: r.transferId, src: r.source, dst: r.dest, bc: r.barcode, item: r.itemCode || r.barcode, desc: r.itemCode ? r.desc : '', qty: r.qty, batch: r.batch || '', bexp: r.bexp || '', t: hhmm(r.clientTime), status: '待上传' });
         LS.set('trecent', recent.slice(0, 20));
