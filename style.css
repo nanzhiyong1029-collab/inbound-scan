@@ -528,3 +528,16 @@ body.lang-my .pkfil .hint { font-size: 12px; }
 .inbw { max-height: 360px; overflow: auto; }
 .inb-act { display: flex; gap: 10px; align-items: center; justify-content: flex-end; margin-top: 8px; } .inb-act label { margin-right: auto; }
 .tkacts { white-space: nowrap; } .tkacts .tbtn { margin-left: 4px; }
+/* v1.8.2 移库选批次 */
+.tbatc { margin: -2px 0 8px; padding: 8px; border: 2px solid #c2410c; border-top: 0; border-radius: 0 0 12px 12px; background: #fff7ed; }
+.tbat { display: flex; flex-direction: column; gap: 8px; }
+.tbatb { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; text-align: left; width: 100%; padding: 12px 14px; border: 2px solid #c9d1dc; border-radius: 10px; background: #fff; color: inherit; font: inherit; cursor: pointer; }
+.tbatb.on { border-color: #1a7f37; background: #e6f4ea; }
+.tbatb .tbx { font-size: 15px; } .tbatb .tbx b { font-size: 26px; color: #b42318; letter-spacing: .5px; }
+.tbatb .tbm { font-size: 13px; color: #475467; } .tbatb .tbm b { color: #1f3864; }
+.tb1 { margin-top: 3px; font-size: 13px; color: #1a7f37; } .tb1 b { font-size: 15px; }
+.trec-b { margin-top: 2px; } .trec-b b { color: #b42318; }
+.trec-l { margin-top: 2px; font-size: 13px; color: #1a7f37; } .trec-l.bad { color: #b42318; font-weight: 600; }
+.rlok { color: #1a7f37; font-size: 13px; } .rlbad { color: #b42318; font-weight: 600; font-size: 13px; }
+.tef select { width: 100%; font-size: 15px; padding: 8px; }
+.tbsrc { font-style: normal; background: #1f3864; color: #fff; border-radius: 6px; padding: 0 6px; font-size: 12px; }
