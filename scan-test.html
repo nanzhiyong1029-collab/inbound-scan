@@ -28,6 +28,7 @@
   /* ZXing（华为浏览器等）：画面由扫码组件自己画，框和红线要跟着它的扫描区，不然会对不上 */
   .cam.zx { aspect-ratio: auto; max-height: none; }
   .cam.zx #reader { position: relative; }
+  .cam.zx.big #reader { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
   .cam.zx .aim { display: none; }
   .cam.zx .line { z-index: 5; }
   #reader { position: absolute; inset: 0; }
@@ -55,10 +56,10 @@
   <div class="modes">
     <button data-m="loc" class="on">库位模式</button>
     <button data-m="prod">商品（现在）</button>
-    <button data-m="zoom">商品（放大）</button>
+    <button data-m="zoom">商品（高清）</button>
   </div>
   <div class="tip" id="tip"></div>
-  <div class="cam" id="cam"><video id="v" playsinline muted autoplay></video><div id="reader" hidden></div><div id="zxfile" hidden></div><div class="aim"></div><div class="line"></div><div class="camsg" id="camsg"><div>正在打开摄像头…<br><small>如果弹出“允许使用相机”，请点允许</small></div></div></div>
+  <div class="cam" id="cam"><video id="v" playsinline muted autoplay></video><div id="reader" hidden></div><div class="aim"></div><div class="line"></div><div class="camsg" id="camsg"><div>正在打开摄像头…<br><small>如果弹出“允许使用相机”，请点允许</small></div></div></div>
   <div class="opts"><button id="hd">4K 画质</button><button id="torch" hidden>🔦 手电筒</button><button id="z" hidden>🔍 放大</button></div>
   <div class="res" id="res"><small>对准条码…</small></div>
   <div class="stat" id="stat"></div>
@@ -89,8 +90,8 @@
   var $ = function (s) { return document.querySelector(s); };
   var MODES = {
     loc: { tip: '库位模式：<b>红线压在要扫的那张标签的条码中间</b>，离 20–40 厘米。上下层的标签也在画面里没关系：只认红线上的那张。只认库位码，商品条码会被忽略；连续 3 次读到一样的才算。', need: 3, zoom: false, loc: true },
-    prod: { tip: '商品（现在正式系统的做法）：离 10–20 厘米。商品条码（EAN-13）校验位对就算；其他条码读到 2 次一样才算。', need: 2, zoom: false, loc: false },
-    zoom: { tip: '商品（放大）：自动放大 2 倍，<b>离 20–30 厘米</b>，小箱码不会因为太近而模糊。规则和“现在”一样。', need: 2, zoom: true, loc: false }
+    prod: { tip: '商品（现在）：和正式系统现在一模一样（同样的识别组件、同样的设置），用来对比。', need: 2, zoom: false, loc: false, live: true },
+    zoom: { tip: '商品（高清）：识别速度和“现在”一样，但按摄像头原始清晰度识别，<b>可以离 20–30 厘米</b>，小箱码不用凑近也不会模糊。', need: 2, zoom: false, loc: false }
   };
   var mode = 'loc', hd = false, running = false, stream = null, track = null, det = null, zx = null, loopT = 0, t0 = 0, hist = [], logs = [], ok = 0, bad = 0, pauseUntil = 0, zoomOn = false, caps = {};
   var LOC = /^(\d{2})-?([A-Z])-?(\d{2})$/;
@@ -113,8 +114,8 @@
     mode = m; hist = [];
     Array.prototype.forEach.call(document.querySelectorAll('[data-m]'), function (b) { b.classList.toggle('on', b.dataset.m === m); });
     $('#tip').innerHTML = MODES[m].tip; $('#cam').classList.toggle('loc', m === 'loc');
-    log('i', '切换到：' + { loc: '库位模式', prod: '商品（现在）', zoom: '商品（放大）' }[m]);
-    if (running) applyZoom(MODES[m].zoom);
+    log('i', '切换到：' + { loc: '库位模式', prod: '商品（现在）', zoom: '商品（高清）' }[m]);
+    if (running) start();                 // 每个模式的识别设置不同：重新打开摄像头
   }
   function show(v, fmt, ms) {
     var p = normLoc(v), h = '';
@@ -142,30 +143,6 @@
     var lst = hist[hist.length - 1];
     if (lst && lst.v === v && Date.now() - lst.t < 1500) return done(v, f);
     hist = [{ v: v, t: Date.now() }];
-  }
-  /** 框（.aim）在视频原始画面里的位置：视频是 object-fit: cover 显示的 */
-  function aimRegion(v) {
-    var vw = v.videoWidth, vh = v.videoHeight; if (!vw || !vh) return null;
-    var C = $('#cam').getBoundingClientRect(), A = document.querySelector('#cam .aim').getBoundingClientRect();
-    var sc = Math.max(C.width / vw, C.height / vh), ox = (C.width - vw * sc) / 2, oy = (C.height - vh * sc) / 2;
-    var x = Math.max(0, (A.left - C.left - ox) / sc), y = Math.max(0, (A.top - C.top - oy) / sc);
-    var w = Math.min(vw - x, A.width / sc), h = Math.min(vh - y, A.height / sc);
-    x = Math.round(x); y = Math.round(y); w = Math.round(Math.min(vw - x, w)); h = Math.round(Math.min(vh - y, h));   // 整像素截取，不然条码会被插值糊掉
-    return w > 20 && h > 10 ? { x: x, y: y, w: w, h: h } : null;
-  }
-  function zxDetector() {
-    var F = Html5QrcodeSupportedFormats;
-    var dec = new Html5Qrcode('zxfile', { verbose: false, formatsToSupport: [F.EAN_13, F.EAN_8, F.UPC_A, F.UPC_E, F.CODE_128, F.ITF, F.CODE_39, F.QR_CODE] });
-    var cv = document.createElement('canvas'), cx = cv.getContext('2d');
-    return { detect: function (v) {
-      var r = aimRegion(v); if (!r) return Promise.resolve([]);
-      var k = Math.min(1, 1600 / r.w);                              // 4K 画质时最多 1600 宽，够清楚也不太慢
-      cv.width = Math.round(r.w * k); cv.height = Math.round(r.h * k);
-      cx.drawImage(v, r.x, r.y, r.w, r.h, 0, 0, cv.width, cv.height);
-      return new Promise(function (res) { cv.toBlob(res, 'image/png'); })
-        .then(function (b) { return dec.scanFileV2(new File([b], 'f.png', { type: 'image/png' }), false); })
-        .then(function (x) { return [{ rawValue: x.decodedText, format: x.result && x.result.format && x.result.format.formatName }]; }, function () { return []; });
-    } };
   }
   /** 库位模式：画面里可能同时有上下几层的标签 → 只要红线（画面正中横线）压着的那一个 */
   function pick(rs, vw, vh) {
@@ -202,6 +179,7 @@
     $('#z').onclick = function () { applyZoom(!zoomOn); };
     applyZoom(MODES[mode].zoom);
     var s = track && track.getSettings ? track.getSettings() : {};
+    if (!track && zx) { try { s = zx.getRunningTrackSettings(); } catch (e) { } }
     log('i', '摄像头已打开' + (s.width ? '：' + s.width + '×' + s.height : '') + (caps.zoom ? '，可放大到 ' + caps.zoom.max + ' 倍' : '，不支持放大'));
   }
   function constraints() { return { facingMode: { ideal: 'environment' }, width: { ideal: hd ? 3840 : 1920 }, height: { ideal: hd ? 2160 : 1080 } }; }
@@ -219,11 +197,27 @@
         })();
       }).catch(fail);
     };
-    // 手机没有自带识别（华为浏览器等）：自己开摄像头，按“原始清晰度”截取框里（库位模式 = 红线那一条）的画面给 ZXing 识别。
-    // 以前用扫码组件自己的画面：它先把画面缩小到屏幕大小再识别，离远一点条码就太细读不出。
+    // 手机没有自带识别（华为浏览器等）：用 ZXing 扫码组件（和正式系统一样，每秒 20 帧）。
+    // 组件识别前会按“摄像头宽度 ÷ 画面在网页上的宽度”把画面缩小。“现在”模式和正式系统一样；
+    // 库位 / 高清模式：把组件的画面在网页上排成摄像头原始宽度，再缩小显示 → 按原始清晰度识别，离远一点也能读。
     var useZx = function () {
       if (!window.Html5Qrcode) return fail('扫码组件没加载，请联网后刷新');
-      useNative(null, zxDetector(), 'ZXing · 高清截取');
+      var big = !MODES[mode].live, cam = $('#cam'), R = $('#reader'), W = cam.clientWidth, RW = big ? (hd ? 2160 : 1080) : W, k = W / RW;
+      $('#v').hidden = true; R.hidden = false; cam.classList.add('zx'); cam.classList.toggle('big', big);
+      R.style.width = RW + 'px'; R.style.transform = big ? 'scale(' + k + ')' : '';
+      var fit = function () { if (R.offsetHeight) cam.style.height = Math.round(R.offsetHeight * k) + 'px'; };
+      try { new ResizeObserver(fit).observe(R); } catch (e) { }
+      $('#eng').textContent = 'ZXing' + (big ? ' · 原始清晰度' : '（和正式系统一样）');
+      var F = Html5QrcodeSupportedFormats;
+      zx = new Html5Qrcode('reader', { verbose: false, formatsToSupport: [F.EAN_13, F.EAN_8, F.UPC_A, F.UPC_E, F.CODE_128, F.ITF, F.CODE_39, F.QR_CODE], experimentalFeatures: { useBarCodeDetectorIfSupported: true } });
+      zx.start({ facingMode: 'environment' }, {
+        fps: 20, videoConstraints: constraints(),
+        qrbox: function (vw, vh) {
+          if (mode === 'loc') return { width: Math.floor(vw * .94), height: Math.max(Math.round(50 / k), Math.floor(vh * .09)) };      // 红线那一条
+          return { width: Math.floor(vw * 0.92), height: Math.max(Math.round(80 / k), Math.floor(Math.min(vh * 0.45, vw * 0.5))) };   // 和正式系统一样的框
+        }
+      }, function (t, r) { accept(t, r && r.result && r.result.format && r.result.format.formatName); }, function () { })
+        .then(function () { fit(); msg(''); controls(); }).catch(fail);
     };
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return fail('这个浏览器不能用摄像头（请用 Chrome）');
     if ('BarcodeDetector' in window && BarcodeDetector.getSupportedFormats) {
@@ -237,7 +231,7 @@
     running = false; clearTimeout(loopT); $('#go').textContent = '开始扫描';
     if (stream) stream.getTracks().forEach(function (t) { t.stop(); }); stream = null; track = null;
     if (zx) { var z = zx; zx = null; try { z.stop().catch(function () { }).then(function () { try { z.clear(); } catch (e) { } }); } catch (e) { try { z.clear(); } catch (e2) { } } }
-    $('#v').hidden = false; $('#cam').classList.remove('zx');
+    $('#v').hidden = false; $('#reader').hidden = true; $('#cam').classList.remove('zx', 'big'); $('#cam').style.height = ''; $('#reader').style.transform = ''; $('#reader').style.width = '';
     if (!quiet) msg('已停止<br><button>开始扫描</button>');
   }
   function msg(html) { var m = $('#camsg'); if (!html) { m.hidden = true; return; } m.hidden = false; m.innerHTML = '<div>' + html + '</div>'; var b = m.querySelector('button'); if (b) b.onclick = start; }
