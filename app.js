@@ -3,7 +3,7 @@
  * 原则：只采集原始资料，不做任何核对。先存手机（离线队列），再上传云端。 */
 (function () {
   'use strict';
-  var VERSION = '1.8.5';
+  var VERSION = '1.8.6';
   var $ = function (s, el) { return (el || document).querySelector(s); };
   var app = $('#app');
 
@@ -2778,7 +2778,7 @@
       var h = '<div class="rstats"><div class="g"><b>' + (c.ok || 0) + '</b><span>已核实</span></div><div class="o"><b>' + (c.todo || 0) + '</b><span>待核实（AutoCount）</span></div><div><b>' + (c.noloc || 0) + '</b><span>有库存没库位</span></div><div><b>' + (c.tasks || 0) + '</b><span>仓管待处理</span></div><div><b>' + (c.batches || 0) + '</b><span>AutoCount 批次行</span></div><div><b>' + (c.barcodes || 0) + '</b><span>条码' + (c.newItems ? ' · 新商品 ' + c.newItems : '') + '</span></div></div>' +
         '<div class="rfil lmimp"><label>导入 AutoCount「Stock Item with Batch」<button class="btn save" id="lmImp"' + (R.busy ? ' disabled' : '') + '>📂 选择 Excel</button><input id="lmImpF" class="vh" type="file" accept=".xlsx" tabindex="-1"></label>' +
         '<label>导入 AutoCount 条码表（Item Sales Price Listing with barcode）<button class="btn save" id="lmBc"' + (R.busy ? ' disabled' : '') + '>📂 选择 Excel</button><input id="lmBcF" class="vh" type="file" accept=".xlsx" tabindex="-1"></label>' +
-        '<label>移库记录转给仓管（从这天起）<span class="lmrow"><input type="date" id="lmTrD" value="' + esc(myToday(-7)) + '"><button class="tbtn" id="lmTr"' + (R.busy ? ' disabled' : '') + '>导入</button></span></label></div>' +
+        '<label>以前的移库记录更新到库位（从这天起）<span class="lmrow"><input type="date" id="lmTrD" value="' + esc(myToday(-30)) + '"><button class="tbtn" id="lmTr"' + (R.busy ? ' disabled' : '') + '>更新</button></span></label></div>' +
         (R.lmMsg ? '<p class="' + (/失败|不对|没有/.test(R.lmMsg) ? 'err' : 'hint') + '"><b>' + esc(R.lmMsg) + '</b></p>' : '') +
         '<div class="rbar">' + [['all', '全部'], ['已核实', '已核实'], ['待核实', '待核实']].map(function (t) { return '<button class="rtab' + (f.st === t[0] ? ' on' : '') + '" data-lst="' + t[0] + '">' + t[1] + '</button>'; }).join('') + '</div>' +
         '<div class="rfil"><label>商品 / Item Code / 批次 <input id="lmQ" value="' + esc(f.q) + '"></label><label>库位 <input id="lmL" value="' + esc(f.loc) + '"></label><button class="tbtn" id="lmR">刷新</button><button class="btn save rexp" id="lmX"' + (rows.length ? '' : ' disabled') + '>⬇ 导出 Excel（' + rows.length + '）</button></div>' +
@@ -2875,7 +2875,7 @@
         $('#lmBcF').onchange = function () { var f = this.files[0]; this.value = ''; if (f) lmBcImport(f); };
         $('#lmTr').onclick = function () {
           var dt = $('#lmTrD').value; R.busy = true; draw();
-          api({ action: 'rcLmTransfers', from: dt }, true).then(function (d) { R.busy = false; R.lmMsg = d.status === 'ok' ? dt + ' 起的移库记录 ' + d.found + ' 条，新转给仓管 ' + d.added + ' 条（已转过的不重复）' : d.message; load('lm'); },
+          api({ action: 'rcLmTransfers', from: dt }, true).then(function (d) { R.busy = false; R.lmMsg = d.status === 'ok' ? dt + ' 起的移库记录 ' + d.found + ' 条：这次更新到库位 ' + d.applied + ' 条' + (d.tasks ? '，' + d.tasks + ' 条（箱码不认识 / 有多个批次）转仓管 PDA【待处理】一个一个核实' : '') + (d.done ? '，' + d.done + ' 条之前已经更新过' : '') : d.message; load('lm'); },
             function (e) { R.busy = false; R.lmMsg = '导入失败：' + e.message; draw(); });
         };
         var lx = $('#lmX'); if (lx) lx.onclick = function () {
@@ -3889,14 +3889,20 @@
       if (sub === 'empty') return drawEmpty();
       if (sub === 'exp') return drawExp(arg);
       // 首页 = 现场总览：每排进度
-      loading('读取库位总览…');
+      // v1.8.6 先显示上次的总览（马上能点），后台读到最新的再刷新
+      var cached = LS.get('lmMapC', null), myHash = location.hash, fresh = false;
+      if (cached) renderMap(cached); else loading('读取库位总览…');
       api({ action: 'lmMap' }, true).then(function (d) {
+        if (location.hash !== myHash) return;
+        fresh = true; LS.set('lmMapC', d); renderMap(d);
+      }, function (e) { if (cached) { var u = $('#lmUpd'); if (u) u.textContent = e.network ? '离线：显示的是上次的' : '更新失败：' + e.message; } else fail(e); });
+      function renderMap(d) {
         setBar('库位总览', false);
         var L = d.locs, tot = L.ok + L.todo + L.task + L.empty, pct = function (x, t) { return (t ? x * 100 / t : 0).toFixed(1) + '%'; };
         app.innerHTML = head((lmLastMsg ? '<p class="err">' + esc(lmLastMsg) + '</p>' : '') +
           '<div class="lmstats">' + [['tasks', d.counts.tasks, '待处理', 'r'], ['todo', d.counts.todo, '待核实', 'y'], ['empty', L.empty, '空库位', 'k'], ['noloc', d.counts.noloc, '没库位商品', 'k']].map(function (x) {
             return '<button data-go="' + x[0] + '"><b class="' + x[3] + '">' + x[1] + '</b><span>' + x[2] + '</span></button>'; }).join('') + '</div>' +
-          '<div class="lmchips"><button class="tbtn" data-go="exp">⏰ 快到期</button><span class="hint">已核实库位 ' + L.ok + ' / ' + tot + '</span></div>' +
+          '<div class="lmchips"><button class="tbtn" data-go="exp">⏰ 快到期</button><span class="hint">已核实库位 ' + L.ok + ' / ' + tot + '</span><span class="hint" id="lmUpd">' + (fresh ? '' : '更新中…') + '</span></div>' +
           '<div class="lmlg"><span class="ok">已核实</span><span class="todo">待核实</span><span class="task">有问题</span><span class="emp">空</span></div>' +
           d.aisles.map(function (a) {
             return '<button class="card lmais" data-a="' + a.a + '"><span class="lmaisn" data-nt>' + a.a + '</span><span class="lmpb"><i class="ok" style="width:' + pct(a.ok, a.total) + '"></i><i class="todo" style="width:' + pct(a.todo, a.total) + '"></i><i class="task" style="width:' + pct(a.task, a.total) + '"></i></span>' +
@@ -3905,7 +3911,7 @@
         bindHead(); lmLastMsg = '';
         Array.prototype.forEach.call(app.querySelectorAll('[data-go]'), function (b) { b.onclick = function () { location.hash = '#/lm/' + b.dataset.go; }; });
         Array.prototype.forEach.call(app.querySelectorAll('[data-a]'), function (b) { b.onclick = function () { location.hash = '#/lm/a/' + b.dataset.a; }; });
-      }, fail);
+      }
     }
     /** 一排一张表：行 = 位置（字母），列 = 层 */
     function drawAisle(a) {
@@ -4037,6 +4043,10 @@
           h = L.map(function (x) { return '<button class="card lmgrp" data-i="' + esc(x.item) + '"><b data-nt>' + esc(x.desc) + '</b><span>库存 ' + x.qty + ' ' + esc(x.uom) + '</span><small><span data-nt>' + esc(x.item) + ' · ' + esc(x.base) + '</span> · 到期 ' + esc(x.exp || '—') + '</small></button>'; }).join('');
         } else {
           h = L.map(function (t, i) {
+            if (t.type === '移库：库位覆盖待确认') return '<div class="card lmtask"><div class="lmrec-h"><b>库位里还有旧货？</b><span class="hint">' + esc(t.at) + '</span></div>' +      // v1.8.6
+              '<div class="lmmv">新托盘放到 <b class="pkloc" data-nt>' + esc(t.to) + '</b></div><div class="hint"><span data-nt>' + esc(t.desc || '') + '</span> · ' + esc(t.note) + '</div>' +
+              '<p class="hint lmchk">请到 <b data-nt>' + esc(t.to) + '</b> 看一下：旧货不在了就在库位页里点“不在这里了”</p>' +
+              '<div class="lmacts"><button class="btn save" data-go="' + esc(t.to) + '">打开库位 ' + esc(t.to) + '</button><button class="tbtn" data-sk="' + i + '">处理好了</button></div></div>';
             return '<div class="card lmtask"><div class="lmrec-h"><b>' + esc(t.type) + '</b><span class="hint">' + esc(t.at) + '</span></div><div><b data-nt>' + esc(t.desc || '（不认识的箱码）') + '</b></div><div class="hint">' +
               (t.bc ? '箱码 <span data-nt>' + esc(t.bc) + '</span> · ' : '') + (t.base ? '批次 <span data-nt>' + esc(t.base) + '</span> · ' : '') + esc(t.note) + '</div>' +
               (t.to ? '<div class="lmmv"><span data-nt>' + esc(t.from || '—') + '</span> → <b class="pkloc" data-nt>' + esc(t.to) + '</b></div>' : '<p class="err" style="margin:4px 0">' + (t.item ? '没有库位' : '系统认不出这个商品') + '</p>') +
@@ -4048,7 +4058,8 @@
         bindHead();
         Array.prototype.forEach.call(app.querySelectorAll('[data-l]'), function (b) { b.onclick = function () { location.hash = '#/lm/l/' + encodeURIComponent(b.dataset.l); }; });
         Array.prototype.forEach.call(app.querySelectorAll('[data-i]'), function (b) { b.onclick = function () { location.hash = '#/lm/i/' + encodeURIComponent(b.dataset.i); }; });
-        Array.prototype.forEach.call(app.querySelectorAll('[data-sk]'), function (b) { b.onclick = function () { var t = L[+b.dataset.sk]; confirmBox('忽略这条？（' + (t.desc || t.bc) + (t.to ? ' → ' + t.to : '') + '）', '忽略', function () { api({ action: 'lmTaskSkip', id: t.id }, true).then(function () { toast('已忽略', 1500); draw(); }, fail); }); }; });
+        Array.prototype.forEach.call(app.querySelectorAll('.lmtask [data-go]'), function (b) { b.onclick = function () { location.hash = '#/lm/l/' + encodeURIComponent(b.dataset.go); }; });
+        Array.prototype.forEach.call(app.querySelectorAll('[data-sk]'), function (b) { b.onclick = function () { var t = L[+b.dataset.sk]; if (t.type === '移库：库位覆盖待确认') return api({ action: 'lmTaskSkip', id: t.id, note: '仓管已处理' }, true).then(function () { toast('已处理', 1500); draw(); }, fail); confirmBox('忽略这条？（' + (t.desc || t.bc) + (t.to ? ' → ' + t.to : '') + '）', '忽略', function () { api({ action: 'lmTaskSkip', id: t.id }, true).then(function () { toast('已忽略', 1500); draw(); }, fail); }); }; });
         Array.prototype.forEach.call(app.querySelectorAll('[data-tk]'), function (b) {
           b.onclick = function () {
             var t = L[+b.dataset.tk];
