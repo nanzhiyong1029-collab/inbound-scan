@@ -3,7 +3,7 @@
  * 原则：只采集原始资料，不做任何核对。先存手机（离线队列），再上传云端。 */
 (function () {
   'use strict';
-  var VERSION = '1.9.12';
+  var VERSION = '1.9.13';
   var $ = function (s, el) { return (el || document).querySelector(s); };
   var app = $('#app');
 
@@ -1337,7 +1337,10 @@
   function trSnapApply(src, dst, item, desc, base, over, seenItems) {
     if (!trSnap || !item) return;
     var L = trSnap.locs, b = base == null ? null : base;
-    if (over === true) L = L.filter(function (x) { return !(x[0] === dst && !(x[1] === item && (b == null || x[3] === b))); });
+    if (over === true) {                 // v1.9.13 只移走勾选的（seenItems = 记录 ID）；没给就全部
+      var sg = {}; (seenItems || []).forEach(function (k) { sg[k] = 1; });
+      L = L.filter(function (x) { return !(x[0] === dst && !(x[1] === item && (b == null || x[3] === b)) && (!seenItems || sg[x[5]])); });
+    }
     var mv = src ? L.filter(function (x) { return x[0] === src && x[1] === item && (b == null || x[3] === b); })[0] : null;
     if (mv) { mv[0] = dst; mv[4] = '已核实'; }
     else if (!L.some(function (x) { return x[0] === dst && x[1] === item && (b == null || x[3] === b); })) L.push([dst, item, desc || '', b || '', '已核实', '']);
@@ -1380,7 +1383,7 @@
         var body = { transferId: r.transferId, source: r.source, dest: r.dest, barcode: r.barcode, qty: r.qty || '', photo: r.photo, clientTime: r.clientTime };
         if (r.batch != null) body.batch = r.batch;
         if (r.learnItem) body.learnItem = r.learnItem; else if (r.newName) body.newName = r.newName;     // v1.9.2 当场认出的箱码
-        if (r.over === true || r.over === false) { body.over = r.over; body.seen = r.seen || []; }
+        if (r.over === true || r.over === false) { body.over = r.over; body.seen = r.seen || []; if (r.kept) body.kept = r.kept; }
         return api({ action: 'transfer', transfer: body }, true).then(function (d) {
           if (d.status === 'saved' || d.status === 'duplicate') { done++; return IDB.del(r.transferId); }
           r.rejected = d.message || '被服务器退回'; toast('有一笔库位转移被退回：' + r.rejected, 4000);
@@ -1940,23 +1943,33 @@
     function askOver(o, local) {
         if (!o.length) return save(null, []);
         busy = false; errBeep();
-        modal('<div class="tmiss"><div class="tmiss-h"><span class="tmiss-ic">!</span><div><h3>库位 ' + esc(st.dst) + ' 系统里还有旧货</h3><div class="hint">新托盘放进去之前，请看一下这些货还在不在</div></div></div>' +
-          '<ul class="tover">' + o.map(function (x) { return '<li><b>' + esc(x.desc || x.item) + '</b><span>' + esc(x.item) + (x.base ? ' · 批次 ' + esc(x.base) : '') + (x.exp ? ' · 到期 <b>' + esc(x.exp) + '</b>' : '') + '</span></li>'; }).join('') + '</ul>' +
-          '<div class="tovb"><button class="btn save" id="ovY">旧货已经不在了（覆盖）</button><button class="btn ghost" id="ovN">旧货还在，一起放</button><button class="tbtn" id="ovC">取消，先不提交</button></div></div>', function (m) {
+        // v1.9.13 一条一条勾：勾了 = 已经不在（移走），没勾 = 还在（一起放）
+        modal('<div class="tmiss"><div class="tmiss-h"><span class="tmiss-ic">!</span><div><h3>库位 ' + esc(st.dst) + ' 系统里还有旧货</h3><div class="hint">新托盘放进去之前，请看一下：<b>已经不在的打勾</b>，没勾的当作还在</div></div></div>' +
+          '<ul class="tover">' + o.map(function (x, i) { return '<li><label class="tovl"><input type="checkbox" data-ov="' + i + '"><span class="tovt"><b>' + esc(x.desc || x.item) + '</b><span>' + esc(x.item) + (x.base ? ' · 批次 ' + esc(x.base) : '') + (x.exp ? ' · 到期 <b>' + esc(x.exp) + '</b>' : '') + '</span></span><em class="tovs">还在</em></label></li>'; }).join('') + '</ul>' +
+          '<div class="tovb"><button class="btn save" id="ovP" disabled>先勾选已经不在的货</button><button class="btn ghost" id="ovY">全部都不在了（全部移走）</button><button class="btn ghost" id="ovN">全部还在，一起放</button><button class="tbtn" id="ovC">取消，先不提交</button></div></div>', function (m) {
+            var cbs = m.querySelectorAll('[data-ov]'), bp = $('#ovP', m);
+            var ids = function (on) { var r = []; Array.prototype.forEach.call(cbs, function (c) { if (c.checked === on && o[+c.dataset.ov].id) r.push(o[+c.dataset.ov].id); }); return r; };
+            var upd = function () {
+              var n = 0; Array.prototype.forEach.call(cbs, function (c) { if (c.checked) n++; var li = c.closest('li'); li.classList.toggle('gone', c.checked); li.querySelector('.tovs').textContent = c.checked ? '不在了' : '还在'; });
+              bp.disabled = !n;
+              bp.textContent = !n ? '先勾选已经不在的货' : n === cbs.length ? '✓ 移走全部 ' + n + ' 条' : '✓ 移走勾选的 ' + n + ' 条，其余 ' + (cbs.length - n) + ' 条还在';
+            };
+            Array.prototype.forEach.call(cbs, function (c) { c.onchange = upd; });
+            bp.onclick = function () { closeModal(); save(true, ids(true), ids(false)); };
             $('#ovY', m).onclick = function () { closeModal(); save(true, o.map(function (x) { return x.id; }).filter(Boolean)); };
             $('#ovN', m).onclick = function () { closeModal(); save(false, []); };
             $('#ovC', m).onclick = function () { closeModal(); draw(); };
           });
     }
-    function save(over, seen) {
+    function save(over, seen, kept) {
       busy = true;
       var r = { transferId: uuid(), source: st.src, dest: st.dst, barcode: st.bc, itemCode: st.item, desc: st.desc, photo: st.photo, qty: st.qty || '',
         clientTime: new Date().toISOString(), operator: operator };
       if (st.bok) { r.batch = st.batch; r.bexp = st.bexp; }          // 没选（没有批次 / 还没读到）：后台自己判断，判断不了转仓管
       if (st.learn && st.item) r.learnItem = st.item; else if (st.newName) r.newName = st.newName;      // v1.9.2 当场认出：后台记住箱码
       if (r.learnItem && masters) masters.byBarcode[r.barcode] = [r.barcode, r.itemCode, r.desc];       // 这台手机马上认得
-      if (over === true || over === false) { r.over = over; if (seen) r.seen = seen; }
-      trSnapApply(r.source, r.dest, r.itemCode, r.desc, r.batch != null ? r.batch : null, over);
+      if (over === true || over === false) { r.over = over; if (seen) r.seen = seen; if (kept && kept.length) r.kept = kept; }
+      trSnapApply(r.source, r.dest, r.itemCode, r.desc, r.batch != null ? r.batch : null, over, over === true ? seen || [] : null);
       IDB.put(r).then(function () {
         recent.unshift({ id: r.transferId, src: r.source, dst: r.dest, bc: r.barcode, item: r.itemCode || (r.newName ? '新商品' : r.barcode), desc: r.itemCode || r.newName ? r.desc : '', qty: r.qty, batch: r.batch || '', bexp: r.bexp || '', t: hhmm(r.clientTime), status: '待上传' });
         LS.set('trecent', recent.slice(0, 20));
