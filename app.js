@@ -3,7 +3,7 @@
  * 原则：只采集原始资料，不做任何核对。先存手机（离线队列），再上传云端。 */
 (function () {
   'use strict';
-  var VERSION = '1.9.13';
+  var VERSION = '1.9.14';
   var $ = function (s, el) { return (el || document).querySelector(s); };
   var app = $('#app');
 
@@ -3272,6 +3272,9 @@
       Object.keys(WC_RACKS).forEach(function (a) {
         for (var k = 65; k <= WC_RACKS[a].charCodeAt(0); k++) for (var lv = 1; lv <= WC_LEVELS; lv++) cell(a + '-' + String.fromCharCode(k) + '-0' + lv);
       });
+      // v1.9.14 库位备注（wms_meta.locnotes = {库位: [备注, 谁, 时间]}）
+      var NT = {}; try { NT = JSON.parse((D.meta.locnotes || [])[0] || '{}') || {}; } catch (e) { NT = {}; }
+      Object.keys(NT).forEach(function (l) { if (lmParts(l) && NT[l] && NT[l][0]) cell(l).note = { text: String(NT[l][0]), by: NT[l][1] || '', at: NT[l][2] || '' }; });
       Object.keys(D.locs).forEach(function (l) { var c = D.locs[l]; c.st = c.tasks.length ? 'task' : c.recs.some(function (x) { return x.status !== '已核实'; }) ? 'todo' : c.recs.length ? 'ok' : 'empty'; });
       return D;
     }
@@ -3287,6 +3290,28 @@
         toast(okMsg, 2000); return load();
       }, function (e) { W.busy = false; paintTop(); toast(e.network ? '没有网络' : e.message, 4000); });
     }
+    /** v1.9.14 库位备注：打字保存；清空 = 删除 */
+    function noteEdit(l) {
+      var c = W.snap.locs[l], old = c && c.note ? c.note.text : '';
+      modal('<div class="tmiss"><h3>📝 库位 ' + esc(l) + ' 备注</h3><p class="hint">例如：货架坏了、不能放重货、暂时放客户的货……写了以后库位图上这个库位会用紫框标出来。</p>' +
+        '<textarea id="wcNt" class="wcnta" maxlength="300" placeholder="写备注（最多 300 字）">' + esc(old) + '</textarea><div class="hint" id="wcNtN"></div>' +
+        '<div class="row" style="margin-top:10px"><button class="btn ghost" id="wcNtC">取消</button>' + (old ? '<button class="btn ghost red" id="wcNtD">删除备注</button>' : '') + '<button class="btn save" id="wcNtS">保存备注</button></div></div>', function (m) {
+          var ta = $('#wcNt', m), cnt = function () { $('#wcNtN', m).textContent = ta.value.length + ' / 300'; };
+          var go = function (v) {
+            v = String(v).trim(); if (v === old) { closeModal(); return; }
+            closeModal(); if (W.busy) return; W.busy = true; paintTop(); toast('保存中…', 3000);
+            if (c) { c.note = v ? { text: v, by: operator || '', at: '' } : null; draw(); }      // 先显示
+            api({ action: PF + 'LocNote', loc: l, note: v }, true).then(function (r) {
+              W.busy = false; if (r.status && r.status !== 'ok') { toast(r.message || '保存不了', 4000); return load(); }
+              toast(v ? '备注已保存' : '备注已删除', 2000); return load();
+            }, function (e) { W.busy = false; toast(e.network ? '没有网络，备注没保存' : e.message, 4000); load(); });
+          };
+          ta.oninput = cnt; cnt();
+          $('#wcNtC', m).onclick = closeModal; $('#wcNtS', m).onclick = function () { go(ta.value); };
+          var d = $('#wcNtD', m); if (d) d.onclick = function () { confirmBox('删除库位 ' + l + ' 的备注？', '删除', function () { go(''); }); };
+          setTimeout(function () { ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); }, 50);
+        });
+    }
     function skip(t) {
       confirmBox('“' + (t.desc || t.bc || t.type) + '”这条待处理标为已处理 / 忽略？', '确定', function () {
         api({ action: PF + 'LmTaskSkip', id: t.id, note: '中控台处理' }, true).then(function () { toast('已处理', 1500); load(); }, function (e) { toast(e.message, 4000); });
@@ -3295,7 +3320,7 @@
     // ---------- 各页面 ----------
     function vMap() {
       var D = W.snap, A = {};
-      Object.keys(D.locs).forEach(function (l) { var p = lmParts(l), c = D.locs[l]; var a = A[p.a] || (A[p.a] = { a: p.a, n: 0, ok: 0, todo: 0, task: 0, empty: 0 }); a.n++; a[c.st]++; });
+      Object.keys(D.locs).forEach(function (l) { var p = lmParts(l), c = D.locs[l]; var a = A[p.a] || (A[p.a] = { a: p.a, n: 0, ok: 0, todo: 0, task: 0, empty: 0, note: 0 }); a.n++; a[c.st]++; if (c.note) a.note++; });
       var as = Object.keys(A).sort();
       if (!W.aisle || !A[W.aisle]) W.aisle = as[0] || '';
       var pct = function (x, n) { return (n ? x * 100 / n : 0).toFixed(1) + '%'; };
@@ -3303,20 +3328,21 @@
       var h = '<div class="wcstats">' + [['ok', '受控（已核实）'], ['todo', '未受控（待核实）'], ['task', '待核验（有待处理）'], ['empty', '空库位']].map(function (x) {
         return '<div class="wcstat s-' + x[0] + '"><b>' + tot[x[0]] + '</b><span>' + x[1] + '</span></div>'; }).join('') + '</div>';
       h += '<div class="wcsplit"><div class="wcais">' + as.map(function (k) { var a = A[k];
-        return '<button class="wcai' + (k === W.aisle ? ' on' : '') + '" data-ai="' + k + '"><span class="wcain">' + k + ' 排</span><span class="wcpb"><i class="ok" style="width:' + pct(a.ok, a.n) + '"></i><i class="todo" style="width:' + pct(a.todo, a.n) + '"></i><i class="task" style="width:' + pct(a.task, a.n) + '"></i></span><small>' + a.ok + '/' + a.n + ' 受控 · 空 ' + a.empty + (a.task ? ' · ◐ ' + a.task : '') + '</small></button>'; }).join('') + '</div>';
+        return '<button class="wcai' + (k === W.aisle ? ' on' : '') + '" data-ai="' + k + '"><span class="wcain">' + k + ' 排</span><span class="wcpb"><i class="ok" style="width:' + pct(a.ok, a.n) + '"></i><i class="todo" style="width:' + pct(a.todo, a.n) + '"></i><i class="task" style="width:' + pct(a.task, a.n) + '"></i></span><small>' + a.ok + '/' + a.n + ' 受控 · 空 ' + a.empty + (a.task ? ' · ◐ ' + a.task : '') + (a.note ? ' · 📝 ' + a.note : '') + '</small></button>'; }).join('') + '</div>';
       var cells = Object.keys(D.locs).filter(function (l) { return lmParts(l).a === W.aisle; }), P = {}, L = {};
       cells.forEach(function (l) { var p = lmParts(l); P[p.p] = 1; L[p.lv] = 1; });
       var ps = Object.keys(P).sort(), lvs = Object.keys(L).sort().reverse();
-      h += '<div class="wcgridw"><div class="wcgh"><b>第 ' + esc(W.aisle) + ' 排</b><span class="hint">最上一行 = 最高层 · 点库位看上面放了什么</span></div><div class="wcgrid" style="grid-template-columns: 44px repeat(' + ps.length + ', minmax(46px, 1fr))"><span></span>' +
+      h += '<div class="wcgridw"><div class="wcgh"><b>第 ' + esc(W.aisle) + ' 排</b><span class="hint">最上一行 = 最高层 · 点库位看上面放了什么、写备注 · <span class="wcnotek">📝</span> 紫框 = 有备注</span></div><div class="wcgrid" style="grid-template-columns: 44px repeat(' + ps.length + ', minmax(46px, 1fr))"><span></span>' +
         ps.map(function (p) { return '<span class="wcgc">' + p + '</span>'; }).join('') +
         lvs.map(function (lv) { return '<span class="wcgc">' + lv + '层</span>' + ps.map(function (p) { var l = W.aisle + '-' + p + '-' + lv, c = D.locs[l];
-          return c ? '<button class="wccell st-' + c.st + (W.loc === l ? ' sel' : '') + '" data-loc="' + l + '" title="' + l + '"><span>' + p + lv + '</span><small>' + (c.recs.length || '') + '</small></button>' : '<span class="wccell none"></span>'; }).join(''); }).join('') +
+          return c ? '<button class="wccell st-' + c.st + (c.note ? ' note' : '') + (W.loc === l ? ' sel' : '') + '" data-loc="' + l + '" title="' + l + (c.note ? ' 📝 ' + esc(c.note.text) : '') + '"><span>' + p + lv + '</span><small>' + (c.recs.length || '') + '</small></button>' : '<span class="wccell none"></span>'; }).join(''); }).join('') +
         '</div>' + (W.loc && D.locs[W.loc] ? locPanel(W.loc) : '<p class="hint" style="margin:12px 0">选一个库位，查看上面的商品和批次。</p>') + '</div></div>';
       return h;
     }
     function locPanel(l) {
       var c = W.snap.locs[l];
-      var h = '<div class="wcpanel"><div class="wcph"><b class="mono">' + l + '</b>' + chip(c.st) + '<span class="hint">' + (c.recs.length ? c.recs.length + ' 个商品 / 批次' : '系统里是空的') + '</span></div>';
+      var h = '<div class="wcpanel"><div class="wcph"><b class="mono">' + l + '</b>' + chip(c.st) + '<span class="hint">' + (c.recs.length ? c.recs.length + ' 个商品 / 批次' : '系统里是空的') + '</span><button class="tbtn" data-note="' + l + '">' + (c.note ? '✎ 改备注' : '📝 写备注') + '</button></div>';
+      if (c.note) h += '<div class="wcnote" data-note="' + l + '"><b>📝 备注</b><div class="wcnt">' + esc(c.note.text) + '</div><div class="hint">' + esc(c.note.by) + ' ' + esc(c.note.at) + '</div></div>';     // v1.9.14
       h += c.recs.map(function (x) { var b = bInfo(x.item, x.base), dl = b ? daysLeft(b.exp) : null;
         return '<div class="wcrec"><div><b>' + esc(x.desc) + '</b><div class="hint mono">' + esc(x.item) + (x.base ? ' · 批次 ' + esc(x.base) : ' · 不分批次') + '</div>' +
           '<div class="wcrm">' + (b ? '库存 <b>' + b.qty + '</b> ' + esc(b.uom) + ' · 到期 <b' + (dl != null && dl < 60 ? ' class="red"' : '') + '>' + esc(b.exp || '—') + '</b>' : '<span class="hint">AutoCount 没有这个批次的库存</span>') + '</div>' +
@@ -3373,7 +3399,7 @@
           return '<tr><td><b class="' + (r.dl < 30 ? 'red' : '') + '">' + esc(r.b.exp) + '</b> <span class="hint">' + (r.dl < 0 ? '已过期' : r.dl + ' 天') + '</span></td><td>' + esc(r.b.desc) + '<div class="mono hint">' + esc(r.b.item) + '</div></td><td class="mono">' + esc(r.b.base) + '</td><td class="n">' + r.b.qty + ' ' + esc(r.b.uom) + '</td><td>' +
             (l.length ? l.map(function (x) { return '<button class="lnk mono" data-goloc="' + x + '">' + x + '</button>'; }).join(' ') : '<span class="hint">没有库位</span>') + '</td></tr>'; }).join('') + '</tbody></table>';
     }
-    var ACT = { BIND: '绑定库位', MOVE: '移库 / 改库位', VERIFY: '核实', REMOVE: '移走', UNDO: '撤回', OVERWRITE: '新托盘覆盖', LEARN: '记住箱码', MERGE: '合并新商品', IMPORT: '导入', INBOUND: '入库单', 'NEW ITEM': '新商品' };
+    var ACT = { BIND: '绑定库位', MOVE: '移库 / 改库位', VERIFY: '核实', REMOVE: '移走', UNDO: '撤回', OVERWRITE: '新托盘覆盖', LEARN: '记住箱码', MERGE: '合并新商品', IMPORT: '导入', INBOUND: '入库单', 'NEW ITEM': '新商品', NOTE: '库位备注' };
     function vLog() {
       var q = W.lf.toUpperCase(), L = W.snap.log.filter(function (r) { return !q || r.join(' ').toUpperCase().indexOf(q) >= 0; });
       return '<div class="wcbar"><input id="wcLf" placeholder="筛选：商品 / 库位 / 人 / 箱码" value="' + esc(W.lf) + '"><span class="hint">最近 ' + W.snap.log.length + ' 条（每次核实、移库、更正都有一条）</span></div>' +
@@ -3417,6 +3443,7 @@
           $('#wcMvN', m).onclick = closeModal; $('#wcMvY', m).onclick = go; $('#wcMv', m).addEventListener('keydown', function (e) { if (e.key === 'Enter') go(); }); setTimeout(function () { $('#wcMv', m).focus(); }, 50);
         }); }; });
       all('[data-add]', function (b) { b.onclick = function () { addAt(b.dataset.add); }; });
+      all('[data-note]', function (b) { b.onclick = function () { noteEdit(b.dataset.note); }; });
       all('[data-bind]', function (b) { b.onclick = function () { bindTo(W.item, b.dataset.bind); }; });
       all('[data-sk]', function (b) { b.onclick = function () { skip(W.snap.tasks[+b.dataset.sk]); }; });
       all('[data-res]', function (b) { b.onclick = function () { var t = W.snap.tasks[+b.dataset.res]; confirmBox('箱码 ' + t.bc + ' 是“' + b.textContent + '”？系统会记住这个箱码，并把库位改到 ' + t.to + '。', '确定', function () { act({ act: 'resolve', taskId: t.id, recId: b.dataset.rec }, '已记住，库位已更新'); }); }; });
