@@ -3,7 +3,7 @@
  * 原则：只采集原始资料，不做任何核对。先存手机（离线队列），再上传云端。 */
 (function () {
   'use strict';
-  var VERSION = '1.9.14';
+  var VERSION = '1.9.15';
   var $ = function (s, el) { return (el || document).querySelector(s); };
   var app = $('#app');
 
@@ -1946,16 +1946,19 @@
         // v1.9.13 一条一条勾：勾了 = 已经不在（移走），没勾 = 还在（一起放）
         modal('<div class="tmiss"><div class="tmiss-h"><span class="tmiss-ic">!</span><div><h3>库位 ' + esc(st.dst) + ' 系统里还有旧货</h3><div class="hint">新托盘放进去之前，请看一下：<b>已经不在的打勾</b>，没勾的当作还在</div></div></div>' +
           '<ul class="tover">' + o.map(function (x, i) { return '<li><label class="tovl"><input type="checkbox" data-ov="' + i + '"><span class="tovt"><b>' + esc(x.desc || x.item) + '</b><span>' + esc(x.item) + (x.base ? ' · 批次 ' + esc(x.base) : '') + (x.exp ? ' · 到期 <b>' + esc(x.exp) + '</b>' : '') + '</span></span><em class="tovs">还在</em></label></li>'; }).join('') + '</ul>' +
-          '<div class="tovb"><button class="btn save" id="ovP" disabled>先勾选已经不在的货</button><button class="btn ghost" id="ovY">全部都不在了（全部移走）</button><button class="btn ghost" id="ovN">全部还在，一起放</button><button class="tbtn" id="ovC">取消，先不提交</button></div></div>', function (m) {
+          '<div class="tovb"><div class="tovm" id="ovM"></div><button class="btn save" id="ovP">先勾选已经不在的货</button><button class="btn ghost" id="ovY">全部都不在了（全部移走）</button><button class="btn ghost" id="ovN">全部还在，一起放</button><button class="tbtn" id="ovC">取消，先不提交</button></div></div>', function (m) {
             var cbs = m.querySelectorAll('[data-ov]'), bp = $('#ovP', m);
             var ids = function (on) { var r = []; Array.prototype.forEach.call(cbs, function (c) { if (c.checked === on && o[+c.dataset.ov].id) r.push(o[+c.dataset.ov].id); }); return r; };
             var upd = function () {
               var n = 0; Array.prototype.forEach.call(cbs, function (c) { if (c.checked) n++; var li = c.closest('li'); li.classList.toggle('gone', c.checked); li.querySelector('.tovs').textContent = c.checked ? '不在了' : '还在'; });
-              bp.disabled = !n;
+              bp.classList.toggle('off', !n); if (n) $('#ovM', m).textContent = '';
               bp.textContent = !n ? '先勾选已经不在的货' : n === cbs.length ? '✓ 移走全部 ' + n + ' 条' : '✓ 移走勾选的 ' + n + ' 条，其余 ' + (cbs.length - n) + ' 条还在';
             };
             Array.prototype.forEach.call(cbs, function (c) { c.onchange = upd; });
-            bp.onclick = function () { closeModal(); save(true, ids(true), ids(false)); };
+            bp.onclick = function () {         // v1.9.15 没勾就点：说清楚要做什么（以前按钮是灰的，点了没反应）
+              if (!ids(true).length && !Array.prototype.some.call(cbs, function (c) { return c.checked; })) { errBeep(); $('#ovM', m).textContent = '还没有勾选。请在上面勾选已经不在的货；如果全部都还在，点「全部还在，一起放」。'; return; }
+              closeModal(); save(true, ids(true), ids(false));
+            };
             $('#ovY', m).onclick = function () { closeModal(); save(true, o.map(function (x) { return x.id; }).filter(Boolean)); };
             $('#ovN', m).onclick = function () { closeModal(); save(false, []); };
             $('#ovC', m).onclick = function () { closeModal(); draw(); };
