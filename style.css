@@ -643,3 +643,9 @@ body.wcon header#bar { display: none; }
 /* v1.9.8 拣货单缅甸语版：规格、单位加粗放大 */
 .ppl.ppmy .ppspec, .ppl.ppmy .ppuom { font-weight: 700; font-size: 1.08em; }
 .ppl.ppmy th { font-size: .85em; }
+
+/* v1.9.9 装车分货 */
+.ldfenrow { margin: 6px 0; } .ldfenb { width: 100%; background: #0f5f8c; color: #fff; }
+.fenit { margin-top: 10px; } .fentab { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 1.05em; }
+.fentab th, .fentab td { padding: 8px 6px; border-bottom: 1px solid #e3e7ec; text-align: left; } .fentab .n { text-align: right; }
+.fentab td.n b { font-size: 1.3em; } .fentab tfoot td { font-weight: 600; border-top: 2px solid #333; }
