@@ -686,3 +686,11 @@ body.wcon header#bar { display: none; }
 .tbatb.tbnew { border-style: dashed; border-color: #6a3d9a; background: #faf5ff; } .tbatb.tbnew.on { border-style: solid; background: #f3e8ff; }
 .tbnl { display: inline-block; margin-top: 4px; color: #6a3d9a; font-weight: 600; font-size: 14px; text-decoration: underline; padding: 4px 0; cursor: pointer; }
 .tb1new { color: #6a3d9a; font-weight: 600; }
+
+/* v1.9.17 库位分配 */
+.lahead { display: flex; align-items: center; gap: 10px; margin: 8px 0; } .lahead b { font-size: 18px; flex: 1; } .lahead .ok { color: #1a7f37; font-weight: 600; }
+.lachips { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 6px; margin-bottom: 6px; } .lachip { flex: 0 0 auto; border: 1px solid #cbd5e1; background: #fff; border-radius: 16px; padding: 6px 12px; font-size: 14px; white-space: nowrap; } .lachip.on { background: #1f3864; color: #fff; border-color: #1f3864; }
+.lafilter { margin: 4px 0 8px; color: #475467; display: flex; gap: 8px; align-items: center; }
+.laitem { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; width: 100%; text-align: left; padding: 10px 12px; margin-bottom: 8px; } .laitem > b { font-size: 16px; }
+.lam { font-size: 13px; color: #475467; } .laref { font-size: 13px; color: #6a3d9a; }
+.ladem { font-size: 13px; color: #b45309; font-weight: 600; } .ladem.hot { color: #b42318; } .ladem.none { color: #98a2b3; font-weight: 400; } .lasort { margin: 0 0 6px; }
