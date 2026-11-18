@@ -657,3 +657,10 @@ body.wcon header#bar { display: none; }
 
 /* v1.9.11 入库单批量 */
 .inb-log { margin: 6px 0; padding: 6px 10px; background: #f1f8f2; border: 1px solid #cfe6d3; border-radius: 8px; } .inb-log ul { margin: 4px 0 0; padding-left: 18px; }
+
+/* v1.9.12 按家分货 / 各家差货 */
+.ldfenrow { display: flex; gap: 8px; } .ldfenrow .btn { flex: 1; } .ldfenb2 { background: #6a3d9a; color: #fff; }
+.alrow { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 0; } .alrow span { flex: 1; } .alrow .ldq-in { width: 90px; flex: 0 0 90px; margin: 0; }
+.alq #alFill { margin-top: 6px; width: 100%; }
+.cshort { border-top: 1px solid #e3e7ec; padding: 8px 0; } .cshort-h { display: flex; justify-content: space-between; align-items: center; } .cshort .ok { color: #1a7f37; font-weight: 600; }
+.fentab th, .fentab td.n { white-space: nowrap; }
