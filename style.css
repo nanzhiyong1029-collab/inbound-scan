@@ -671,7 +671,7 @@ body.wcon header#bar { display: none; }
 .tovl input { width: 24px; height: 24px; flex: 0 0 24px; margin: 0; } .tovt { flex: 1; min-width: 0; }
 .tovs { font-style: normal; font-size: 12px; font-weight: 600; color: #1a7f37; white-space: nowrap; }
 .tover li.gone { background: #f2f4f7; border-color: #d0d5dd; } .tover li.gone .tovt > b { text-decoration: line-through; color: #667085; } .tover li.gone .tovs { color: #b42318; }
-.tovb #ovP:disabled { opacity: .55; }
+.tovb #ovP.off { opacity: .6; } .tovm { color: #b42318; font-weight: 600; font-size: 14px; } .tovm:empty { display: none; }
 
 /* v1.9.14 库位备注 */
 .wccell { position: relative; }
