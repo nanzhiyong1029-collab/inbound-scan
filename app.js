@@ -3,7 +3,7 @@
  * 原则：只采集原始资料，不做任何核对。先存手机（离线队列），再上传云端。 */
 (function () {
   'use strict';
-  var VERSION = '1.9.17';
+  var VERSION = '1.9.18';
   var $ = function (s, el) { return (el || document).querySelector(s); };
   var app = $('#app');
 
@@ -4553,10 +4553,11 @@
       api({ action: 'lmFind', code: v }, true).then(function (d) { done(d && d.kind === 'item' ? d.item : '', d && d.desc); }, function () { done('', ''); });     // 手机里没有：问后台
     }
     /** 登记：扫 / 输入货架上的库位码 */
-    function assign(x) {
+    function assign(x, pre) {
       modal('<div class="ldq"><div class="ldq-h">' + esc(x.desc) + '</div><p class="hint" data-nt>' + esc(x.cont) + ' · 批次 ' + esc(x.base) + ' · 到期 <b>' + esc(x.exp || '—') + '</b></p>' +
         (x.ref && x.ref.length ? '<p class="hint">同商品在：<b data-nt>' + esc(x.ref.join(' ')) + '</b></p>' : '') +
-        '<label class="ldq-l">这批货放在哪个库位？扫货架上的库位码</label><input id="laLoc" class="pkq" maxlength="20" autocomplete="off" autocapitalize="characters" placeholder="例如 07-J-01"><div id="laM" class="ldq-m"></div>' +
+        '<label class="ldq-l">这批货放在哪个库位？扫货架上的库位码</label><div class="lmscan laloc"><input id="laLoc" class="pkq" inputmode="none" maxlength="20" autocomplete="off" autocapitalize="characters" placeholder="例如 07-J-01"><button class="btn cam" id="laLocCam" aria-label="摄像头扫库位码">📷</button></div>' +
+        '<p class="hint">用扫描枪直接扫，或点 📷 用摄像头扫；点输入框可以打字</p><div id="laM" class="ldq-m"></div>' +
         '<div class="row"><button class="btn ghost" id="laX">取消</button><button class="btn save" id="laOk">登记</button></div></div>', function (m) {
           var inp = $('#laLoc', m), out = $('#laM', m);
           var ok = function () {
@@ -4570,11 +4571,13 @@
               A.list = A.list.filter(function (y) { return !(y.item === x.item && y.base === x.base); });
               A.conts.forEach(function (k) { if (k.cont === x.cont && k.left > 0) k.left--; });
               if (A.item && !A.list.some(function (y) { return y.item === A.item; })) A.item = '';
-              toast('✓ ' + x.desc + ' → ' + c, 2500); draw();
+              var lk = r.linked || {}; toast('✓ ' + x.desc + ' → ' + c + (lk.picks ? ' · 拣货单已换上新库位（' + lk.picks + ' 行）' : ''), lk.picks ? 3500 : 2500); draw();
             }, function (e) { A.busy = false; out.className = 'ldq-m err'; out.textContent = e.network ? '没有网络，没登记上，请再点一次' : e.message; errBeep(); });
           };
           inp.onkeydown = function (e) { if (e.key === 'Enter') { e.preventDefault(); ok(); } };
-          $('#laOk', m).onclick = ok; $('#laX', m).onclick = closeModal; setTimeout(function () { inp.focus(); }, 50);
+          $('#laOk', m).onclick = ok; $('#laX', m).onclick = closeModal;
+          $('#laLocCam', m).onclick = function () { closeModal(); openCamera('lm', function (code) { assign(x, code); }, { label: '货架库位码', qr: true }); };    // v1.9.18 摄像头扫库位码 → 回来自动登记
+          if (pre) { inp.value = pre; setTimeout(ok, 50); } else setTimeout(function () { inp.focus(); }, 50);
         });
     }
     currentRedraw = function () { if (/^#\/lm(\/|\?|$)/.test(location.hash) && $('#modal').hidden) draw(); };
