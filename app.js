@@ -3,7 +3,7 @@
  * 原则：只采集原始资料，不做任何核对。先存手机（离线队列），再上传云端。 */
 (function () {
   'use strict';
-  var VERSION = '1.9.15';
+  var VERSION = '1.9.16';
   var $ = function (s, el) { return (el || document).querySelector(s); };
   var app = $('#app');
 
@@ -1440,7 +1440,7 @@
   function viewTransfer() {
     setBar('库位转移', false);
     // 草稿存手机（v1.3.8）：有些手机打开相机后内存不足会把网页重新载入，回来后已扫的资料不丢
-    var st = tState || (tState = Object.assign({ src: '', srcSkip: false, bc: '', item: '', desc: '', match: '', dst: '', qty: '', photo: '', edit: '', bst: '', bopts: [], batch: '', bexp: '', bok: false, learn: false, newName: '' }, LS.get('tdraft', {})));
+    var st = tState || (tState = Object.assign({ src: '', srcSkip: false, bc: '', item: '', desc: '', match: '', dst: '', qty: '', photo: '', edit: '', bst: '', bopts: [], batch: '', bexp: '', bok: false, bnew: false, learn: false, newName: '' }, LS.get('tdraft', {})));
     var pend = LS.get('tphotoPending', 0);
     LS.del('tphotoPending');
     var msg = (pend && Date.now() - pend < 15 * 60e3 && !st.photo) ? { cls: 'bad', text: '刚才拍照后网页被手机重新打开了（手机内存不足时会这样）。已扫的资料都还在，请再拍一次；如果还是这样，请用“🖼 从相册选”。' } : { cls: '', text: '' }, recent = LS.get('trecent', []).filter(function (r) { return r.id; }), busy = false;
@@ -1487,7 +1487,7 @@
     /** 扫了箱码 → 读这个商品的批次：1 个自动选；2 个以上要选；没有批次（新商品）就不用选 */
     function loadBatches(keepBatch) {
       var code = st.bc, item = st.item, kb = keepBatch ? { b: st.batch, e: st.bexp } : null;
-      st.bst = st.bc ? (item ? 'load' : 'none') : ''; st.bopts = []; st.batch = ''; st.bexp = ''; st.bok = false;      // v1.9.3 手机里不认识：马上问，不等后台
+      st.bst = st.bc ? (item ? 'load' : 'none') : ''; st.bopts = []; st.batch = ''; st.bexp = ''; st.bok = false; st.bnew = false;      // v1.9.3 手机里不认识：马上问，不等后台
       if (!code) return;
       trBatches(code, item, function (list, fresh, it, desc) {
         if (st.bc !== code) return;                                 // 已经换了别的箱码
@@ -1502,6 +1502,7 @@
         else if (list.length > 1) { st.bst = 'need'; if (!keep) { st.batch = ''; st.bexp = ''; st.bok = false; } }
         else st.bst = fresh || !cfg ? 'none' : 'load';
         if (!fresh && st.bst === 'load') st.bst = 'none';
+        if (st.bnew) { st.batch = ''; st.bexp = ''; st.bok = true; }        // v1.9.16 仓管已经选了“新批次”：后台批次读回来也不改
         mkSteps(); if (location.hash === '#/t') { draw(); if (unknownBc() && $('#modal').hidden) askUnknown(); }      // v1.9.2 不认识：当场选商品
       });
     }
@@ -1519,7 +1520,7 @@
     function pickShelf(i) {
       var x = (trSnapAt(st.src) || [])[i]; if (!x) return;
       st.bc = x[1]; st.item = x[1]; st.desc = x[2]; st.match = '库位记录'; st.learn = false; st.newName = ''; st.edit = '';
-      st.batch = x[3]; st.bexp = ''; st.bok = true;
+      st.batch = x[3]; st.bexp = ''; st.bok = true; st.bnew = false;
       beep(); msg = { cls: 'good', text: '✓ ' + x[1] + ' ' + (x[2] || '') + (x[3] ? '（批次 ' + x[3] + '）' : '') };
       loadBatches(true); st.batch = x[3]; st.bok = true;
       var bb = masters && masters.batches && (masters.batches[x[1]] || []).filter(function (b) { return b[0] === x[3]; })[0]; if (bb) st.bexp = bb[2];
@@ -1530,7 +1531,7 @@
         return '<button class="tbatb' + (st.bok && st.batch === b.base ? ' on' : '') + '" data-bi="' + i + '"><span class="tbx">到期 <b>' + esc(b.exp || '—') + '</b></span>' +
           '<span class="tbm">生产 ' + esc(b.mfg || '—') + ' · 库存 <b>' + esc(b.qty) + '</b> ' + esc(b.uom || '') + '</span>' +
           '<span class="tbm">批次 ' + esc(b.base || '（不分批次）') + ' · 系统库位 <b>' + esc((b.locs || []).join(' ') || '没有') + '</b>' + (st.src && (b.locs || []).indexOf(st.src) >= 0 ? ' <i class="tbsrc">= 来源库位</i>' : '') + '</span></button>';
-      }).join('') + '</div>';
+      }).join('') + '<button class="tbatb tbnew' + (st.bok && st.bnew ? ' on' : '') + '" data-bnew="1"><span class="tbx">🆕 <b>新批次</b>（系统里还没有）</span><span class="tbm">箱子上的到期日上面都没有：新到的货、入库单还没上传。记成「不分批次」，旧批次的库位不动</span></button></div>';
     }
     function goFix(k) {
       closeModal();
@@ -1600,7 +1601,7 @@
         (rows ? '<p class="hint" style="margin:6px 0 0">点一笔可以修改（办公室已完成的不能改；记录不能删除）</p>' : '') + '</div>';
     }
     // 这一笔的资料在切换页面时会保留（tState），所以不需要“未保存离开”提示
-    function saveDraft() { LS.set('tdraft', { src: st.src, srcSkip: !!st.srcSkip, bc: st.bc, item: st.item, desc: st.desc, match: st.match, dst: st.dst, qty: st.qty || '', bst: st.bst === 'load' ? '' : st.bst, bopts: st.bopts || [], batch: st.batch, bexp: st.bexp, bok: !!st.bok, learn: !!st.learn, newName: st.newName || '' }); }
+    function saveDraft() { LS.set('tdraft', { src: st.src, srcSkip: !!st.srcSkip, bc: st.bc, item: st.item, desc: st.desc, match: st.match, dst: st.dst, qty: st.qty || '', bst: st.bst === 'load' ? '' : st.bst, bopts: st.bopts || [], batch: st.batch, bexp: st.bexp, bok: !!st.bok, bnew: !!st.bnew, learn: !!st.learn, newName: st.newName || '' }); }
     function draw() {
       saveDraft();
       var keepIn = $('#tIn'), keepVal = keepIn ? keepIn.value : '', keepStep = keepIn ? keepIn.getAttribute('data-step') : '';
@@ -1608,14 +1609,15 @@
       var cur = step(), im = prefs.pda ? 'none' : 'text';
       var rows = STEPS.map(function (s) {
         var k = s[0], v = k === 'batch' ? st.bok : st[k], val;
-        if (k === 'batch') val = st.bok ? '<b class="tv">到期 ' + esc(st.bexp || '—') + '</b><div class="hint">批次 ' + esc(st.batch || '不分批次') + '</div>' : '';
+        if (k === 'batch') val = st.bok ? (st.bnew ? '<b class="tv">🆕 新批次</b><div class="hint">系统里还没有，记成不分批次</div>' : '<b class="tv">到期 ' + esc(st.bexp || '—') + '</b><div class="hint">批次 ' + esc(st.batch || '不分批次') + '</div>') : '';
         else if (k === 'bc') val = !v ? '' : st.item ? '<b class="tv">' + esc(st.item) + '</b><div class="td">' + esc(st.desc || '') + '</div><div class="hint">箱码 ' + esc(v) + (st.match === 'Item Code' ? '（按 Item Code 识别）' : '') + (st.learn ? '（刚认出，提交时系统记住这个箱码）' : '') + '</div>'
           : st.newName ? '<b class="tv">新商品</b><div class="td">' + esc(st.newName) + '</div><div class="hint">箱码 ' + esc(v) + '（提交时系统建新商品并记住箱码）</div>'
           : '<b class="tv loc">' + esc(v) + '</b>' + (st.bst === 'load' ? '<div class="hint">查找商品…</div>' : '<div class="tunk">⚠ 系统不认识这个箱码</div>');
         else if (k === 'photo') val = v ? '<img class="tphoto" src="' + v + '" alt="照片">' : '';
         else if (k === 'src' && !v && srcOptional() && cur !== 'src') val = '<span class="tp" style="color:var(--mute)">不填（选填）</span>';
         else val = v ? '<b class="tv loc">' + esc(v) + '</b>' : '';
-        if (k === 'bc' && v) val += st.bst === 'load' ? '<div class="hint">读取批次…</div>' : st.bst === 'one' ? '<div class="tb1">只有 1 个批次：到期 <b>' + esc(st.bexp || '—') + '</b>' + (st.batch ? ' · ' + esc(st.batch) : '') + '（自动选好）</div>' : '';
+        if (k === 'bc' && v) val += st.bst === 'load' ? '<div class="hint">读取批次…</div>' : st.bst === 'one' ? (st.bnew ? '<div class="tb1 tb1new">🆕 新批次（系统里还没有，记成不分批次） <span class="tbnl" data-bold1="1">改回 到期 ' + esc((st.bopts[0] || {}).exp || '—') + '</span></div>'
+          : '<div class="tb1">只有 1 个批次：到期 <b>' + esc(st.bexp || '—') + '</b>' + (st.batch ? ' · ' + esc(st.batch) : '') + '（自动选好）</div><div class="tbnl" data-bnew1="1">到期日不一样？点这里选「新批次」</div>') : '';     // v1.9.16
         return '<button class="tstep' + (cur === k ? ' cur' : '') + (showNeed && k !== 'src' && k !== 'photo' && !v ? ' need' : '') + (v ? ' ok' : '') + '" data-edit="' + k + '"><span class="tl">' + s[1] + '</span>' +
           (val || '<span class="tp">' + (cur === k ? '👉 ' + s[2] : '—') + '</span>') + '</button>' +
           (k === 'batch' && cur === 'batch' ? '<div class="tbatc">' + batchHtml() + (st.edit ? '<div class="row tsub"><button class="tbtn" id="tCancelEdit">取消修改</button></div>' : '') + '</div>' : '');
@@ -1673,9 +1675,16 @@
         setTimeout(function () { var bx = $('.tbatc'); if (bx && bx.scrollIntoView) bx.scrollIntoView({ block: 'nearest' }); }, 30);
         var cb = $('#tCancelEdit'); if (cb) cb.onclick = function () { st.edit = ''; msg = { cls: '', text: '' }; draw(); };
         Array.prototype.forEach.call(app.querySelectorAll('[data-bi]'), function (b) {
-          b.onclick = function () { var x = st.bopts[+b.dataset.bi]; if (!x) return; st.batch = x.base; st.bexp = x.exp; st.bok = true; st.edit = ''; beep(); msg = { cls: 'good', text: '✓ 批次：到期 ' + (x.exp || '—') + ' · ' + (x.base || '不分批次') }; draw(); };
+          b.onclick = function () { var x = st.bopts[+b.dataset.bi]; if (!x) return; st.batch = x.base; st.bexp = x.exp; st.bok = true; st.bnew = false; st.edit = ''; beep(); msg = { cls: 'good', text: '✓ 批次：到期 ' + (x.exp || '—') + ' · ' + (x.base || '不分批次') }; draw(); };
         });
       }
+      // v1.9.16 新批次（系统里还没有）：记成不分批次，旧批次的库位不动
+      var setNew = function (on, e) { if (e) { e.preventDefault(); e.stopPropagation(); } var x = st.bopts[0] || {};
+        if (on) { st.batch = ''; st.bexp = ''; st.bnew = true; } else { st.batch = x.base || ''; st.bexp = x.exp || ''; st.bnew = false; }
+        st.bok = true; if (st.edit === 'batch') st.edit = ''; beep(); msg = { cls: 'good', text: on ? '✓ 新批次：记成不分批次（旧批次的库位不动）' : '✓ 批次：到期 ' + (x.exp || '—') }; saveDraft(); draw(); };
+      Array.prototype.forEach.call(app.querySelectorAll('[data-bnew]'), function (b) { b.onclick = function (e) { setNew(true, e); }; });
+      Array.prototype.forEach.call(app.querySelectorAll('[data-bnew1]'), function (b) { b.onclick = function (e) { setNew(true, e); }; });
+      Array.prototype.forEach.call(app.querySelectorAll('[data-bold1]'), function (b) { b.onclick = function (e) { setNew(false, e); }; });
       [['#tPhotoBtn', '#tPhoto'], ['#tPhotoAltBtn', '#tPhotoAlt']].forEach(function (p) {
         var b = $(p[0]), fi = $(p[1]); if (!b || !fi) return;
         b.onclick = function () {
@@ -1834,7 +1843,7 @@
     }
     function reset(keep) {
       var src = st.src, dst = st.dst;
-      st = tState = { src: keep ? src : '', srcSkip: false, bc: '', item: '', desc: '', match: '', dst: keep ? dst : '', qty: '', photo: '', edit: '', bst: '', bopts: [], batch: '', bexp: '', bok: false };
+      st = tState = { src: keep ? src : '', srcSkip: false, bc: '', item: '', desc: '', match: '', dst: keep ? dst : '', qty: '', photo: '', edit: '', bst: '', bopts: [], batch: '', bexp: '', bok: false, bnew: false };
       mkSteps();
       LS.del('tdraft'); showNeed = false;
       msg = { cls: '', text: '' }; draw();
@@ -1901,7 +1910,7 @@
               '<div class="row"><button class="btn ghost" id="niX">返回</button><button class="btn save" id="niO">确定</button></div></div>', function (m2) {
                 var inp = $('#niN', m2), ok = function () {
                   var v = inp.value.trim(); if (v.length < 2) { $('#niM', m2).className = 'ldq-m err'; $('#niM', m2).textContent = '请写品名'; errBeep(); return; }
-                  closeModal(); st.newName = v; st.item = ''; st.desc = v; st.match = '新商品'; st.learn = false; st.bst = 'none'; st.bopts = []; st.batch = ''; st.bexp = ''; st.bok = false; mkSteps();
+                  closeModal(); st.newName = v; st.item = ''; st.desc = v; st.match = '新商品'; st.learn = false; st.bst = 'none'; st.bopts = []; st.batch = ''; st.bexp = ''; st.bok = false; st.bnew = false; mkSteps();
                   beep(); msg = { cls: 'good', text: '✓ 新商品：' + v + '（提交时系统建新商品并记住箱码）' }; draw();
                 };
                 inp.onkeydown = function (e) { if (e.key === 'Enter') { e.preventDefault(); ok(); } };
@@ -1978,7 +1987,7 @@
         LS.set('trecent', recent.slice(0, 20));
         beep(); toast(navigator.onLine === false ? '✓ 已保存到手机，联网后自动上传' : '✓ 已提交');
         busy = false;
-        var done = '✓ 已提交：' + (r.itemCode || (r.newName ? '新商品 ' + r.newName : r.barcode)) + (r.batch ? '（到期 ' + (r.bexp || '—') + '）' : '') + '  ' + (r.source || '（无来源）') + ' → ' + r.dest + (r.qty ? ' · 数量 ' + r.qty : '');
+        var done = '✓ 已提交：' + (r.itemCode || (r.newName ? '新商品 ' + r.newName : r.barcode)) + (r.batch ? '（到期 ' + (r.bexp || '—') + '）' : st.bnew ? '（新批次，不分批次）' : '') + '  ' + (r.source || '（无来源）') + ' → ' + r.dest + (r.qty ? ' · 数量 ' + r.qty : '');
         reset(false);
         msg = { cls: 'good', text: done }; draw();
         return refreshTq().then(flushTransfers).then(function () { trSnapLoad(true); return refreshRecent(); });
