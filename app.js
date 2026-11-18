@@ -3,7 +3,7 @@
  * 原则：只采集原始资料，不做任何核对。先存手机（离线队列），再上传云端。 */
 (function () {
   'use strict';
-  var VERSION = '1.9.11';
+  var VERSION = '1.9.12';
   var $ = function (s, el) { return (el || document).querySelector(s); };
   var app = $('#app');
 
@@ -3470,9 +3470,9 @@
   var LDQ = null, ldMem = {}, ldFlushing = null, ldPendN = 0, ldLastErr = '';
   function ldLoadQ() {
     if (LDQ) return Promise.resolve(LDQ);
-    return IDB.get('ld:q').then(function (q) { LDQ = LDQ || q || []; ldPendN = LDQ.length; renderNet(); return LDQ; }, function () { LDQ = LDQ || []; return LDQ; });
+    return IDB.get('ld:q').then(function (q) { LDQ = LDQ || q || []; ldPendN = LDQ.filter(function (o) { return !(o.txn && o.txn.method === 'ALLOC'); }).length; renderNet(); return LDQ; }, function () { LDQ = LDQ || []; return LDQ; });
   }
-  function ldSaveQ() { ldPendN = LDQ.length; renderNet(); return IDB.set('ld:q', LDQ); }
+  function ldSaveQ() { ldPendN = LDQ.filter(function (o) { return !(o.txn && o.txn.method === 'ALLOC'); }).length; renderNet(); return IDB.set('ld:q', LDQ); }
   function ldGet(id) { if (ldMem[id]) return Promise.resolve(ldMem[id]); return IDB.get('ld:' + id).then(function (s) { if (s) ldMem[id] = s; return s || null; }, function () { return null; }); }
   function ldPut(s) { ldMem[s.task.id] = s; pkLocalSave(s); return IDB.set('ld:' + s.task.id, s); }
   /** v1.5.3 拣货：手机里已下载的任务摘要（任务列表断网时用，不会变空白） */
@@ -3497,7 +3497,7 @@
   function ldCounts(s) { var c = {}; Object.keys(s.txns).forEach(function (k) { var t = s.txns[k]; c[t.key] = r3((c[t.key] || 0) + Number(t.qty)); }); return c; }
   function ldItemSt(req, c, done) { return c > req ? '超出' : c === req ? '已点齐' : done ? '短少' : c > 0 ? '点货中' : '未点'; }
   function ldCodes(it) { if (!it._codes) it._codes = [it.code].concat(String(it.bc || '').split(' / ')).map(ldNorm).filter(Boolean); return it._codes; }
-  function ldPending(id) { return (LDQ || []).filter(function (o) { return o.taskId === id; }).length; }
+  function ldPending(id) { return (LDQ || []).filter(function (o) { return o.taskId === id && !(o.txn && o.txn.method === 'ALLOC'); }).length; }   // v1.9.12 分货那一笔不单独算
   function ldFlush() {
     if (ldFlushing) return ldFlushing;
     if (!cfg || !sess || cfg.r) return Promise.resolve();
@@ -3672,7 +3672,7 @@
       keepVal = keep ? keep.value : ''; keepFocus = !!keep && document.activeElement === keep;   // 重画时不吞掉正在扫的条码
       if (IT != null) return drawItem();
       app.innerHTML = ldW(head + (msg ? '<div class="tmsg ' + msg.cls + '">' + esc(msg.text) + '</div>' : '') +
-        (PK ? '' : '<div class="row tsub ldfenrow"><button class="btn ldfenb" id="ldFen">📦 分货：扫商品，看每家要几箱</button></div>') +
+        (PK ? '' : '<div class="row tsub ldfenrow"><button class="btn ldfenb" id="ldFen">📦 分货：扫商品看每家几箱</button><button class="btn ldfenb2" id="ldCs">🧾 各家差货</button></div>') +
         (done() ? '<div class="card lddone">✓ 已完成' + (s.task.submittedBy ? '（' + esc(s.task.submittedBy) + ' ' + esc(s.task.submitted) + '）' : s.localDone ? '（待上传）' : '') + '，不能再修改。需要更正请找办公室重新打开。</div>' :
           (PK ? '<div class="bcrow tscan"><input id="ldIn" inputmode="' + im + '" maxlength="64" autocomplete="off" spellcheck="false" placeholder="扫码 / 搜索商品（品名、条码后几位、批次、库位）" value="' + esc(pq) + '"><button class="btn cam" id="ldCam">📷</button></div>' :
           '<div class="bcrow tscan"><input id="ldIn" inputmode="' + im + '" maxlength="64" autocomplete="off" spellcheck="false" placeholder="扫描条码，或点这里手输（后几位 / 品名）"><button class="btn cam" id="ldCam">📷 扫描</button></div>' +
@@ -3973,11 +3973,13 @@
       };
       app.innerHTML = ldW(head + (msg ? '<div class="tmsg ' + msg.cls + '">' + esc(msg.text) + '</div>' : '') +
         tbl(done() ? '短少 / 未装' : '没点够 / 没点（未装）', bad, 'err') + tbl('超出', over, 'ldpos') +
+        (!PK && s.task.customer ? custShortHtml() : '') +      // v1.9.12 按客户看差货
         (ok.length ? '<details class="card"><summary><b>已点齐 ' + ok.length + ' 项</b></summary><table class="ldrt"><tbody>' + ok.map(tr).join('') + '</tbody></table></details>' : '') +
         (done() ? '' : PK ? '<p class="hint">提交的是实际点到的数量，不需要改成和 DO 一样。没点够的会记为<b>短少</b>。</p>' : '<p class="hint">提交的是实际点到的数量，不需要改成和 DO 一样。没点够的会记为<b>未装</b>，下次上传 DO 时可以带进新任务（会注明今天的日期）。</p>') +
         '<div id="dock" class="dock"><button class="btn ghost" id="ldBack" style="flex:0 0 36%">‹ 继续点货</button>' +
         (done() ? '' : '<button class="btn save" id="ldSubmit">✓ 确认完成点货</button>') + '</div>');
       $('#ldBack').onclick = function () { location.hash = ldHash(id); };
+      Array.prototype.forEach.call(app.querySelectorAll('.cshort tr[data-k]'), function (r) { r.onclick = function () { detail(byKey(r.dataset.k)); }; });
       var sb = $('#ldSubmit');
       if (sb) sb.onclick = function () {
         modal('<div class="tmiss"><div class="tmiss-h"><span class="tmiss-ic" style="background:#e6f4ea;color:#1a7f37">✓</span><div><h3>确认完成点货？</h3></div></div>' +
@@ -4011,6 +4013,7 @@
       $('#ldHist').onclick = showHistory;
       $('#ldRev').onclick = function () { location.hash = ldHash(id) + '/review'; };
       var fz = $('#ldFen'); if (fz) fz.onclick = function () { fenOpen(''); };
+      var cz = $('#ldCs'); if (cz) cz.onclick = custShortOpen;
       var inp = $('#ldIn');
       if (!inp) return;
       if (PK) {        // v1.5.1 拣货：一个入口 —— 扫码进商品，打字即时搜索
@@ -4065,6 +4068,64 @@
       var f = fenByCust(it); if (!f.list.length || (f.list.length === 1 && !f.list[0].cust)) return '';
       return '<div class="fenmini"><b>📦 分货</b>' + (f.pre ? '<span class="hint">（之前未装，原来的 DO）</span>' : '') + f.list.map(function (x) {
         return '<div><span>' + esc(x.cust || x.dos[0]) + '</span><b>' + x.qty + ' ' + esc(it.uom || '') + '</b></div>'; }).join('') + '</div>';
+    }
+    /** v1.9.12 按家分货：这个商品要分给哪几家（2 家以上才要按家填） */
+    function allocKeys(it) { return fenByCust(it).list.map(function (x) { return { k: x.cust || x.dos[0], cust: x.cust || x.dos[0], need: x.qty }; }); }
+    function allocMulti(it) { return !PK && allocKeys(it).length >= 2; }
+    /** 每家已经放了几个：以最后一笔 ALLOC 为准；只有一家的商品 = 点到的总数 */
+    function allocOf(it) {
+      var last = null; Object.keys(s.txns).forEach(function (k) { var t = s.txns[k]; if (t.key === it.key && t.method === 'ALLOC' && (!last || String(t.time) > String(last.time))) last = t; });
+      var m = {}; if (last) { try { m = typeof last.alloc === 'string' ? JSON.parse(last.alloc || '{}') : (last.alloc || {}); } catch (e) { m = {}; } }
+      return m;
+    }
+    function allocSum(m) { return r3(Object.keys(m).reduce(function (a, k) { return a + (Number(m[k]) || 0); }, 0)); }
+    /** 每家差什么：[{cust, rows:[{it, need, put, short}]}]；还有分货数和点货数对不上的商品 */
+    function custShort() {
+      stats(); var g = {}, order = [], mism = [];
+      s.items.forEach(function (it) {
+        var ks = allocKeys(it); if (!ks.length) return;
+        var multi = ks.length >= 2, a = multi ? allocOf(it) : null;
+        if (multi && allocSum(a) !== r3(it._c)) mism.push({ it: it, sum: allocSum(a) });
+        ks.forEach(function (x) {
+          var put = multi ? (Number(a[x.k]) || 0) : Math.min(it._c, x.need), sh = r3(x.need - put);
+          if (!g[x.cust]) { g[x.cust] = []; order.push(x.cust); }
+          if (sh > 0) g[x.cust].push({ it: it, need: x.need, put: put, short: sh });
+        });
+      });
+      return { list: order.map(function (c) { return { cust: c, rows: g[c] }; }), mism: mism };
+    }
+    function custShortHtml() {
+      var r = custShort(), bad = r.list.filter(function (x) { return x.rows.length; });
+      return '<div class="card"><h3 style="margin-top:0">🧾 各家差货（' + (bad.length ? bad.length + ' 家有差' : '每家都够了') + '）</h3>' +
+        (r.mism.length ? '<div class="tmsg bad">这些商品各家填的数加起来和点货数不一样，请点商品改“各家数量”：' + r.mism.map(function (x) { return esc(x.it.desc) + '（点了 ' + x.it._c + '，各家共 ' + x.sum + '）'; }).join('；') + '</div>' : '') +
+        r.list.map(function (x) {
+          return '<div class="cshort"><div class="cshort-h"><b>' + esc(x.cust) + '</b>' + (x.rows.length ? '<span class="err">差 ' + x.rows.length + ' 项</span>' : '<span class="ok">✓ 够了</span>') + '</div>' +
+            (x.rows.length ? '<table class="fentab"><thead><tr><th>商品</th><th class="n">要</th><th class="n">放了</th><th class="n">差</th></tr></thead><tbody>' + x.rows.map(function (y) {
+              return '<tr data-k="' + esc(y.it.key) + '"><td>' + esc(y.it.desc) + '</td><td class="n">' + y.need + '</td><td class="n">' + y.put + '</td><td class="n"><b class="err">' + y.short + ' ' + esc(y.it.uom || '') + '</b></td></tr>'; }).join('') + '</tbody></table>' : '') + '</div>';
+        }).join('') + '</div>';
+    }
+    function custShortOpen() {
+      modal(custShortHtml() + '<div class="row"><button class="btn ghost" id="csX">关闭</button></div>', function (m) {
+        $('#csX', m).onclick = function () { closeModal(); draw(); };
+        Array.prototype.forEach.call(m.querySelectorAll('tr[data-k]'), function (r) { r.onclick = function () { detail(byKey(r.dataset.k)); }; });
+      });
+    }
+    /** 改各家数量（点错 / 撤销 / 调整过之后用） */
+    function allocEdit(it) {
+      stats(); var ks = allocKeys(it), a = allocOf(it);
+      modal('<div class="ldq"><div class="ldq-h">' + itemName(it) + '</div><div class="hint">各家放了几个 ' + esc(it.uom || '') + '（点货一共 ' + it._c + '）</div>' +
+        ks.map(function (x, i) { return '<label class="alrow"><span>' + esc(x.cust) + ' <small class="hint">要 ' + x.need + '</small></span><input data-ai="' + i + '" class="ldq-in" inputmode="decimal" autocomplete="off" maxlength="9" value="' + (a[x.k] != null ? a[x.k] : '') + '"></label>'; }).join('') +
+        '<div id="alM" class="ldq-m"></div><div class="row"><button class="btn ghost" id="alC2">取消</button><button class="btn save" id="alO2">保存各家数量</button></div></div>', function (m) {
+          var ins = m.querySelectorAll('[data-ai]'), out = $('#alM', m);
+          var sum = function () { var t = 0; Array.prototype.forEach.call(ins, function (x) { t += Number(x.value) || 0; }); return r3(t); };
+          Array.prototype.forEach.call(ins, function (x) { x.oninput = function () { var t = sum(); out.className = 'ldq-m' + (t !== r3(it._c) ? ' err' : ''); out.textContent = '各家共 ' + t + (t !== r3(it._c) ? '，和点货数 ' + it._c + ' 不一样' : ''); }; });
+          $('#alC2', m).onclick = function () { closeModal(); detail(it); };
+          $('#alO2', m).onclick = function () {
+            var na = {}, bad = false; Array.prototype.forEach.call(ins, function (x) { var v = x.value.trim(); if (v === '') return; var n = Number(v); if (!(n >= 0) || n > 100000) bad = true; else na[ks[+x.dataset.ai].k] = r3(n); });
+            if (bad) { out.className = 'ldq-m err'; out.textContent = '请输入正确的数量'; errBeep(); return; }
+            closeModal(); push(it, 'ALLOC', 0, { alloc: na }, '已保存各家数量');
+          };
+        });
     }
     function fenShow(it, box) {
       var c = fenCust(), f0 = fenByCust(it), f = { pre: f0.pre, list: f0.list.map(function (x) { return { doNo: x.dos.join(' / '), qty: x.qty, cust: x.cust }; }) }, tot = f.list.reduce(function (a, x) { return r3(a + x.qty); }, 0);
@@ -4154,10 +4215,21 @@
       var rem = r3(it.req - it._c);
       modal('<div class="ldq"><div class="ldq-h">' + itemName(it) + '</div><div class="hint">' + pkTag(it) + esc(ldId(it, '条码 ')) + (it.spec ? ' · ' + esc(it.spec) : '') + '</div>' +
         '<div class="ldq-n"><div><span>需求</span><b>' + it.req + '</b></div><div><span>已点</span><b>' + it._c + '</b></div><div class="' + (rem < 0 ? 'p' : rem ? 'o' : 'g') + '"><span>' + (rem < 0 ? '已超出' : '还差') + '</span><b>' + Math.abs(rem) + '</b></div></div>' +
-        (PK ? '' : fenMini(it)) +
-        '<label class="ldq-l">这次点了多少 <b>' + esc(it.uom || '') + '</b>？</label><input id="ldQn" class="ldq-in" inputmode="decimal" autocomplete="off" maxlength="9">' +
+        (allocMulti(it) ? (function () {          // v1.9.12 好几家要：按家填这次放了几个（总数 = 加起来）
+          var ks = allocKeys(it), a = allocOf(it);
+          return '<div class="fenmini alq"><b>📦 这次每家放了几个 ' + esc(it.uom || '') + '？</b>' + ks.map(function (x, i) {
+            var put = Number(a[x.k]) || 0, left = Math.max(0, r3(x.need - put));
+            return '<label class="alrow"><span>' + esc(x.cust) + ' <small class="hint">要 ' + x.need + (put ? ' · 已放 ' + put : '') + '</small></span><input data-aq="' + i + '" data-left="' + left + '" class="ldq-in" inputmode="decimal" autocomplete="off" maxlength="9"></label>';
+          }).join('') + '<button class="tbtn" id="alFill">全部按要求填满</button></div><input id="ldQn" type="hidden">';
+        })() : (PK ? '' : fenMini(it)) +
+        '<label class="ldq-l">这次点了多少 <b>' + esc(it.uom || '') + '</b>？</label><input id="ldQn" class="ldq-in" inputmode="decimal" autocomplete="off" maxlength="9">') +
         '<div id="ldQm" class="ldq-m"></div><div class="row"><button class="btn ghost" id="ldQc">取消</button><button class="btn save" id="ldQo">＋ 确认累加</button></div></div>', function (m) {
-          var inp = $('#ldQn', m), out = $('#ldQm', m);
+          var inp = $('#ldQn', m), out = $('#ldQm', m), aqs = m.querySelectorAll('[data-aq]');
+          if (aqs.length) {          // 按家填：总数自动加起来
+            var tot = function () { var t = 0; Array.prototype.forEach.call(aqs, function (x) { t += Number(x.value) || 0; }); inp.value = t ? r3(t) : ''; inp.oninput(); };
+            Array.prototype.forEach.call(aqs, function (x, i) { x.oninput = tot; x.onkeydown = function (e) { if (e.key === 'Enter') { e.preventDefault(); if (aqs[i + 1]) aqs[i + 1].focus(); else ok(); } }; });
+            $('#alFill', m).onclick = function () { Array.prototype.forEach.call(aqs, function (x) { x.value = x.dataset.left; }); tot(); };
+          }
           inp.oninput = function () {
             var v = Number(inp.value);
             out.className = 'ldq-m';
@@ -4166,20 +4238,27 @@
           var ok = function () {
             var raw = inp.value.trim(), v = Number(raw);
             if (/^\d{7,}$/.test(raw)) { out.className = 'ldq-m err'; out.textContent = '数量太大——是不是扫到了条码？请输入数量'; inp.value = ''; errBeep(); return; }
-            if (!(v > 0) || v > 100000) { out.className = 'ldq-m err'; out.textContent = '请输入点到的数量（大于 0）'; errBeep(); inp.focus(); return; }
-            closeModal(); add(it, v, method, code);
+            if (!(v > 0) || v > 100000) { out.className = 'ldq-m err'; out.textContent = aqs.length ? '请填每家放了几个（至少一家大于 0）' : '请输入点到的数量（大于 0）'; errBeep(); (aqs[0] || inp).focus(); return; }
+            var al = null;
+            if (aqs.length) { var ks = allocKeys(it); al = allocOf(it); Array.prototype.forEach.call(aqs, function (x) { var n = Number(x.value) || 0; if (n > 0) { var k = ks[+x.dataset.aq].k; al[k] = r3((Number(al[k]) || 0) + n); } }); }
+            closeModal(); add(it, v, method, code, '', al);
           };
           inp.onkeydown = function (e) { if (e.key === 'Enter') { e.preventDefault(); ok(); } };
           $('#ldQo', m).onclick = ok; $('#ldQc', m).onclick = function () { closeModal(); draw(); };
-          setTimeout(function () { inp.focus(); }, 50);
+          setTimeout(function () { (aqs[0] || inp).focus(); }, 50);
         });
     }
-    function add(it, v, method, code, aloc) {
+    function add(it, v, method, code, aloc, alloc) {
       var tid = uuid(), now = new Date().toISOString();
       s.txns[tid] = { id: tid, key: it.key, qty: v, method: method, staff: operator, time: now, rev: '', code: code || '', aloc: aloc || '', synced: false };
       var tx = { txnId: tid, taskId: id, key: it.key, qty: v, method: method, code: code || '', clientTime: now };
       if (aloc) tx.aloc = aloc;                     // v1.6 拣货：实际取货库位（扫了才有）
       LDQ.push({ op: 'txn', taskId: id, txn: tx });
+      if (alloc) {                                  // v1.9.12 装车：每家放了几个（另记一笔 ALLOC，数量 0）
+        var aid = uuid(), at = new Date(Date.parse(now) + 1).toISOString();
+        s.txns[aid] = { id: aid, key: it.key, qty: 0, method: 'ALLOC', staff: operator, time: at, rev: '', code: '', alloc: alloc, synced: false };
+        LDQ.push({ op: 'txn', taskId: id, txn: { txnId: aid, taskId: id, key: it.key, qty: 0, method: 'ALLOC', alloc: alloc, clientTime: at } });
+      }
       if (s.task.status === '待点货') s.task.status = '点货中';
       Promise.all([ldPut(s), ldSaveQ()]).then(function () {
         var c = ldCounts(s)[it.key] || 0;
@@ -4210,7 +4289,9 @@
       var tid = uuid(), now = new Date().toISOString();
       var rec = Object.assign({ id: tid, key: it.key, qty: delta, method: method, staff: operator, time: now, rev: '', code: '', orig: '', to: '', reason: '', synced: false }, extra);
       s.txns[tid] = rec;
-      LDQ.push({ op: 'txn', taskId: id, txn: { txnId: tid, taskId: id, key: it.key, qty: delta, method: method, reverses: rec.rev, orig: rec.orig, to: rec.to, reason: rec.reason, clientTime: now } });
+      var tx2 = { txnId: tid, taskId: id, key: it.key, qty: delta, method: method, reverses: rec.rev, orig: rec.orig, to: rec.to, reason: rec.reason, clientTime: now };
+      if (rec.alloc) tx2.alloc = rec.alloc;
+      LDQ.push({ op: 'txn', taskId: id, txn: tx2 });
       if (s.task.status === '待点货') s.task.status = '点货中';
       return Promise.all([ldPut(s), ldSaveQ()]).then(function () {
         beep(); var c = ldCounts(s)[it.key] || 0;
@@ -4245,6 +4326,11 @@
       var H = histRows(it, ro), list = { length: H.n }, rows = [H.html];
       modal('<div class="ldq"><div class="ldq-h">' + itemName(it) + '</div><div class="hint">' + pkTag(it) + esc(ldId(it, '条码 ')) + ' · ' + esc(it.uom || '') + (it.spec ? ' · ' + esc(it.spec) : '') + '</div>' +
         '<div class="ldq-n"><div><span>需求</span><b>' + it.req + '</b></div><div><span>已点</span><b>' + c + '</b></div><div class="' + (rem < 0 ? 'p' : rem ? 'o' : 'g') + '"><span>' + (rem < 0 ? '超出' : '还差') + '</span><b>' + Math.abs(rem) + '</b></div></div>' +
+        (allocMulti(it) ? (function () {       // v1.9.12 各家放了几个
+          var ks = allocKeys(it), a = allocOf(it), sum = allocSum(a);
+          return '<div class="fenmini"><b>📦 各家放了几个</b>' + ks.map(function (x) { var p = Number(a[x.k]) || 0; return '<div><span>' + esc(x.cust) + ' <small class="hint">要 ' + x.need + '</small></span><b class="' + (p < x.need ? 'err' : '') + '">' + p + '</b></div>'; }).join('') +
+            (sum !== r3(c) ? '<div class="err">各家共 ' + sum + '，和点货数 ' + c + ' 不一样' + (ro ? '' : '，请改一下') + '</div>' : '') + (ro ? '' : '<button class="tbtn" id="dtAl">改各家数量</button>') + '</div>';
+        })() : '') +
         '<div class="ldq-l"><b>点货记录</b>（' + list.length + ' 笔）' + (ro ? '' : '<span class="hint"> 点错了可以修改或撤销，原记录会保留</span>') + '</div>' +
         '<div class="pkl" id="dtL">' + (rows.join('') || '<div class="empty">还没有点货记录</div>') + '</div>' +
         (ro ? '<p class="hint">任务已完成，不能修改。需要更正请找办公室重新打开。</p><div class="row"><button class="btn ghost" id="dtX">关闭</button></div>' :
@@ -4253,6 +4339,7 @@
           if (ro) return;
           $('#dtP', m).onclick = function () { qty(it, 'SEARCH', ''); };
           $('#dtA', m).onclick = function () { adjust(it); };
+          var dal = $('#dtAl', m); if (dal) dal.onclick = function () { allocEdit(it); };
           bindHist(it, m);
         });
     }
@@ -4291,7 +4378,7 @@
     }
     // 整个任务的点货记录（最新在上）；点一行打开那个商品的详情去修改
     function showHistory() {
-      var list = Object.keys(s.txns).map(function (k) { return s.txns[k]; }).sort(function (a, b) { return byTime(b, a); });
+      var list = Object.keys(s.txns).map(function (k) { return s.txns[k]; }).filter(function (t) { return t.method !== 'ALLOC'; }).sort(function (a, b) { return byTime(b, a); });
       var voided = {}; list.forEach(function (t) { if (t.method === 'VOID' || t.method === 'REVERSAL') voided[t.rev] = 1; });
       var name = function (k) { var it = byKey(k); return it ? dn(it) + (it.uom ? '（' + it.uom + '）' : '') : k; };
       modal('<h3 style="margin-top:0">点货记录（' + list.length + ' 笔）</h3><p class="hint" style="margin-top:-6px">点一行可以修改 / 撤销。修改、撤销、调整都会另记一笔，原记录保留。</p><div class="pkl">' + (list.length ? list.map(function (t) {
