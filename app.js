@@ -3,7 +3,7 @@
  * 原则：只采集原始资料，不做任何核对。先存手机（离线队列），再上传云端。 */
 (function () {
   'use strict';
-  var VERSION = '1.9.10';
+  var VERSION = '1.9.11';
   var $ = function (s, el) { return (el || document).querySelector(s); };
   var app = $('#app');
 
@@ -2872,7 +2872,11 @@
     var INB_KIND = { bind: ['新箱码绑定', 'k1'], change: ['改绑（以入库单为准）', 'k2'], new: ['新品', 'k3'], same: ['已经一样', 'k0'] };
     function inbHtml() {
       var I = R.inb || {}, h = '<div class="inb"><div class="inb-h"><b>📥 上传入库单</b><span class="hint">箱码自动绑定到 Item Code；Item Code 系统里没有的就是新品，自动建产品资料。PDA 移库扫这些箱码就认得。</span>' +
-        '<button class="btn save" id="inbB"' + (I.busy ? ' disabled' : '') + '>📂 选择入库单 Excel</button><input id="inbF" class="vh" type="file" accept=".xlsx" tabindex="-1"></div>';
+        '<button class="btn save" id="inbB"' + (I.busy ? ' disabled' : '') + '>📂 选择入库单 Excel（可多选）</button><input id="inbF" class="vh" type="file" accept=".xlsx" multiple tabindex="-1"></div>';
+      var q = (R.inbQ || []).length;
+      if ((R.inbLog && R.inbLog.length) || q) h += '<div class="inb-log">' + (R.inbN > 1 ? '<b>一共 ' + R.inbN + ' 个入库单：已写入 ' + (R.inbLog || []).length + ' 个' + (q ? '，还有 ' + q + ' 个排队' : '') + (R.inbAuto ? '（自动写入中…）' : '') + '</b>' : '') +
+        '<ul class="hint">' + (R.inbLog || []).map(function (m) { return '<li>✓ ' + esc(m) + '</li>'; }).join('') + '</ul></div>';
+      if (I.err && q) h += '<p><button class="tbtn" id="inbSkip">跳过这个文件，读下一个</button></p>';
       if (I.msg) h += '<p class="' + (I.err ? 'err' : 'hint') + '"><b>' + esc(I.msg) + '</b></p>';
       var d = I.res;
       if (d && !d.committed) {
@@ -2885,7 +2889,8 @@
             (x.old ? '<div class="hint">原来是 ' + esc(x.old) + (x.oldDesc ? ' ' + esc(x.oldDesc) : '') + '</div>' : '') + '</td></tr>'; }).join('') +
           (L.length ? '' : '<tr><td colspan="5" class="hint">全部箱码系统里已经一样，不用改。</td></tr>') + '</tbody></table></div>' +
           inbBatchHtml(d, I) +
-          '<div class="inb-act"><label class="hint"><input type="checkbox" id="inbAll"' + (I.all ? ' checked' : '') + '> 显示“已经一样”的行</label><button class="tbtn" id="inbX">取消</button>' +
+          '<div class="inb-act"><label class="hint"><input type="checkbox" id="inbAll"' + (I.all ? ' checked' : '') + '> 显示“已经一样”的行</label><button class="tbtn" id="inbX">' + ((R.inbQ || []).length ? '跳过这个文件' : '取消') + '</button>' +
+          ((R.inbQ || []).length ? '<button class="btn" id="inbGoAll"' + (I.busy ? ' disabled' : '') + '>✓ 这个和剩下 ' + R.inbQ.length + ' 个全部写入</button>' : '') +
           '<button class="btn save" id="inbGo"' + (I.busy || !(c.bind + c.change + c.new + inbNewB(d)) ? ' disabled' : '') + '>✓ 确认写入（' + (c.bind + c.change + c.new) + ' 个箱码' + (inbNewB(d) ? ' · ' + inbNewB(d) + ' 个新批次' : '') + '）</button></div>';
       }
       return h + '</div>';
@@ -2913,12 +2918,12 @@
       var I = R.inb; I.busy = true; draw();
       return api({ action: 'rcInbound', rows: I.rows, batches: I.batches, container: I.container, fileName: I.file }, true).then(function (d) {
         I.busy = false; I.res = d; I.msg = I.file + '：' + I.rows.length + ' 个整箱条码' + (I.skip ? '（另 ' + I.skip + ' 行没有整箱条码，不用绑定）' : '') + '，请核对后点“确认写入”。'; draw();
-      }, function (e) { R.inb = { msg: '读取失败：' + (e.network ? '网络不可用' : e.message), err: true }; draw(); });
+      }, function (e) { R.inb = { msg: I.file + ' 读取失败：' + (e.network ? '网络不可用' : e.message), err: true, file: I.file }; draw(); });
     }
     /** 读入库单：在前 30 行找表头（箱码 / 条码 / Barcode + Item Code，品名、单位可选）。拿到正式模版后按模版调整。 */
     function inbRead(file) {
       R.inb = { busy: true, msg: '读取 ' + file.name + '…', file: file.name }; draw();
-      file.arrayBuffer().then(function (b) { return xlsxRead(b, /final\s*details/i); }).then(function (sh) {
+      return file.arrayBuffer().then(function (b) { return xlsxRead(b, /final\s*details/i); }).then(function (sh) {
         var hr = 0, C = {}, seen = [], skip = 0;
         var pickCol = function (cs, re, not) { var x = cs.filter(function (c) { var t = cellText(c.v); return re.test(t) && !(not && not.test(t)); })[0]; return x ? x.c1 : 0; };
         for (var r = 1; r <= Math.min(sh.maxRow, 30) && !hr; r++) {
@@ -2944,15 +2949,33 @@
         R.inb.rows = rows; R.inb.batches = batches;
         var cm = /([A-Z]{2,}\d{3,})/i.exec(file.name); R.inb.container = cm ? cm[1].toUpperCase() : '';      // 柜号从文件名找（例如 LX26246-297 (DSSB).xlsx）
         return inbPreview();
-      }).catch(function (e) { R.inb = { msg: '读取失败：' + (e.network ? '网络不可用' : e.message), err: true }; draw(); });
+      }).catch(function (e) { R.inb = { msg: file.name + ' 读取失败：' + (e.network ? '网络不可用' : e.message), err: true, file: file.name }; draw(); });
     }
     function inbCommit() {
       var I = R.inb; I.busy = true; draw();
-      api({ action: 'rcInbound', rows: I.rows, batches: I.batches, container: I.container, fileName: I.file, commit: true }, true).then(function (d) {
+      return api({ action: 'rcInbound', rows: I.rows, batches: I.batches, container: I.container, fileName: I.file, commit: true }, true).then(function (d) {
         var c = d.counts;
         R.inb = { msg: '已写入 ' + I.file + '：新箱码绑定 ' + c.bind + ' · 改绑 ' + c.change + ' · 新品 ' + c.newItems + ' 个' + (d.batchesAdded ? ' · 新批次 ' + d.batchesAdded + ' 个（' + d.container + '）' : '') + (d.merged ? ' · 仓管建的新商品已合并 ' + d.merged + ' 个' : '') + (d.autoFixed ? ' · 待处理里 ' + d.autoFixed + ' 笔“箱码不认识”的移库现在认出来了，已自动更新库位' : '') + '。PDA 移库重新打开就认得这些箱码和批次。' };
-        draw();
-      }, function (e) { I.busy = false; I.msg = '写入失败：' + (e.network ? '网络不可用' : e.message); I.err = true; draw(); });
+        (R.inbLog = R.inbLog || []).push(R.inb.msg);
+        draw(); inbNext();
+      }, function (e) { I.busy = false; R.inbAuto = false; I.msg = '写入失败：' + (e.network ? '网络不可用' : e.message); I.err = true; draw(); });
+    }
+    /** v1.9.11 一次选好几个入库单：一个一个读、核对、写入；点“全部写入”后剩下的自动写入（缺柜号 / 读不出 / 有问题的停下来给你看） */
+    function inbStart(files) {
+      files = Array.prototype.slice.call(files || []).filter(function (f) { return /\.xlsx$/i.test(f.name); });
+      if (!files.length) return;
+      R.inbQ = files.slice(1); R.inbLog = []; R.inbAuto = false; R.inbN = files.length;
+      inbRead(files[0]);
+    }
+    function inbNext() {
+      if (!R.inbQ || !R.inbQ.length) { R.inbAuto = false; return; }
+      var f = R.inbQ.shift();
+      inbRead(f).then(function () {
+        var I = R.inb, d = I && I.res;
+        if (!R.inbAuto || !d || I.err) { R.inbAuto = false; return; }
+        if (!d.container || (d.errors && d.errors.length)) { R.inbAuto = false; I.msg = (I.msg || '') + ' —— 自动写入停在这个文件：' + (!d.container ? '没有柜号，请填好' : '有些行导入不了，请看一下') + '，再点确认。'; draw(); return; }
+        inbCommit();
+      });
     }
     function trHtml() {
       var f = R.trF, d = R.tr, c = d ? d.counts : {}, rows = d ? trRows() : [];
@@ -3115,9 +3138,11 @@
           download(xlsxBlob('Item Locations', [['库位', '商品', 'Item Code', '批次', '库存', '状态', '来源', '更新人', '更新时间']].concat(lmRows().map(function (x) { return [x.loc, x.desc, x.item, x.base, x.stock, x.status, x.source, x.by, x.at]; }))), 'Item Locations ' + myToday(0) + '.xlsx');
         };
       } else if (R.tab === 'tr') {
-        var ib = $('#inbB'); if (ib) { ib.onclick = function () { $('#inbF').click(); }; $('#inbF').onchange = function () { var f0 = this.files[0]; this.value = ''; if (f0) inbRead(f0); }; }
-        var ig = $('#inbGo'); if (ig) ig.onclick = inbCommit;
-        var ix = $('#inbX'); if (ix) ix.onclick = function () { R.inb = null; draw(); };
+        var ib = $('#inbB'); if (ib) { ib.onclick = function () { $('#inbF').click(); }; $('#inbF').onchange = function () { var fs = Array.prototype.slice.call(this.files || []); this.value = ''; inbStart(fs); }; }
+        var ig = $('#inbGo'); if (ig) ig.onclick = function () { R.inbAuto = false; inbCommit(); };
+        var iga = $('#inbGoAll'); if (iga) iga.onclick = function () { R.inbAuto = true; inbCommit(); };
+        var ix = $('#inbX'); if (ix) ix.onclick = function () { R.inb = null; R.inbAuto = false; if ((R.inbQ || []).length) inbNext(); else draw(); };
+        var isk = $('#inbSkip'); if (isk) isk.onclick = function () { R.inb = null; R.inbAuto = false; inbNext(); };
         var ia = $('#inbAll'); if (ia) ia.onchange = function () { R.inb.all = ia.checked; draw(); };
         var ic = $('#inbCtn'); if (ic) ic.onchange = function () { R.inb.container = ic.value.trim().toUpperCase().replace(/[^A-Z0-9]/g, ''); inbPreview(); };
         Array.prototype.forEach.call(app.querySelectorAll('[data-st]'), function (b) { b.onclick = function () { R.trF.status = b.dataset.st; draw(); }; });
