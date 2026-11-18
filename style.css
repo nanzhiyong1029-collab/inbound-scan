@@ -664,3 +664,11 @@ body.wcon header#bar { display: none; }
 .alq #alFill { margin-top: 6px; width: 100%; }
 .cshort { border-top: 1px solid #e3e7ec; padding: 8px 0; } .cshort-h { display: flex; justify-content: space-between; align-items: center; } .cshort .ok { color: #1a7f37; font-weight: 600; }
 .fentab th, .fentab td.n { white-space: nowrap; }
+
+/* v1.9.13 移库旧货逐条勾选 */
+.tover li { padding: 0; } .tovl { display: flex; align-items: center; gap: 10px; padding: 8px 10px; cursor: pointer; }
+.tover li .tovt > b { display: block; color: #101828; }
+.tovl input { width: 24px; height: 24px; flex: 0 0 24px; margin: 0; } .tovt { flex: 1; min-width: 0; }
+.tovs { font-style: normal; font-size: 12px; font-weight: 600; color: #1a7f37; white-space: nowrap; }
+.tover li.gone { background: #f2f4f7; border-color: #d0d5dd; } .tover li.gone .tovt > b { text-decoration: line-through; color: #667085; } .tover li.gone .tovs { color: #b42318; }
+.tovb #ovP:disabled { opacity: .55; }
