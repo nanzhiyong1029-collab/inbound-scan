@@ -3,7 +3,7 @@
  * 原则：只采集原始资料，不做任何核对。先存手机（离线队列），再上传云端。 */
 (function () {
   'use strict';
-  var VERSION = '1.9.6';
+  var VERSION = '1.9.7';
   var $ = function (s, el) { return (el || document).querySelector(s); };
   var app = $('#app');
 
@@ -2954,7 +2954,7 @@
       if (!rows.length) return h + '<div class="empty">没有记录。</div>';
       return h + '<div class="rtw"><table class="rtab-t"><thead><tr><th>库位</th><th>商品</th><th>Item Code</th><th>批次</th><th>库存</th><th>状态</th><th>来源</th><th>更新</th></tr></thead><tbody>' +
         rows.slice(0, 3000).map(function (x) {
-          return '<tr><td><b class="rloc">' + esc(x.loc) + '</b></td><td>' + esc(x.desc) + '</td><td>' + esc(x.item) + '</td><td>' + esc(x.base) + '</td><td>' + x.stock + '</td><td><span class="rst ' + (x.status === '已核实' ? 's3' : 's1') + '">' + esc(x.status) + '</span></td><td class="rmeta">' + esc(x.source) + '</td><td class="rmeta">' + esc(x.by) + '<br>' + esc(x.at) + '</td></tr>';
+          return '<tr><td><b class="rloc">' + esc(x.loc) + '</b></td><td>' + esc(x.desc) + '</td><td>' + esc(x.item) + '</td><td>' + esc(x.base) + '</td><td>' + x.stock + (x.stock && x.uom ? ' ' + esc(x.uom) : '') + '</td><td><span class="rst ' + (x.status === '已核实' ? 's3' : 's1') + '">' + esc(x.status) + '</span></td><td class="rmeta">' + esc(x.source) + '</td><td class="rmeta">' + esc(x.by) + '<br>' + esc(x.at) + '</td></tr>';
         }).join('') + '</tbody></table></div>';
     }
     /** 读 AutoCount「Stock Item with Batch」Excel → 分批上传 */
@@ -3152,7 +3152,7 @@
       (s.batches || []).forEach(function (r) {
         var b = { item: r[0], desc: r[1], base: r[2], bloc: r[3], uom: r[4], qty: +r[5] || 0, mfg: r[6], exp: r[7], src: r[8] };
         var k = b.item + '|' + b.base, o = D.bat[k] || (D.bat[k] = { item: b.item, desc: b.desc, base: b.base, uom: b.uom, qty: 0, mfg: b.mfg, exp: b.exp, src: b.src, acLocs: {} });
-        o.qty = Math.round((o.qty + b.qty) * 1000) / 1000; if (b.bloc) { o.acLocs[b.bloc] = 1; if (lmParts(b.bloc)) cell(b.bloc).ac++; }
+        o.qty = Math.round((o.qty + b.qty) * 1000) / 1000; String(b.bloc || '').split(/\s+/).forEach(function (l) { if (!l) return; o.acLocs[l] = 1; if (lmParts(l)) cell(l).ac++; });    // v1.9.7 一个批次一行，库位空格分开
         if (!D.items[b.item]) D.items[b.item] = b.desc;
       });
       (s.locs || []).forEach(function (r) {
@@ -4365,7 +4365,7 @@
     function peekLoc(loc) {
       api({ action: 'lmFind', code: loc }, true).then(function (d) {
         modal('<div class="ldq"><div class="ldq-h"><span data-nt>' + esc(d.loc) + '</span> · ' + d.rows.length + ' 个商品</div>' +
-          (d.rows.length ? d.rows.map(function (x) { return '<div class="lmpeek"><b data-nt>' + esc(x.desc) + '</b> ' + stChip(x.status) + '<small>批次 <span data-nt>' + esc(x.base || '—') + '</span> · 库存 ' + x.stock + (x.status === '已核实' ? ' · ' + esc(x.by) + ' ' + esc(x.at) : ' · ' + esc(x.source)) + '</small></div>'; }).join('') : '<p class="hint">系统里这个库位是空的</p>') +
+          (d.rows.length ? d.rows.map(function (x) { return '<div class="lmpeek"><b data-nt>' + esc(x.desc) + '</b> ' + stChip(x.status) + '<small>批次 <span data-nt>' + esc(x.base || '—') + '</span> · 库存 ' + x.stock + (x.stock && x.uom ? ' ' + esc(x.uom) : '') + (x.status === '已核实' ? ' · ' + esc(x.by) + ' ' + esc(x.at) : ' · ' + esc(x.source)) + '</small></div>'; }).join('') : '<p class="hint">系统里这个库位是空的</p>') +
           '<div class="row"><button class="btn ghost" id="pkX">关闭</button><button class="btn save" id="pkO">打开这个库位（核实 / 改）</button></div></div>', function (m) {
             $('#pkX', m).onclick = closeModal; $('#pkO', m).onclick = function () { closeModal(); location.hash = '#/lm/l/' + encodeURIComponent(d.loc); };
           });
@@ -4402,7 +4402,7 @@
         setBar('库位 ' + d.loc, true);
         app.innerHTML = head('<div class="lmloc"><div class="pkloc big" data-nt>' + esc(d.loc) + '</div><span>' + d.rows.length + ' 个商品 / 批次</span></div>' +
           (d.rows.length ? d.rows.map(function (x) {
-            return '<div class="card lmrec"><div class="lmrec-h"><b data-nt>' + esc(x.desc) + '</b>' + stChip(x.status) + '</div><div class="hint"><span data-nt>' + esc(x.item) + '</span> · 批次 <b data-nt>' + esc(x.base || '—') + '</b> · 库存 ' + x.stock +
+            return '<div class="card lmrec"><div class="lmrec-h"><b data-nt>' + esc(x.desc) + '</b>' + stChip(x.status) + '</div><div class="hint"><span data-nt>' + esc(x.item) + '</span> · 批次 <b data-nt>' + esc(x.base || '—') + '</b> · 库存 ' + x.stock + (x.stock && x.uom ? ' ' + esc(x.uom) : '') +
               (x.status !== '已核实' ? ' · 来自 ' + esc(x.source) : ' · ' + esc(x.by) + ' ' + esc(x.at)) + '</div>' + recActs(x) + '</div>';
           }).join('') : '<div class="empty">系统里这个库位还没有商品</div>') +
           '<button class="btn save lmadd" id="lmAdd">＋ 这个库位还放了别的商品（扫箱码）</button>');
