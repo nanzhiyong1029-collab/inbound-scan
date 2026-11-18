@@ -681,3 +681,8 @@ body.wcon header#bar { display: none; }
 .wcnote { background: #FAE8FF; border: 1px solid #E879F9; border-left: 5px solid #A21CAF; border-radius: 8px; padding: 8px 12px; margin: 4px 0 10px; cursor: pointer; }
 .wcnote > b { color: #86198F; } .wcnt { white-space: pre-wrap; word-break: break-word; font-size: 15px; margin: 2px 0; color: #1f2937; }
 .wcnta { width: 100%; min-height: 110px; font-size: 16px; padding: 8px; border: 1px solid #cbd5e1; border-radius: 8px; resize: vertical; box-sizing: border-box; font-family: inherit; }
+
+/* v1.9.16 移库：新批次（系统里还没有） */
+.tbatb.tbnew { border-style: dashed; border-color: #6a3d9a; background: #faf5ff; } .tbatb.tbnew.on { border-style: solid; background: #f3e8ff; }
+.tbnl { display: inline-block; margin-top: 4px; color: #6a3d9a; font-weight: 600; font-size: 14px; text-decoration: underline; padding: 4px 0; cursor: pointer; }
+.tb1new { color: #6a3d9a; font-weight: 600; }
