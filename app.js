@@ -3,7 +3,7 @@
  * 原则：只采集原始资料，不做任何核对。先存手机（离线队列），再上传云端。 */
 (function () {
   'use strict';
-  var VERSION = '1.9.9';
+  var VERSION = '1.9.10';
   var $ = function (s, el) { return (el || document).querySelector(s); };
   var app = $('#app');
 
@@ -2238,7 +2238,8 @@
         // 列：用表头文字的中心点分界
         var H = [['seq', /^序号$/], ['batch', /^批次号$/], ['barcode', /^条码$/], ['desc', /^商品名称$/], ['qty', /^数量$/], ['spec', /^规格$/], ['uom', /^单位$/]];
         var cols = [];
-        rows[hi].items.forEach(function (t) { var f = H.filter(function (h) { return h[1].test(t.s); })[0]; if (f) cols.push({ f: f[0], c: t.x + t.w / 2 }); });
+        // v1.9.10 表头里其他列（单价 / 金额 / 折扣…）也占一列，但不读 —— 不然价格会被算进“单位”
+        rows[hi].items.forEach(function (t) { var f = H.filter(function (h) { return h[1].test(t.s); })[0]; cols.push({ f: f ? f[0] : '_', c: t.x + t.w / 2 }); });
         cols.sort(function (a, b) { return a.c - b.c; });
         var colOf = function (t) {
           var c = t.x + t.w / 2, best = cols[0];
@@ -2258,7 +2259,7 @@
           });
           if (/^\d+\.?$/.test(o.seq || '')) {
             seq++;
-            cur = { row: seq, batch: o.batch || '', barcode: (o.barcode || '').replace(/\s+/g, ''), desc: o.desc || '', qtyRaw: o.qty || '', spec: o.spec || '', uom: o.uom || '', y: r.y };
+            cur = { row: seq, batch: o.batch || '', barcode: (o.barcode || '').replace(/\s+/g, ''), desc: o.desc || '', qtyRaw: o.qty || '', spec: o.spec || '', uom: String(o.uom || '').replace(/\s+[\d.,]+(\s.*)?$/, ''), y: r.y };
             cur.qty = Number(String(cur.qtyRaw).replace(/,/g, ''));
             blk.lines.push(cur); gap = 0; return;
           }
@@ -2556,7 +2557,7 @@
         if (l.barcode && !/^\d{6,14}$/.test(l.barcode)) w.push('条码不是 6–14 位数字');
         if (!l.barcode && !l.itemCode && l.desc) w.push('没有条码，PDA 上只能按品名搜索');
         if (!l.uom) w.push('没有单位');
-        var k = [l.doNo, l.itemCode, l.barcode, l.batch, l.qty, l.uom].join('|');
+        var k = [l.doNo, l.itemCode, l.barcode, l.desc, l.batch, l.qty, l.uom].join('|');
         if (seen[k]) w.push('和第 ' + seen[k] + ' 行完全一样，会相加'); else seen[k] = l.row;
         l._e = e; l._w = w;
         if (e.length) errs.push(at(l) + '：' + e.join('，'));
@@ -2591,6 +2592,7 @@
         var k = (PKU() ? l.doNo + '#' : '') + ldLineKey(l, PKU());        // v1.7 拣货每张 DO 一个任务：只在同一张 DO 里合并
         if (!m[k]) { m[k] = { k: k, code: l.itemCode, desc: l.desc, uom: l.uom, spec: l.spec || '', batch: l.batch || '', bc: [], qty: 0, src: [], i: order.length, fix: l.fix }; order.push(k); }
         var it = m[k]; it.qty = Math.round((it.qty + l.qty) * 1000) / 1000; it.src.push(l.doNo + '×' + l.qty);
+        if (l.desc && (' / ' + it.desc + ' / ').indexOf(' / ' + l.desc + ' / ') < 0) it.desc += ' / ' + l.desc;     // v1.9.10 同一个条码、不同口味：品名都写上
         if (l.barcode && it.bc.indexOf(l.barcode) < 0) it.bc.push(l.barcode);
       });
       var out = order.map(function (k) { return m[k]; });
@@ -4027,12 +4029,24 @@
       src.split(/;\s*/).forEach(function (p) { var m = /^(.+?)×(-?[\d.]+)$/.exec(p.trim()); if (!m) return; if (g[m[1]] == null) { g[m[1]] = 0; order.push(m[1]); } g[m[1]] = r3(g[m[1]] + Number(m[2])); });
       return { pre: pre, list: order.map(function (d) { return { doNo: d, qty: g[d] }; }) };
     }
+    /** v1.9.10 按客户（送货地址）合计：同一家有几张 DO 的加在一起 */
+    function fenByCust(it) {
+      var c = fenCust(), f = fenRows(it), g = {}, order = [];
+      f.list.forEach(function (x) { var k = c[x.doNo] || x.doNo; if (!g[k]) { g[k] = { cust: c[x.doNo] || '', dos: [], qty: 0 }; order.push(k); } g[k].dos.push(x.doNo); g[k].qty = r3(g[k].qty + x.qty); });
+      return { pre: f.pre, list: order.map(function (k) { return g[k]; }) };
+    }
+    /** 点货弹窗里的分货小表：这个商品每家几箱（一边点一边分） */
+    function fenMini(it) {
+      var f = fenByCust(it); if (!f.list.length || (f.list.length === 1 && !f.list[0].cust)) return '';
+      return '<div class="fenmini"><b>📦 分货</b>' + (f.pre ? '<span class="hint">（之前未装，原来的 DO）</span>' : '') + f.list.map(function (x) {
+        return '<div><span>' + esc(x.cust || x.dos[0]) + '</span><b>' + x.qty + ' ' + esc(it.uom || '') + '</b></div>'; }).join('') + '</div>';
+    }
     function fenShow(it, box) {
-      var c = fenCust(), f = fenRows(it), tot = f.list.reduce(function (a, x) { return r3(a + x.qty); }, 0);
+      var c = fenCust(), f0 = fenByCust(it), f = { pre: f0.pre, list: f0.list.map(function (x) { return { doNo: x.dos.join(' / '), qty: x.qty, cust: x.cust }; }) }, tot = f.list.reduce(function (a, x) { return r3(a + x.qty); }, 0);
       box.innerHTML = '<div class="fenit"><b>' + esc(it.desc) + '</b><div class="hint">' + esc(ldId(it, '条码 ')) + (it.spec ? ' · ' + esc(it.spec) : '') + '</div>' +
         (f.pre ? '<p class="hint">之前未装（' + esc(f.pre) + '），这次要装 ' + it.req + ' ' + esc(it.uom) + '；下面是原来的 DO：</p>' : '') +
         '<table class="fentab"><thead><tr><th>客户</th><th>DO</th><th class="n">' + esc(it.uom || '数量') + '</th></tr></thead><tbody>' +
-        (f.list.length ? f.list.map(function (x) { return '<tr><td><b>' + esc(c[x.doNo] || '—') + '</b></td><td class="hint">' + esc(x.doNo) + '</td><td class="n"><b>' + x.qty + '</b></td></tr>'; }).join('') : '<tr><td colspan="3" class="hint">没有 DO 明细</td></tr>') +
+        (f.list.length ? f.list.map(function (x) { return '<tr><td><b>' + esc(x.cust || '—') + '</b></td><td class="hint">' + esc(x.doNo) + '</td><td class="n"><b>' + x.qty + '</b></td></tr>'; }).join('') : '<tr><td colspan="3" class="hint">没有 DO 明细</td></tr>') +
         '</tbody><tfoot><tr><td colspan="2">' + f.list.length + ' 家 · 合计</td><td class="n"><b>' + tot + '</b></td></tr></tfoot></table></div>';
     }
     function fenOpen(code) {
@@ -4115,6 +4129,7 @@
       var rem = r3(it.req - it._c);
       modal('<div class="ldq"><div class="ldq-h">' + itemName(it) + '</div><div class="hint">' + pkTag(it) + esc(ldId(it, '条码 ')) + (it.spec ? ' · ' + esc(it.spec) : '') + '</div>' +
         '<div class="ldq-n"><div><span>需求</span><b>' + it.req + '</b></div><div><span>已点</span><b>' + it._c + '</b></div><div class="' + (rem < 0 ? 'p' : rem ? 'o' : 'g') + '"><span>' + (rem < 0 ? '已超出' : '还差') + '</span><b>' + Math.abs(rem) + '</b></div></div>' +
+        (PK ? '' : fenMini(it)) +
         '<label class="ldq-l">这次点了多少 <b>' + esc(it.uom || '') + '</b>？</label><input id="ldQn" class="ldq-in" inputmode="decimal" autocomplete="off" maxlength="9">' +
         '<div id="ldQm" class="ldq-m"></div><div class="row"><button class="btn ghost" id="ldQc">取消</button><button class="btn save" id="ldQo">＋ 确认累加</button></div></div>', function (m) {
           var inp = $('#ldQn', m), out = $('#ldQm', m);
