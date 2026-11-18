@@ -3,7 +3,7 @@
  * 原则：只采集原始资料，不做任何核对。先存手机（离线队列），再上传云端。 */
 (function () {
   'use strict';
-  var VERSION = '1.9.18';
+  var VERSION = '1.9.19';
   var $ = function (s, el) { return (el || document).querySelector(s); };
   var app = $('#app');
 
@@ -1350,9 +1350,12 @@
   }
   /** v1.8.2 移库选批次：这个商品有库存的批次。先用本机资料（离线也能选），联网时再读最新的（库位是最新的）。
    *  cb(list, fresh, item, desc)：list = [{ base, mfg, exp, qty, uom, locs: [] }]，到期早的在前 */
+  /** v1.9.19 入库单建的批次（AutoCount 还没有）：数量是到货时的数，不是现在的库存 → 不显示数字，显示「新到货」 */
+  function isNewIn(b) { return !!(b && (b.nin || b.src === '入库单')); }
+  function qtyHtml(b, bold) { return isNewIn(b) ? '<span class="newin" title="入库单建的新批次：AutoCount 导入后才有库存数">🆕 新到货</span>' : '库存 ' + (bold === false ? esc(b.qty) : '<b>' + esc(b.qty) + '</b>') + ' ' + esc(b.uom || ''); }
   function trBatches(code, item, cb) {
     var loc = item && masters && masters.batches && masters.batches[item];
-    var local = (loc || []).map(function (x) { return { base: x[0], mfg: x[1], exp: x[2], qty: x[3], uom: x[4], locs: x[5] ? String(x[5]).split(' ') : [] }; });
+    var local = (loc || []).map(function (x) { return { base: x[0], mfg: x[1], exp: x[2], qty: x[3], uom: x[4], locs: x[5] ? String(x[5]).split(' ') : [], nin: x[6] || 0 }; });
     if (loc) cb(local, false, item);
     if (!cfg || !sess || navigator.onLine === false) { if (!loc) cb(local, false, item); return; }
     api({ action: 'trBatches', code: code, item: item || '' }, true).then(function (d) {
@@ -1530,7 +1533,7 @@
     function batchHtml() {
       return '<div class="tbat">' + st.bopts.map(function (b, i) {
         return '<button class="tbatb' + (st.bok && st.batch === b.base ? ' on' : '') + '" data-bi="' + i + '"><span class="tbx">到期 <b>' + esc(b.exp || '—') + '</b></span>' +
-          '<span class="tbm">生产 ' + esc(b.mfg || '—') + ' · 库存 <b>' + esc(b.qty) + '</b> ' + esc(b.uom || '') + '</span>' +
+          '<span class="tbm">生产 ' + esc(b.mfg || '—') + ' · ' + qtyHtml(b) + '</span>' +
           '<span class="tbm">批次 ' + esc(b.base || '（不分批次）') + ' · 系统库位 <b>' + esc((b.locs || []).join(' ') || '没有') + '</b>' + (st.src && (b.locs || []).indexOf(st.src) >= 0 ? ' <i class="tbsrc">= 来源库位</i>' : '') + '</span></button>';
       }).join('') + '<button class="tbatb tbnew' + (st.bok && st.bnew ? ' on' : '') + '" data-bnew="1"><span class="tbx">🆕 <b>新批次</b>（系统里还没有）</span><span class="tbm">箱子上的到期日上面都没有：新到的货、入库单还没上传。记成「不分批次」，旧批次的库位不动</span></button></div>';
     }
@@ -1791,7 +1794,7 @@
                 if (!list.length) { sel.innerHTML = '<option value="">没有批次（不用选）</option>'; return; }
                 if (list.length === 1) { sel.innerHTML = '<option value="' + esc(list[0].base) + '">到期 ' + esc(list[0].exp || '—') + ' · ' + esc(list[0].base) + '（只有 1 个）</option>'; return; }
                 sel.innerHTML = (list.some(function (b) { return b.base === want; }) ? '' : '<option value="" disabled selected>— 请选批次 —</option>') + list.map(function (b) {
-                  return '<option value="' + esc(b.base) + '"' + (b.base === want ? ' selected' : '') + '>到期 ' + esc(b.exp || '—') + ' · 库存 ' + esc(b.qty) + ' · ' + esc(b.base) + ((b.locs || []).length ? ' · ' + esc(b.locs.join(' ')) : '') + '</option>';
+                  return '<option value="' + esc(b.base) + '"' + (b.base === want ? ' selected' : '') + '>到期 ' + esc(b.exp || '—') + ' · ' + (isNewIn(b) ? '新到货' : '库存 ' + esc(b.qty)) + ' · ' + esc(b.base) + ((b.locs || []).length ? ' · ' + esc(b.locs.join(' ')) : '') + '</option>';
                 }).join('');
                 sel.disabled = false;
               });
@@ -3358,7 +3361,7 @@
       if (c.note) h += '<div class="wcnote" data-note="' + l + '"><b>📝 备注</b><div class="wcnt">' + esc(c.note.text) + '</div><div class="hint">' + esc(c.note.by) + ' ' + esc(c.note.at) + '</div></div>';     // v1.9.14
       h += c.recs.map(function (x) { var b = bInfo(x.item, x.base), dl = b ? daysLeft(b.exp) : null;
         return '<div class="wcrec"><div><b>' + esc(x.desc) + '</b><div class="hint mono">' + esc(x.item) + (x.base ? ' · 批次 ' + esc(x.base) : ' · 不分批次') + '</div>' +
-          '<div class="wcrm">' + (b ? '库存 <b>' + b.qty + '</b> ' + esc(b.uom) + ' · 到期 <b' + (dl != null && dl < 60 ? ' class="red"' : '') + '>' + esc(b.exp || '—') + '</b>' : '<span class="hint">AutoCount 没有这个批次的库存</span>') + '</div>' +
+          '<div class="wcrm">' + (b ? qtyHtml(b) + ' · 到期 <b' + (dl != null && dl < 60 ? ' class="red"' : '') + '>' + esc(b.exp || '—') + '</b>' : '<span class="hint">AutoCount 没有这个批次的库存</span>') + '</div>' +
           '<div class="hint">' + (x.status === '已核实' ? '● 受控' : '○ 未受控（' + esc(x.status) + '）') + ' · ' + esc(x.by || x.src || '') + ' ' + esc(x.at || '') + '</div></div>' +
           '<div class="wcracts">' + (x.status !== '已核实' ? '<button class="btn save" data-ver="' + esc(x.id) + '">已核实</button>' : '') + '<button class="tbtn" data-mv="' + esc(x.id) + '">改库位</button><button class="tbtn red" data-rm="' + esc(x.id) + '" data-what="' + esc(x.desc + ' ' + x.base) + '">不在这里了</button></div></div>'; }).join('');
       if (c.tasks.length) h += '<div class="wcpt"><b>这个库位的待处理</b>' + c.tasks.map(function (t) { return '<div class="hint">◐ ' + esc(t.type) + ' · ' + esc(t.desc || t.bc) + ' · ' + esc(t.from || '—') + ' → ' + esc(t.to || '—') + '</div>'; }).join('') + '</div>';
@@ -3375,11 +3378,11 @@
         var it = W.item, D = W.snap, bs = Object.keys(D.bat).map(function (k) { return D.bat[k]; }).filter(function (b) { return b.item === it; })
           .sort(function (a, b) { var x = dmy(a.exp), y = dmy(b.exp); return (x ? x.getTime() : 9e15) - (y ? y.getTime() : 9e15); });
         var recs = []; Object.keys(D.locs).forEach(function (l) { D.locs[l].recs.forEach(function (x) { if (x.item === it) recs.push(x); }); });
-        var tot = bs.reduce(function (s, b) { return s + b.qty; }, 0);
-        h += '<div class="wcpanel"><div class="wcph"><b>' + esc(D.items[it] || it) + '</b><span class="mono hint">' + esc(it) + '</span><span class="hint">总库存 <b>' + Math.round(tot * 1000) / 1000 + '</b> · ' + bs.length + ' 个批次</span>' + (W.found && W.found.length > 1 ? '<button class="tbtn" id="wcBack">‹ 换一个商品</button>' : '') + '</div>' +
+        var tot = bs.reduce(function (s, b) { return s + (isNewIn(b) ? 0 : b.qty); }, 0), nNew = bs.filter(isNewIn).length;     // v1.9.19 新到货（入库单）不算进总库存
+        h += '<div class="wcpanel"><div class="wcph"><b>' + esc(D.items[it] || it) + '</b><span class="mono hint">' + esc(it) + '</span><span class="hint">总库存 <b>' + Math.round(tot * 1000) / 1000 + '</b> · ' + bs.length + ' 个批次' + (nNew ? '（另有 ' + nNew + ' 个新到货批次，AutoCount 还没有库存数）' : '') + '</span>' + (W.found && W.found.length > 1 ? '<button class="tbtn" id="wcBack">‹ 换一个商品</button>' : '') + '</div>' +
           '<table class="wct"><thead><tr><th>批次</th><th>到期（先到先出）</th><th>生产</th><th class="n">库存</th><th>系统库位</th></tr></thead><tbody>' +
           bs.map(function (b) { var rl = recs.filter(function (x) { return x.base === b.base; }), dl = daysLeft(b.exp);
-            return '<tr><td class="mono">' + esc(b.base || '（不分批次）') + (b.src === '入库单' ? ' <span class="chip c-info">入库单</span>' : '') + '</td><td><b' + (dl != null && dl < 60 ? ' class="red"' : '') + '>' + esc(b.exp || '—') + '</b>' + (dl != null ? ' <span class="hint">' + (dl < 0 ? '已过期' : dl + ' 天') + '</span>' : '') + '</td><td>' + esc(b.mfg || '—') + '</td><td class="n"><b>' + b.qty + '</b> ' + esc(b.uom) + '</td><td>' +
+            return '<tr><td class="mono">' + esc(b.base || '（不分批次）') + (b.src === '入库单' ? ' <span class="chip c-info">入库单</span>' : '') + '</td><td><b' + (dl != null && dl < 60 ? ' class="red"' : '') + '>' + esc(b.exp || '—') + '</b>' + (dl != null ? ' <span class="hint">' + (dl < 0 ? '已过期' : dl + ' 天') + '</span>' : '') + '</td><td>' + esc(b.mfg || '—') + '</td><td class="n">' + (isNewIn(b) ? '<span class="newin">🆕 新到货</span>' : '<b>' + b.qty + '</b> ' + esc(b.uom)) + '</td><td>' +
               (rl.length ? rl.map(function (x) { return '<button class="lnk mono" data-goloc="' + esc(x.loc) + '">' + esc(x.loc) + '</button>' + (x.status === '已核实' ? '' : ' <span class="hint">○</span>'); }).join(' ') : '<span class="hint">没有库位' + (Object.keys(b.acLocs).length ? '（AutoCount：' + esc(Object.keys(b.acLocs).join(' ')) + '）' : '') + '</span>') + ' <button class="tbtn" data-bind="' + esc(b.base) + '">＋ 登记库位</button></td></tr>'; }).join('') +
           '</tbody></table>' + (bs.length ? '' : '<p class="hint">AutoCount 没有这个商品的库存批次。 <button class="tbtn" data-bind="">＋ 登记库位（不分批次）</button></p>') + (recs.filter(function (x) { return !x.base; }).length ? '<p class="hint">不分批次的库位：' + recs.filter(function (x) { return !x.base; }).map(function (x) { return esc(x.loc); }).join(' ') + '</p>' : '') + '</div>';
       }
@@ -3495,7 +3498,7 @@
         var pick = function (it) {
           var bs = batchesOf(it);
           box.innerHTML = '<p><b>' + esc(D.items[it] || it) + '</b> <span class="hint mono">' + esc(it) + '</span></p><p class="hint">选批次（按到期先后）：</p><div class="wclist">' +
-            bs.map(function (b) { return '<button class="wcli" data-ab="' + esc(b.base) + '"><b class="mono">' + esc(b.base || '（不分批次）') + '</b><span class="hint">库存 ' + b.qty + ' ' + esc(b.uom) + ' · 到期 ' + esc(b.exp || '—') + '</span></button>'; }).join('') +
+            bs.map(function (b) { return '<button class="wcli" data-ab="' + esc(b.base) + '"><b class="mono">' + esc(b.base || '（不分批次）') + '</b><span class="hint">' + qtyHtml(b, false) + ' · 到期 ' + esc(b.exp || '—') + '</span></button>'; }).join('') +
             (bs.some(function (b) { return !b.base; }) ? '' : '<button class="wcli" data-ab=""><b>不分批次</b><span class="hint">不知道批次 / 没有批次</span></button>') + '</div>';
           Array.prototype.forEach.call(box.querySelectorAll('[data-ab]'), function (b) { b.onclick = function () { doBind(it, b.dataset.ab, loc); }; });
         };
@@ -4516,12 +4519,13 @@
         h += '<div class="lahead"><b>还要登记 ' + left + ' 个</b>' + (A.done ? '<span class="ok">今天已登记 ' + A.done + '</span>' : '') + '<button class="tbtn" id="laRe">⟳</button></div>' +
           '<div class="lachips"><button class="lachip' + (!A.cont ? ' on' : '') + '" data-c="">全部 ' + left + '</button>' + A.conts.filter(function (c) { return c.left; }).map(function (c) {
             return '<button class="lachip' + (A.cont === c.cont ? ' on' : '') + '" data-c="' + esc(c.cont) + '">' + esc(c.cont) + ' <b>' + c.left + '</b></button>'; }).join('') + '</div>' +
-          '<p class="hint lasort">按入库后拣货次数排：拣得多的先找库位</p>' +
+          '<p class="hint lasort">按近 3 个月拣货次数排：常出的货先找库位</p>' +
           (A.item ? '<div class="lafilter">只看扫到的商品 <button class="tbtn" id="laAll">看全部</button></div>' : '') +
           (L.length ? L.map(function (x, i) {
             return '<button class="card laitem" data-i="' + i + '"><b data-nt>' + esc(x.desc) + '</b><span class="lam"><span data-nt>' + esc(x.cont) + ' · 批次 ' + esc(x.base) + '</span></span>' +
-              '<span class="lam">到期 <b>' + esc(x.exp || '—') + '</b> · 库存 ' + esc(x.qty) + ' ' + esc(x.uom || '') + '</span>' +
-              '<span class="ladem' + (x.pk >= 5 ? ' hot' : x.pk ? '' : ' none') + '">' + (x.pk >= 5 ? '🔥 ' : '') + '入库后拣货 ' + (x.pk || 0) + ' 次' + (x.since ? '（' + esc(x.since) + ' 到柜）' : '') + '</span>' +
+              '<span class="lam">到期 <b>' + esc(x.exp || '—') + '</b> · ' + qtyHtml(x, false) + '</span>' +
+              '<span class="ladem' + (x.pk3 ? '' : ' none') + '">近 3 个月拣货 ' + (x.pk3 || 0) + ' 次</span>' +
+              (x.pk ? '<span class="ladem hot">🔥 到柜后已经有 ' + x.pk + ' 张 DO 要拣' + (x.since ? '（' + esc(x.since) + ' 到柜）' : '') + '</span>' : '') +
               (x.ref && x.ref.length ? '<span class="laref">同商品在：<b data-nt>' + esc(x.ref.join(' ')) + '</b></span>' : '') + '</button>'; }).join('')
             : '<div class="empty">' + (left ? '这里没有要登记的' : '新柜的货都有库位了 👍') + '</div>');
       }
