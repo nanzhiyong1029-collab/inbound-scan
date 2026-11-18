@@ -3,7 +3,7 @@
  * 原则：只采集原始资料，不做任何核对。先存手机（离线队列），再上传云端。 */
 (function () {
   'use strict';
-  var VERSION = '1.9.8';
+  var VERSION = '1.9.9';
   var $ = function (s, el) { return (el || document).querySelector(s); };
   var app = $('#app');
 
@@ -2169,7 +2169,7 @@
         var o = assignCols(heads, cs);
         if (o.doNo === undefined && o.itemCode === undefined && o.barcode === undefined) continue;
         lines.push({ row: rr, doNo: cellText(o.doNo), doDate: xlDate(o.date), itemCode: cellText(o.itemCode), desc: cellText(o.desc), barcode: cellText(o.barcode),
-          qty: typeof o.qty === 'number' ? o.qty : Number(cellText(o.qty).replace(/,/g, '')), qtyRaw: cellText(o.qty), uom: cellText(o.uom), fromDoc: cellText(o.fromDoc), batch: cellText(o.batch) });
+          qty: typeof o.qty === 'number' ? o.qty : Number(cellText(o.qty).replace(/,/g, '')), qtyRaw: cellText(o.qty), uom: cellText(o.uom), fromDoc: cellText(o.fromDoc), batch: cellText(o.batch), customer: cellText(o.customer) });
       }
       return { kind: 'listing', lines: lines, hasUom: has('uom'), hasBatch: has('batch'), extra: extra.filter(function (t) { return !/^(page|date|user id)/i.test(t); }) };
     }
@@ -2204,7 +2204,7 @@
       var pages = []; for (var i = 1; i <= doc.numPages; i++) pages.push(i);
       return Promise.all(pages.map(function (n) { return doc.getPage(n).then(function (pg) { return pg.getTextContent(); }); }));
     }).then(function (contents) {
-      var blk = { doNo: '', doDate: '', customer: '', lines: [] }, any = '', seq = 0;
+      var blk = { doNo: '', doDate: '', customer: '', lines: [] }, any = '', seq = 0, blocks = [blk];
       contents.forEach(function (tc) {
         // 文字块 → 按 y 分行（同一行 y 相差 ≤ 3）
         var its = tc.items.filter(function (t) { return String(t.str).trim(); }).map(function (t) { return { s: String(t.str).trim(), x: t.transform[4], y: t.transform[5], w: t.width || 0 }; });
@@ -2220,6 +2220,9 @@
         });
         var hi = rows.findIndex(function (r) { return /序号/.test(r.text) && /条码/.test(r.text) && /商品名称/.test(r.text); });
         // 表头上面：DO 号、日期、客户（客户 = DO 号那一行左边的文字）
+        // v1.9.9 一个 PDF 里可以有好几张 DO：这一页印的单号和上一张不同 → 新的一张（续页没有单号 / 单号相同就接着上一张）
+        var pdn = null; rows.slice(0, hi < 0 ? rows.length : hi).some(function (r) { pdn = r.text.match(/\b[A-Z]{1,6}DO-\d{4,}\b/); return !!pdn; });
+        if (pdn && blk.doNo && pdn[0] !== blk.doNo) { blk = { doNo: '', doDate: '', customer: '', lines: [] }; blocks.push(blk); seq = 0; }
         rows.slice(0, hi < 0 ? rows.length : hi).forEach(function (r) {
           var dn = r.text.match(/\b[A-Z]{1,6}DO-\d{4,}\b/);
           if (dn && !blk.doNo) {
@@ -2266,8 +2269,8 @@
           }
         });
       });
-      blk.lines.forEach(function (l) { delete l.y; });
-      return { kind: 'printed', pdf: true, noChinese: !/[\u4e00-\u9fff]/.test(any), blocks: [blk] };
+      blocks.forEach(function (b) { b.lines.forEach(function (l) { delete l.y; }); });
+      return { kind: 'printed', pdf: true, noChinese: !/[\u4e00-\u9fff]/.test(any), blocks: blocks };
     });
   }
   /** AutoCount「送货单」打印版式：用来补单位、规格、批次号 */
@@ -2428,7 +2431,7 @@
     function newSt() { return { files: [], lines: null, errors: [], warns: [], infos: [], carry: null, pick: {}, busy: false, done: null, importId: uuid(), fileName: '' }; }
     var st = newSt();
     function readFiles(list) {
-      st.done = null; st.lines = null; st.errors = []; st.warns = []; st.infos = []; st.importId = uuid();
+      st.done = null; st.lines = null; st.all = null; st.used = null; st.errors = []; st.warns = []; st.infos = []; st.importId = uuid();
       var arr = Array.prototype.slice.call(list || []);
       if (!arr.length) return draw();
       st.fileName = arr.map(function (f) { return f.name; }).join(' + ');
@@ -2436,50 +2439,65 @@
       Promise.all(arr.map(function (f) {
         if (/\.xls$/i.test(f.name)) return Promise.reject(new Error(f.name + '：是旧版 .xls，请在 AutoCount 导出为 .xlsx'));
         if (/\.pdf$/i.test(f.name)) {          // v1.7 送货单 PDF（只用于仓库拣货）
-          if (!PKU()) return Promise.reject(new Error(f.name + '：装车点货请上传 Excel（Delivery Order Detail Listing）'));
           return f.arrayBuffer().then(parsePdf).then(function (pr) { return { name: f.name, listing: null, printed: pr }; }, function (e) { throw new Error(f.name + '：读不了这个 PDF（' + e.message + '）'); });
         }
         return f.arrayBuffer().then(xlsxRead).then(function (sh) { return { name: f.name, listing: parseListing(sh), printed: parsePrinted(sh) }; });
       })).then(function (res) {
         var L = res.filter(function (x) { return x.listing; }), P = res.filter(function (x) { return !x.listing && x.printed; });
         if (PKU()) return readPicking(res, L, P);
-        res.forEach(function (x) { if (!x.listing && !x.printed) st.errors.push(x.name + '：认不出格式（需要 Delivery Order Detail Listing）'); });
-        if (!L.length) st.errors.push('需要 AutoCount 的「Delivery Order Detail Listing」（每行带 DO 号和条码 / Item Code）。只有送货单不能建任务，因为送货单里只有第一张 DO 有单号。');
-        if (L.length > 1) st.errors.push('一次只能上传一份 Delivery Order Detail Listing');
-        if (st.errors.length) return draw();
-        var li = L[0].listing, lines = li.lines;
-        if (PKU() && !li.hasBatch) { st.errors.push('仓库拣货需要带「Batch No.」（批次号）列的 Delivery Order Detail Listing——库位是从批次号里读出来的。请在 AutoCount 报表加上 Batch No. 列再导出。'); return draw(); }
-        if (li.extra.length) st.infos.push('没用到的列：' + li.extra.join('、'));
-        if (P.length) {
-          var rep = supplement(lines, P[0].printed);
-          st.infos.push('送货单 ' + rep.blocks + ' 段，对上 ' + rep.matched + ' 张 DO（补上单位 / 规格 / 批次号）');
-          if (rep.missingDo.length) st.warns.push('这些 DO 在送货单里没找到对应的一段，单位会是空的：' + rep.missingDo.join('、'));
-        }
-        var noUom = lines.filter(function (l) { return !l.uom; }).length;
-        if (noUom) st.warns.push(noUom + ' 行没有单位（UOM）。' + (P.length ? '' : '可以同时选择「送货单」Excel，系统会自动补上单位。'));
-        var seen = {};
-        lines.forEach(function (l) {
-          var e = [];
-          if (!l.doNo) e.push('缺 DO 号'); if (!l.itemCode && !l.barcode && !l.desc) e.push('缺条码 / Item Code / 品名');
-          if (!(l.qty > 0)) e.push('数量不对（' + (l.qtyRaw || '空') + '）');
-          if (e.length) st.errors.push('Excel 第 ' + l.row + ' 行：' + e.join('，'));
-          if (!l.barcode && l.itemCode) st.infos.push('Excel 第 ' + l.row + ' 行没有条码（' + l.desc + '），PDA 上可用 Item Code 或搜索');
-          if (!l.barcode && !l.itemCode && l.desc) st.warns.push('Excel 第 ' + l.row + ' 行没有条码（' + l.doNo + ' ' + l.desc + ' ×' + l.qty + '），PDA 上只能按品名搜索');
-          var k = [l.doNo, l.itemCode, l.barcode, l.qty, l.uom].join('|');
-          if (seen[k]) st.warns.push('Excel 第 ' + seen[k] + ' 行和第 ' + l.row + ' 行完全一样（' + l.doNo + ' ' + l.desc + ' ×' + l.qty + '），会相加，请确认不是重复导出');
-          else seen[k] = l.row;
-        });
-        if (!lines.length) st.errors.push('文件里没有商品行');
-        if (PKU()) {      // 批次号缺失 / 没有库位 / 格式异常 → 提醒（不挡上传），这些商品在 PDA 上排在最后并标黄
-          var noB = [], noL = [];
-          lines.forEach(function (l) { var x = pkLoc(l.batch); if (x.flag) (l.batch ? noL : noB).push('第 ' + l.row + ' 行 ' + l.desc + (l.batch ? '（' + l.batch + '：' + x.flag + '）' : '')); });
-          if (noB.length) st.warns.push(noB.length + ' 行没有批次号，PDA 上会排在最后（标黄）：' + noB.join('；'));
-          if (noL.length) st.warns.push(noL.length + ' 行批次号读不出库位，PDA 上会标黄' + '：' + noL.join('；'));
-        }
-        st.lines = lines;
-        draw();
-        loadCarry();
+        readLoading(res, L, P);
       }, function (e) { st.errors.push(e.message); draw(); });
+    }
+    /** v1.9.9 装车：DO Listing（可以多份）、送货单 PDF（一个文件可以好几张 DO）、送货单 Excel 一起选；
+     *  全部 DO 先放进“待建任务”的 DO 池，勾选哪些 DO 放进这次装车任务（剩下的可以接着建下一个任务） */
+    function readLoading(res, L, P) {
+      var lines = [], dosSeen = {}, cust = {};
+      res.forEach(function (x) { if (!x.listing && !x.printed) st.errors.push(x.name + '：认不出格式（需要 Delivery Order Detail Listing、送货单 Excel 或送货单 PDF）'); });
+      var add = function (doNo, src, ls) {
+        if (dosSeen[doNo] && dosSeen[doNo] !== src) { st.warns.push('DO ' + doNo + ' 在 ' + dosSeen[doNo] + ' 和 ' + src + ' 里都有：只用 ' + dosSeen[doNo] + ' 的，' + src + ' 里的这张没有算进去'); return false; }
+        dosSeen[doNo] = src; ls.forEach(function (l) { lines.push(l); }); return true;
+      };
+      L.forEach(function (x) {
+        if (x.listing.extra.length) st.infos.push(x.name + ' 没用到的列：' + x.listing.extra.join('、'));
+        var g = {}, order = [];
+        x.listing.lines.forEach(function (l) { l.file = x.name; if (!g[l.doNo]) { g[l.doNo] = []; order.push(l.doNo); } g[l.doNo].push(l); if (l.customer && !cust[l.doNo]) cust[l.doNo] = l.customer; });
+        order.forEach(function (d) { add(d, x.name, g[d]); });
+      });
+      var listingLines = lines.slice();
+      P.forEach(function (x) {
+        if (!x.printed.pdf) {        // 送货单 Excel：只用来补单位 / 规格 / 批次号（Excel 送货单只有第一张 DO 印了单号，不能单独建任务）
+          if (!L.length) { st.errors.push('需要 AutoCount 的「Delivery Order Detail Listing」（每行带 DO 号和条码 / Item Code），或送货单 PDF。只有送货单 Excel 不能建任务，因为送货单 Excel 里只有第一张 DO 有单号。'); return; }
+          var rep = supplement(listingLines, x.printed);
+          st.infos.push(x.name + '：送货单 ' + rep.blocks + ' 段，对上 ' + rep.matched + ' 张 DO（补上单位 / 规格 / 批次号）');
+          if (rep.missingDo.length) st.warns.push('这些 DO 在送货单里没找到对应的一段，单位会是空的：' + rep.missingDo.join('、'));
+          return;
+        }
+        if (x.printed.noChinese) { st.errors.push(x.name + '：这个 PDF 里没有中文（品名、单位都读不到）。请在 AutoCount 用「打印 → Microsoft Print to PDF」另存为 PDF 再上传。'); return; }
+        var bl = x.printed.blocks.filter(function (b) { return b.lines.length; });
+        if (!bl.length) { st.errors.push(x.name + '：送货单里没有商品行'); return; }
+        bl.forEach(function (b, bi) {
+          var doNo = b.doNo || (bi ? x.name.replace(/\.(xlsx|pdf)$/i, '') + ' 第' + (bi + 1) + '张（单号未印）' : '');
+          if (!doNo) { st.errors.push(x.name + '：认不出 DO 单号（单据编号）'); return; }
+          if (!b.doNo) st.warns.push(x.name + ' 第 ' + (bi + 1) + ' 张没有印单号，暂时叫“' + doNo + '”');
+          if (add(doNo, x.name, b.lines.map(function (l) { return { row: l.row, file: x.name, doNo: doNo, doDate: b.doDate || '', itemCode: '', desc: l.desc, barcode: l.barcode, qty: l.qty, qtyRaw: l.qtyRaw, uom: l.uom, spec: l.spec, batch: l.batch, pdf: !!x.printed.pdf }; })) && b.customer && !cust[doNo]) cust[doNo] = b.customer;
+        });
+      });
+      if (!L.length && !P.length && !st.errors.length) st.errors.push('需要 AutoCount 的「Delivery Order Detail Listing」，或送货单 PDF / Excel');
+      if (st.errors.length) return draw();
+      if (!lines.length) { st.errors.push('文件里没有商品行'); return draw(); }
+      st.customers = cust; st.multi = res.length > 1; st.baseWarns = st.warns.slice(); st.all = lines; st.sel = {};
+      Object.keys(dosSeen).forEach(function (d) { st.sel[d] = true; });
+      ldApplySel(); draw(); loadCarry();
+    }
+    /** 勾选的 DO → 这次要建任务的行 */
+    function ldApplySel() { st.lines = (st.all || []).filter(function (l) { return st.sel[l.doNo]; }); pkCheck(); }
+    function ldPoolDos() {
+      var o = [], m = {};
+      (st.all || []).forEach(function (l) {
+        var x = m[l.doNo]; if (!x) { x = m[l.doNo] = { doNo: l.doNo, cust: (st.customers || {})[l.doNo] || '', file: l.file || '', n: 0, q: {} }; o.push(x); }
+        x.n++; var u = l.uom || ''; x.q[u] = Math.round(((x.q[u] || 0) + (+l.qty || 0)) * 1000) / 1000;
+      });
+      return o;
     }
     /** v1.6 仓库拣货：送货单（每张 DO 一个文件，可多选）和 / 或 DO Listing（带 Batch No.）都能建任务 */
     function readPicking(res, L, P) {
@@ -2495,7 +2513,7 @@
         if (x.printed.noChinese) { st.errors.push(x.name + '：这个 PDF 里没有中文（品名、单位都读不到）。请在 AutoCount 用「打印 → Microsoft Print to PDF」另存为 PDF 再上传。'); return; }
         var bl = x.printed.blocks.filter(function (b) { return b.lines.length; });
         if (!bl.length) { st.errors.push(x.name + '：送货单里没有商品行'); return; }
-        if (bl.length > 1) st.warns.push(x.name + '：一个文件里有 ' + bl.length + ' 张 DO，只有第一张印了单号。建议每张 DO 单独导出一个文件。');
+        if (bl.length > 1 && bl.some(function (b) { return !b.doNo; })) st.warns.push(x.name + '：一个文件里有 ' + bl.length + ' 张 DO，有的没印单号。建议每张 DO 单独导出一个文件。');
         bl.forEach(function (b, bi) {
           var doNo = b.doNo || (bi ? x.name.replace(/\.xlsx$/i, '') + ' 第' + (bi + 1) + '张（单号未印）' : '');
           if (!b.doNo && !bi) { st.errors.push(x.name + '：认不出 DO 单号（单据编号）'); return; }
@@ -2533,19 +2551,19 @@
       var seen = {};
       lines.forEach(function (l) {
         var e = [], w = [];
-        if (!l.doNo) e.push('缺 DO 号'); if (!l.barcode && !l.desc) e.push('缺条码 / 品名');
+        if (!l.doNo) e.push('缺 DO 号'); if (!l.barcode && !l.desc && !l.itemCode) e.push('缺条码 / 品名');
         if (!(l.qty > 0)) e.push('数量不对（' + (l.qtyRaw || '空') + '）');
         if (l.barcode && !/^\d{6,14}$/.test(l.barcode)) w.push('条码不是 6–14 位数字');
-        if (!l.barcode && l.desc) w.push('没有条码，PDA 上只能按品名搜索');
+        if (!l.barcode && !l.itemCode && l.desc) w.push('没有条码，PDA 上只能按品名搜索');
         if (!l.uom) w.push('没有单位');
-        var k = [l.doNo, l.barcode, l.batch, l.qty, l.uom].join('|');
+        var k = [l.doNo, l.itemCode, l.barcode, l.batch, l.qty, l.uom].join('|');
         if (seen[k]) w.push('和第 ' + seen[k] + ' 行完全一样，会相加'); else seen[k] = l.row;
         l._e = e; l._w = w;
         if (e.length) errs.push(at(l) + '：' + e.join('，'));
         w.forEach(function (x) { if (x !== '没有单位') warns.push(at(l) + '（' + l.doNo + ' ' + l.desc + '）' + x); });
       });
       var noB = [], noL = [];
-      lines.forEach(function (l) { var x = pkLoc(l.batch); if (x.flag) (l.batch ? noL : noB).push((st.multi ? l.file + ' ' : '') + '第 ' + l.row + ' 行 ' + l.desc + (l.batch ? '（' + l.batch + '：' + x.flag + '）' : '')); });
+      if (PKU()) lines.forEach(function (l) { var x = pkLoc(l.batch); if (x.flag) (l.batch ? noL : noB).push((st.multi ? l.file + ' ' : '') + '第 ' + l.row + ' 行 ' + l.desc + (l.batch ? '（' + l.batch + '：' + x.flag + '）' : '')); });
       if (noB.length) warns.push(noB.length + ' 行没有批次号，PDA 上会排在最后（标黄）：' + noB.join('；'));
       if (noL.length) warns.push(noL.length + ' 行批次号读不出库位，PDA 上会标黄：' + noL.join('；'));
       st.lineErrs = errs; st.warns = warns;
@@ -2652,11 +2670,12 @@
       if (st.busy) return;
       st.busy = true; draw();
       var refs = Object.keys(st.pick).filter(function (k) { return st.pick[k] && (st.carry || []).some(function (c) { return c.ref === k; }); });
-      api({ action: 'ldImport', mod: UPM, importId: st.importId, fileName: st.fileName, force: !!force, carry: PKU() ? [] : refs, customers: PKU() ? (st.customers || {}) : undefined,
+      var useDos = {}; st.lines.forEach(function (l) { useDos[l.doNo] = 1; });
+      api({ action: 'ldImport', mod: UPM, importId: st.importId, fileName: st.fileName, force: !!force, carry: PKU() ? [] : refs, customers: st.customers || {},
         lines: st.lines.map(function (l) { return { doNo: l.doNo, doDate: l.doDate, itemCode: l.itemCode, desc: l.desc, barcode: l.barcode, qty: l.qty, uom: l.uom, spec: l.spec || '', batch: l.batch || '', fromDoc: l.fromDoc }; }) }, true)
         .then(function (d) {
           st.busy = false;
-          if (d.status === 'created' || d.status === 'duplicate') { st.done = d; beep(); draw(); return loadTasks(); }
+          if (d.status === 'created' || d.status === 'duplicate') { st.done = d; st.used = st.used || {}; Object.keys(useDos).forEach(function (k) { st.used[k] = 1; }); beep(); draw(); return loadTasks(); }
           if (d.status === 'dupDO') {
             draw();
             return modal('<div class="tmiss"><div class="tmiss-h"><span class="tmiss-ic">!</span><div><h3>这些 DO 已经上传过</h3></div></div><ul class="tmiss-list">' +
@@ -2683,14 +2702,28 @@
         else h = '<div class="card upok"><div class="upok-ic">✓</div><h2>已建立装车任务 ' + esc(st.done.taskId) + '</h2><p>' +
           (st.done.status === 'duplicate' ? '（这个文件刚才已经上传过，没有重复建立）' : 'DO ' + st.done.doCount + ' 张 · ' + st.done.lineCount + ' 行 · 商品 ' + st.done.itemCount + ' 项' + (st.done.carryCount ? '（含之前未装 ' + st.done.carryCount + ' 项）' : '')) +
           '</p>' + (st.done.badLoc ? '<p class="err">其中 ' + st.done.badLoc + ' 项批次号没有库位 / 格式异常，PDA 上排在最后并标黄。</p>' : '') +
-          '<p class="hint">PDA 打开「🚚 装车点货」就能看到这个任务。</p><button class="btn save" id="upNew">上传下一个</button></div>';
+          '<p class="hint">PDA 打开「🚚 装车点货」就能看到这个任务。</p>' + (function () {
+            var rest = ldPoolDos().filter(function (x) { return !(st.used || {})[x.doNo]; });
+            return rest.length ? '<div class="card upwarn" style="text-align:left"><b>刚才上传的文件里还有 ' + rest.length + ' 张 DO 没建任务：</b><p class="hint">' + esc(rest.map(function (x) { return x.doNo + (x.cust ? '（' + x.cust + '）' : ''); }).join('、')) + '</p>' +
+              '<button class="btn save" id="upRest">用剩下的 DO 再建一个装车任务</button></div>' : '';
+          })() + '<button class="btn ' + (st.all && ldPoolDos().some(function (x) { return !(st.used || {})[x.doNo]; }) ? 'ghost' : 'save') + '" id="upNew">上传新的文件</button></div>';
       } else {
-        h = '<div class="card"><h3 style="margin-top:0">' + (PKU() ? '选择 AutoCount 送货单（Excel 或 PDF）' : '选择 AutoCount 导出的 Excel') + '</h3>' +
+        h = '<div class="card"><h3 style="margin-top:0">' + (PKU() ? '选择 AutoCount 送货单（Excel 或 PDF）' : '选择 AutoCount 导出的文件（Excel 或 PDF，可多选）') + '</h3>' +
           '<ol class="hint upsteps">' + (PKU() ? '<li><b>送货单</b>（每张 DO 导出一个 Excel，可以一次选多个；需要有批次号、条码、数量）</li><li>或 <b>送货单 PDF</b>：在 AutoCount 用「打印 → Microsoft Print to PDF」另存（直接导出的 PDF 没有中文，不能用）</li><li>或 <b>Delivery Order Detail Listing（带 Batch No. 列）</b></li><li>批次号结尾就是库位，如 2701-AB-07-J01 → 07-J-01</li></ol>' :
-            '<li><b>Delivery Order Detail Listing</b>（必需：每行有 DO 号、条码或 Item Code、数量；有没有 Item Code 列都可以）</li><li><b>送货单</b>（可选：一起选上，自动补上单位 / 规格 / 批次号）</li></ol>') +
-          '<button class="btn save upfile" id="upPick">' + (PKU() ? '📂 选择 Excel / PDF 文件（可多选）' : '📂 选择 Excel 文件（可多选）') + '</button><input id="upF" class="vh" type="file" accept="' + (PKU() ? '.xlsx,.xls,.pdf' : '.xlsx,.xls') + '" multiple tabindex="-1">' +
+            '<li><b>Delivery Order Detail Listing</b> Excel（每行有 DO 号、条码或 Item Code、数量），可以选好几份</li><li>或 <b>送货单 PDF</b>：在 AutoCount 用「打印 → Microsoft Print to PDF」另存，一个 PDF 里可以有好几张 DO，可以一次选很多个</li><li><b>送货单 Excel</b>（可选：和 Listing 一起选，自动补上单位 / 规格）</li><li>读完后在「这次装车放哪几张 DO」里勾选，剩下的 DO 可以接着建下一个任务</li></ol>') +
+          '<button class="btn save upfile" id="upPick">📂 选择 Excel / PDF 文件（可多选）</button><input id="upF" class="vh" type="file" accept=".xlsx,.xls,.pdf" multiple tabindex="-1">' +
           (st.fileName ? '<p class="hint">已选：' + esc(st.fileName) + '</p>' : '') + (note ? '<p>' + esc(note) + '</p>' : '') + '</div>';
         if (st.errors.length) h += '<div class="card upbad"><b>不能上传：</b><ul>' + st.errors.slice(0, 40).map(function (e) { return '<li>' + esc(e) + '</li>'; }).join('') + '</ul></div>';
+        if (st.lines && !st.errors.length && !PKU() && st.all) {       // v1.9.9 DO 池：勾选这次装车放哪几张 DO
+          var pool = ldPoolDos(), nSel = pool.filter(function (x) { return st.sel[x.doNo]; }).length;
+          h += '<div class="card" id="dosCard"><h3 style="margin-top:0">这次装车放哪几张 DO？（已选 ' + nSel + ' / ' + pool.length + '）</h3>' +
+            '<p><button class="tbtn" id="dosAll">全选</button> <button class="tbtn" id="dosNone">全不选</button> <span class="hint">没勾的 DO 先留着，建完这个任务后可以接着用它们建下一个</span></p>' +
+            '<div class="uptabw"><table class="uptab"><thead><tr><th></th><th>DO</th><th>客户</th><th class="n">行</th><th>数量</th><th>文件</th></tr></thead><tbody>' +
+            pool.map(function (x) {
+              return '<tr><td><input type="checkbox" data-dos="' + esc(x.doNo) + '"' + (st.sel[x.doNo] ? ' checked' : '') + '></td><td><b>' + esc(x.doNo) + '</b></td><td>' + esc(x.cust || '—') + '</td><td class="n">' + x.n + '</td><td>' +
+                esc(Object.keys(x.q).map(function (u) { return x.q[u] + ' ' + u; }).join(' · ')) + '</td><td class="hint">' + esc(x.file) + '</td></tr>';
+            }).join('') + '</tbody></table></div></div>';
+        }
         if (st.lines && !st.errors.length) {
           h += '<div class="card"><div class="upsum"><div><b>' + Object.keys(dos).length + '</b><span>张 DO</span></div><div><b>' + st.lines.length + '</b><span>行</span></div><div><b>' + items.length + '</b><span>个商品（合并后）</span></div>' +
             (PKU() ? '<div><b>' + items.filter(function (it) { return it.flag; }).length + '</b><span>没有库位</span></div>' : '<div><b>' + (st.carry ? picked.length : '…') + '</b><span>之前未装</span></div>') + '</div>' +
@@ -2698,8 +2731,8 @@
             '<p class="hint">DO：' + esc(Object.keys(dos).map(function (d) { return d + (st.customers && st.customers[d] ? '（' + st.customers[d] + '）' : ''); }).join('、')) + '</p>' +
             (PKU() ? '<p><b>上传后每张 DO 生成一个拣货任务（共 ' + Object.keys(dos).length + ' 个），再在下面分配给员工。</b></p>' +
               '<p><button class="tbtn" id="upPrint"' + (st.lineErrs && st.lineErrs.length ? ' disabled' : '') + '>🖨 打印拣货单（' + Object.keys(dos).length + ' 张，按库位顺序）</button></p>' : '') + '</div>';
-          if (PKU() && st.lineErrs && st.lineErrs.length) h += '<div class="card upbad"><b>还不能上传（请在下面改好）：</b><ul>' + st.lineErrs.slice(0, 40).map(function (e) { return '<li>' + esc(e) + '</li>'; }).join('') + '</ul></div>';
-          if (PKU()) h += fixHtml();
+          if (st.lineErrs && st.lineErrs.length) h += '<div class="card upbad"><b>还不能上传（请在下面改好）：</b><ul>' + st.lineErrs.slice(0, 40).map(function (e) { return '<li>' + esc(e) + '</li>'; }).join('') + '</ul></div>';
+          h += fixHtml();
           if (st.warns.length) h += '<div class="card upwarn"><b>请注意：</b><ul>' + st.warns.map(function (e) { return '<li>' + esc(e) + '</li>'; }).join('') + '</ul></div>';
           if (st.infos.length) h += '<details class="card"><summary>其他提示（' + st.infos.length + '）</summary><ul class="hint">' + st.infos.map(function (e) { return '<li>' + esc(e) + '</li>'; }).join('') + '</ul></details>';
           if (st.carry && st.carry.length) h += '<div class="card"><h3 style="margin-top:0">之前没装上车的商品（打勾的会一起加进这次任务，注明原来的日期）</h3>' +
@@ -2714,7 +2747,7 @@
                 '</td><td class="n"><b>' + it.qty + '</b></td><td class="hint">' + esc(it.src.join('; ')) + '</td></tr>';
             }).join('') + '</tbody></table></div></div>';
           h += tasksHtml();
-          h += '<div id="dock" class="dock"><button class="btn save" id="upGo"' + (st.busy || !st.carry || (PKU() && st.lineErrs && st.lineErrs.length) ? ' disabled' : '') + '>' + (st.busy ? '上传中…' : '⬆ 上传并建立装车任务') + '</button></div>';
+          h += '<div id="dock" class="dock"><button class="btn save" id="upGo"' + (st.busy || !st.carry || !st.lines.length || (st.lineErrs && st.lineErrs.length) ? ' disabled' : '') + '>' + (st.busy ? '上传中…' : '⬆ 上传并建立装车任务') + '</button></div>';
         }
       }
       if (!(st.lines && !st.errors.length && !st.done)) h += tasksHtml();
@@ -2744,6 +2777,15 @@
       });
       var f = $('#upF'); if (f) { f.onchange = function () { readFiles(f.files); f.value = ''; }; $('#upPick').onclick = function () { f.click(); }; }
       var n = $('#upNew'); if (n) n.onclick = function () { st = newSt(); draw(); };
+      Array.prototype.forEach.call(app.querySelectorAll('[data-dos]'), function (c) { c.onchange = function () { st.sel[c.dataset.dos] = c.checked; ldApplySel(); draw(); }; });
+      var da = $('#dosAll'), dn0 = $('#dosNone');
+      if (da) da.onclick = function () { ldPoolDos().forEach(function (x) { st.sel[x.doNo] = true; }); ldApplySel(); draw(); };
+      if (dn0) dn0.onclick = function () { st.sel = {}; ldApplySel(); draw(); };
+      var ur = $('#upRest'); if (ur) ur.onclick = function () {         // 剩下的 DO 接着建下一个任务（不用重新选文件）
+        var used = st.used || {}, o = st, ns = newSt();
+        ns.all = o.all.filter(function (l) { return !used[l.doNo]; }); ns.customers = o.customers; ns.multi = o.multi; ns.fileName = o.fileName; ns.baseWarns = []; ns.sel = {};
+        st = ns; ldApplySel(); draw(); loadCarry(); window.scrollTo(0, 0);
+      };
       var pp = $('#upPrint'); if (pp) pp.onclick = printPick;
       var g = $('#upGo'); if (g) g.onclick = function () { upload(false); };
       Array.prototype.forEach.call(app.querySelectorAll('[data-ref]'), function (c) { c.onchange = function () { st.pick[c.dataset.ref] = c.checked; draw(); }; });
@@ -3603,6 +3645,7 @@
       keepVal = keep ? keep.value : ''; keepFocus = !!keep && document.activeElement === keep;   // 重画时不吞掉正在扫的条码
       if (IT != null) return drawItem();
       app.innerHTML = ldW(head + (msg ? '<div class="tmsg ' + msg.cls + '">' + esc(msg.text) + '</div>' : '') +
+        (PK ? '' : '<div class="row tsub ldfenrow"><button class="btn ldfenb" id="ldFen">📦 分货：扫商品，看每家要几箱</button></div>') +
         (done() ? '<div class="card lddone">✓ 已完成' + (s.task.submittedBy ? '（' + esc(s.task.submittedBy) + ' ' + esc(s.task.submitted) + '）' : s.localDone ? '（待上传）' : '') + '，不能再修改。需要更正请找办公室重新打开。</div>' :
           (PK ? '<div class="bcrow tscan"><input id="ldIn" inputmode="' + im + '" maxlength="64" autocomplete="off" spellcheck="false" placeholder="扫码 / 搜索商品（品名、条码后几位、批次、库位）" value="' + esc(pq) + '"><button class="btn cam" id="ldCam">📷</button></div>' :
           '<div class="bcrow tscan"><input id="ldIn" inputmode="' + im + '" maxlength="64" autocomplete="off" spellcheck="false" placeholder="扫描条码，或点这里手输（后几位 / 品名）"><button class="btn cam" id="ldCam">📷 扫描</button></div>' +
@@ -3940,6 +3983,7 @@
       }
       $('#ldHist').onclick = showHistory;
       $('#ldRev').onclick = function () { location.hash = ldHash(id) + '/review'; };
+      var fz = $('#ldFen'); if (fz) fz.onclick = function () { fenOpen(''); };
       var inp = $('#ldIn');
       if (!inp) return;
       if (PK) {        // v1.5.1 拣货：一个入口 —— 扫码进商品，打字即时搜索
@@ -3970,6 +4014,53 @@
       setTimeout(function () { var x = $('#ldIn'); if (x && $('#modal').hidden) x.focus(); }, 30);
       $('#ldCam').onclick = function () { openCamera('ld', function (code) { handle(code, 'BARCODE'); }, { label: '商品条码' }); };
       var sb = $('#ldSearch'); if (sb) sb.onclick = function () { pick(s.items, '搜索商品', ''); };
+    }
+    /** v1.9.9 分货：扫商品码（或搜品名）→ 这个商品每张 DO（每家客户）要几箱。不记点货数量，只是查看 */
+    function fenCust() {
+      var m = {}; String(s.task.customer || '').split(/\n/).forEach(function (x) { var i = x.indexOf('='); if (i > 0) m[x.slice(0, i).trim()] = x.slice(i + 1).trim(); });
+      return m;
+    }
+    function fenRows(it) {
+      var src = String(it.src || ''), pre = '', i = src.indexOf('：');
+      if (it.origin === '之前' && i >= 0) { pre = src.slice(0, i); src = src.slice(i + 1); }
+      var g = {}, order = [];
+      src.split(/;\s*/).forEach(function (p) { var m = /^(.+?)×(-?[\d.]+)$/.exec(p.trim()); if (!m) return; if (g[m[1]] == null) { g[m[1]] = 0; order.push(m[1]); } g[m[1]] = r3(g[m[1]] + Number(m[2])); });
+      return { pre: pre, list: order.map(function (d) { return { doNo: d, qty: g[d] }; }) };
+    }
+    function fenShow(it, box) {
+      var c = fenCust(), f = fenRows(it), tot = f.list.reduce(function (a, x) { return r3(a + x.qty); }, 0);
+      box.innerHTML = '<div class="fenit"><b>' + esc(it.desc) + '</b><div class="hint">' + esc(ldId(it, '条码 ')) + (it.spec ? ' · ' + esc(it.spec) : '') + '</div>' +
+        (f.pre ? '<p class="hint">之前未装（' + esc(f.pre) + '），这次要装 ' + it.req + ' ' + esc(it.uom) + '；下面是原来的 DO：</p>' : '') +
+        '<table class="fentab"><thead><tr><th>客户</th><th>DO</th><th class="n">' + esc(it.uom || '数量') + '</th></tr></thead><tbody>' +
+        (f.list.length ? f.list.map(function (x) { return '<tr><td><b>' + esc(c[x.doNo] || '—') + '</b></td><td class="hint">' + esc(x.doNo) + '</td><td class="n"><b>' + x.qty + '</b></td></tr>'; }).join('') : '<tr><td colspan="3" class="hint">没有 DO 明细</td></tr>') +
+        '</tbody><tfoot><tr><td colspan="2">' + f.list.length + ' 家 · 合计</td><td class="n"><b>' + tot + '</b></td></tr></tfoot></table></div>';
+    }
+    function fenOpen(code) {
+      var im = prefs.pda ? 'none' : 'text';
+      modal('<h3 style="margin-top:0">📦 分货</h3><p class="hint">扫商品条码，或输入品名 / 条码后几位。只是查看每家要几箱，不会改点货数量。</p>' +
+        '<div class="bcrow tscan"><input id="fenIn" inputmode="' + im + '" maxlength="64" autocomplete="off" spellcheck="false" placeholder="扫商品码 / 搜品名"><button class="btn cam" id="fenCam" aria-label="相机扫码">📷</button></div>' +
+        '<div id="fenOut"></div><div class="row"><button class="btn ghost" id="fenX">关闭</button></div>', function (m) {
+          var inp = $('#fenIn', m), out = $('#fenOut', m);
+          var go = function (raw) {
+            raw = String(raw || '').trim(); if (!raw) return; inp.value = '';
+            var q = ldNorm(raw), exact = s.items.filter(function (it) { return ldCodes(it).indexOf(q) >= 0; });
+            var list = exact.length ? exact : find(raw);
+            if (list.length === 1) { fenShow(list[0], out); beep(); }
+            else if (!list.length) { errBeep(); out.innerHTML = '<div class="tmsg err">“' + esc(raw) + '”不在这个装车任务里</div>'; }
+            else {
+              out.innerHTML = '<p class="hint">找到 ' + list.length + ' 个，点一个：</p>' + list.slice(0, 40).map(function (it) { return '<button class="ldp" data-fk="' + esc(it.key) + '"><span class="t"><b>' + itemName(it) + '</b><span>' + esc(ldId(it, '')) + ' · ' + esc(it.uom) + '</span></span><span class="n">' + it.req + '</span></button>'; }).join('');
+              Array.prototype.forEach.call(out.querySelectorAll('[data-fk]'), function (b) { b.onclick = function () { fenShow(byKey(b.dataset.fk), out); }; });
+            }
+            setTimeout(function () { if (inp.isConnected) inp.focus(); }, 30);
+          };
+          inp.addEventListener('keydown', function (e) { if (e.key === 'Enter' || e.keyCode === 13) { e.preventDefault(); go(inp.value); } });
+          var pv = 0, pt;
+          inp.addEventListener('input', function () { var n = inp.value.length; clearTimeout(pt); if (n - pv >= 6) pt = setTimeout(function () { if (inp.value) go(inp.value); }, 250); pv = n; });
+          $('#fenX', m).onclick = function () { closeModal(); draw(); };
+          $('#fenCam', m).onclick = function () { closeModal(); openCamera('ld', function (c) { fenOpen(c); }, { label: '商品条码（分货）' }); };
+          if (code) go(code);
+          setTimeout(function () { if (inp.isConnected) inp.focus(); }, 50);
+        });
     }
     // 扫码 / 输入：先精确比对条码和 Item Code；没有就按“后几位”或品名找
     function handle(raw, method) {
