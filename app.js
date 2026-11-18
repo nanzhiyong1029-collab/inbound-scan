@@ -3,7 +3,7 @@
  * 原则：只采集原始资料，不做任何核对。先存手机（离线队列），再上传云端。 */
 (function () {
   'use strict';
-  var VERSION = '1.9.20';
+  var VERSION = '1.9.21';
   var $ = function (s, el) { return (el || document).querySelector(s); };
   var app = $('#app');
 
@@ -1928,7 +1928,7 @@
           setTimeout(function () { if (!srcItems.length) q.focus(); }, 60);
         });
     }
-    function submit() {
+    function submit(skipSrc) {
       if (busy) return;
       if (photoBusy) return infoBox('照片还在处理中', '请等一两秒，照片处理好后再点“提交”。');
       var miss = missing();
@@ -1940,6 +1940,12 @@
       busy = true;
       // v1.8.3 库位释放系统不知道：目的库位系统里还记着别的货 → 当场确认旧货还在不在（覆盖 / 一起放）。离线问不了：后台转仓管
       if (!st.item) return save(null, []);
+      // v1.9.21 没扫来源库位，但这个商品（这个批次）系统里记在别的库位 → 问是不是从那里搬来的（是 = 当作来源，旧库位改掉；不是 = 两边都记）
+      if (!st.src && skipSrc !== true && trSnap) {
+        var bs1 = st.bok ? st.batch : null, it1 = st.item, ls1 = [];
+        trSnap.locs.forEach(function (x) { if (x[1] === it1 && (bs1 == null || x[3] === bs1) && x[0] !== st.dst && ls1.indexOf(x[0]) < 0) ls1.push(x[0]); });
+        if (ls1.length) return askSrc(ls1);
+      }
       if (trSnap) {                                    // v1.9.3 用手机里的库位资料，马上问（不等后台）
         var base0 = st.bok ? st.batch : null, it0 = st.item;
         var o0 = trSnapAt(st.dst).filter(function (x) { return !(x[1] === it0 && (base0 == null || x[3] === base0)); }).map(function (x) {
@@ -1954,6 +1960,17 @@
         if (asked) return; asked = true; clearTimeout(tm);
         askOver((d && d.others) || [], false);
       }, function () { if (asked) return; asked = true; clearTimeout(tm); save(null, []); });
+    }
+    function askSrc(ls) {
+      busy = false; errBeep();
+      modal('<div class="tmiss tsrcask"><div class="tmiss-h"><span class="tmiss-ic">?</span><div><h3>系统里这个货记在别的库位</h3><div class="hint"><b data-nt>' + esc(st.desc || st.item) + '</b>' +
+        (st.bok ? (st.batch ? '（批次 <span data-nt>' + esc(st.batch) + '</span>）' : '（不分批次）') : '') + ' 系统记在 <b data-nt>' + esc(ls.join('、')) + '</b>。你没有扫来源库位：货是从那里搬到 <b data-nt>' + esc(st.dst) + '</b> 的吗？选「是」系统就把那个库位改成 <b data-nt>' + esc(st.dst) + '</b>。</div></div></div>' +
+        '<div class="tovb">' + ls.map(function (l, i) { return '<button class="btn save" data-srcy="' + i + '">是，从 ' + esc(l) + ' 搬过来的</button>'; }).join('') +
+        '<button class="btn ghost" id="srcN">不是，' + esc(ls.join('、')) + ' 那边还有货（都记着）</button><button class="btn ghost" id="srcC">取消</button></div></div>', function (m) {
+          Array.prototype.forEach.call(m.querySelectorAll('[data-srcy]'), function (b) { b.onclick = function () { closeModal(); st.src = ls[+b.dataset.srcy]; mkSteps(); submit(true); }; });
+          $('#srcN', m).onclick = function () { closeModal(); submit(true); };
+          $('#srcC', m).onclick = function () { closeModal(); draw(); };
+        });
     }
     function askOver(o, local) {
         if (!o.length) return save(null, []);
