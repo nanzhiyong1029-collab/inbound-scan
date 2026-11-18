@@ -3,7 +3,7 @@
  * 原则：只采集原始资料，不做任何核对。先存手机（离线队列），再上传云端。 */
 (function () {
   'use strict';
-  var VERSION = '1.9.7';
+  var VERSION = '1.9.8';
   var $ = function (s, el) { return (el || document).querySelector(s); };
   var app = $('#app');
 
@@ -2260,8 +2260,9 @@
             blk.lines.push(cur); gap = 0; return;
           }
           // 折行：品名 / 规格 / 单位太长换到下一行（紧挨着上一行），拼回去
-          if (cur && !o.seq && !o.batch && !o.barcode && !o.qty && (o.desc || o.spec || o.uom) && cur.y - r.y < 40) {
-            if (o.desc) cur.desc += o.desc; if (o.spec) cur.spec += o.spec; if (o.uom) cur.uom += o.uom; cur.y = r.y;
+          // v1.9.8 批次号太长也会折行（2802-BENMART-15- / N01），一起拼回去，不然库位读不出来
+          if (cur && !o.seq && !o.barcode && !o.qty && (o.batch || o.desc || o.spec || o.uom) && cur.y - r.y < 40) {
+            if (o.batch) cur.batch += o.batch.replace(/\s+/g, ''); if (o.desc) cur.desc += o.desc; if (o.spec) cur.spec += o.spec; if (o.uom) cur.uom += o.uom; cur.y = r.y;
           }
         });
       });
@@ -2601,24 +2602,45 @@
       }, function (e) { infoBox('打印不了', e.network ? '没有网络' : e.message); });
     }
     /** 每张 DO 一页：内容和送货单一样（原序号、批次号、条码、品名、数量、规格、单位），只是按 PDA 的库位顺序排；样式和送货单明显不同 */
+    /** v1.9.8 打印前选语言：中文 / 缅甸语（品名、库位号不翻；规格、单位、表头都翻） */
     function printDocs(docs) {
+      modal('<div class="tmiss"><h3>拣货单用哪种语言？</h3><p class="hint">缅甸语版：品名和库位号保持原样，规格、单位、表头都是缅甸语。</p>' +
+        '<div class="row"><button class="btn ghost" id="ppZh">中文</button><button class="btn save" id="ppMy">မြန်မာ（缅甸语）</button></div></div>', function (m) {
+          $('#ppZh', m).onclick = function () { closeModal(); LS.set('ppLang', 'zh'); printDocsL(docs, false); };
+          $('#ppMy', m).onclick = function () { closeModal(); LS.set('ppLang', 'my'); printDocsL(docs, true); };
+        });
+    }
+    var PP_MY = { '拣 货 单': 'ပစ္စည်းထုတ်စာရင်း', 'PICKING LIST · 仓库内部用 · 不是送货单，不随货': 'PICKING LIST · ဂိုဒေါင်တွင်းသုံး · ပို့ဆောင်စာ မဟုတ်ပါ၊ ပစ္စည်းနှင့်အတူ မပို့ရ',
+      '按库位顺序': 'စင်နေရာ အစီအစဉ်အတိုင်း', 'DO 号': 'DO နံပါတ်', '日期': 'ရက်စွဲ', '客户': 'ဖောက်သည်', '行数': 'အကြောင်းရေ', '行': 'ကြောင်း', '合计': 'စုစုပေါင်း', '打印': 'ပုံနှိပ်ချိန်',
+      '库位': 'စင်နေရာ', '原序号': 'မူလ အမှတ်', '批次号': 'အသုတ်နံပါတ်', '条码': 'ဘားကုဒ်', '商品名称': 'ပစ္စည်းအမည်', '数量': 'အရေအတွက်', '规格': 'ထုပ်ပိုးပုံ', '单位': 'ယူနစ်',
+      '没有库位': 'စင်နေရာ မရှိ', '拣货人': 'ထုတ်သူ', '复核人': 'ပြန်စစ်သူ', '第': 'စာမျက်နှာ', '张': '' };
+    /** 规格 / 单位 → 缅甸语：1箱=12瓶 → 1 သေတ္တာ = 12 ပုလင်း（“提”另外翻；只换单位字，数字和 KG/ML 不动） */
+    var PP_UNIT = { '提': 'တွဲ', '单': 'တစ်ခုချင်း' };
+    function ppUnitMy(v) {
+      v = String(v || ''); if (!v) return '';
+      Object.keys(PP_UNIT).forEach(function (k) { v = v.split(k).join(' ' + PP_UNIT[k] + ' '); });
+      v = myText(v);
+      return v.replace(/\s*=\s*/g, ' = ').replace(/\s*\*\s*/g, ' × ').replace(/(\d)(?=[\u1000-\u109f])/g, '$1 ').replace(/\s+/g, ' ').trim();
+    }
+    function printDocsL(docs, my) {
+      var L = function (k) { return my && PP_MY[k] != null ? PP_MY[k] : k; }, U = function (v) { return my ? ppUnitMy(v) : String(v || ''); };
       var now = new Date(Date.now() + 8 * 3600e3).toISOString().replace('T', ' ').slice(0, 16).split(' ');
       var printed = now[0].split('-').reverse().join('/') + ' ' + now[1];
       var html = docs.map(function (D, di) {
         var units = {}, prevLoc = null;
         D.rows.forEach(function (x) { units[x.uom || ''] = Math.round(((units[x.uom || ''] || 0) + (+x.qty || 0)) * 1000) / 1000; });
         return '<section class="pps">' +
-          '<div class="pph"><div class="ppt">拣 货 单<small>PICKING LIST · 仓库内部用 · 不是送货单，不随货</small></div><div class="ppn">按库位顺序</div></div>' +
-          '<table class="ppi"><tr><td>DO 号</td><td><b>' + esc(D.doNo) + '</b></td><td>日期</td><td>' + esc(D.date || '') + '</td></tr>' +
-          '<tr><td>客户</td><td colspan="3"><b>' + esc(D.customer || '—') + '</b></td></tr>' +
-          '<tr><td>行数</td><td>' + D.rows.length + ' 行 · 合计 ' + Object.keys(units).map(function (u) { return units[u] + ' ' + esc(u); }).join(' · ') + '</td><td>打印</td><td>' + esc(printed) + (D.task ? ' · ' + esc(D.task) : '') + '</td></tr></table>' +
-          '<table class="ppl"><thead><tr><th class="c">✓</th><th>库位</th><th class="c2">原序号</th><th>批次号</th><th>条码</th><th>商品名称</th><th class="n">数量</th><th>规格</th><th>单位</th></tr></thead><tbody>' +
+          '<div class="pph"><div class="ppt">' + L('拣 货 单') + '<small>' + L('PICKING LIST · 仓库内部用 · 不是送货单，不随货') + '</small></div><div class="ppn">' + L('按库位顺序') + '</div></div>' +
+          '<table class="ppi"><tr><td>' + L('DO 号') + '</td><td><b>' + esc(D.doNo) + '</b></td><td>' + L('日期') + '</td><td>' + esc(D.date || '') + '</td></tr>' +
+          '<tr><td>' + L('客户') + '</td><td colspan="3"><b>' + esc(D.customer || '—') + '</b></td></tr>' +
+          '<tr><td>' + L('行数') + '</td><td>' + D.rows.length + ' ' + L('行') + ' · ' + L('合计') + ' ' + Object.keys(units).map(function (u) { return units[u] + ' ' + esc(U(u)); }).join(' · ') + '</td><td>' + L('打印') + '</td><td>' + esc(printed) + (D.task ? ' · ' + esc(D.task) : '') + '</td></tr></table>' +
+          '<table class="ppl' + (my ? ' ppmy' : '') + '"><thead><tr><th class="c">✓</th><th>' + L('库位') + '</th><th class="c2">' + L('原序号') + '</th><th>' + L('批次号') + '</th><th>' + L('条码') + '</th><th>' + L('商品名称') + '</th><th class="n">' + L('数量') + '</th><th>' + L('规格') + '</th><th>' + L('单位') + '</th></tr></thead><tbody>' +
           D.rows.map(function (x) {
             var loc = x.loc || '', same = loc === prevLoc; prevLoc = loc;
-            return '<tr class="' + (same ? 'same' : 'newloc') + '"><td class="c"><span class="ppbox"></span></td><td class="pploc">' + (same ? '〃' : '<b>' + esc(loc || '没有库位') + '</b>') + (x.note && !same ? '<div class="ppnote">' + esc(x.note) + '</div>' : '') + '</td>' +
-              '<td class="c2">' + esc(x.row || '') + '</td><td>' + esc(x.batch || '') + '</td><td>' + esc(x.barcode || '') + '</td><td>' + esc(x.desc || '') + '</td><td class="n"><b>' + esc(x.qty) + '</b></td><td>' + esc(x.spec || '') + '</td><td>' + esc(x.uom || '') + '</td></tr>';
+            return '<tr class="' + (same ? 'same' : 'newloc') + '"><td class="c"><span class="ppbox"></span></td><td class="pploc"><b>' + esc(loc || L('没有库位')) + '</b>' + (x.note ? '<div class="ppnote">' + esc(my ? myText(x.note) : x.note) + '</div>' : '') + '</td>' +
+              '<td class="c2">' + esc(x.row || '') + '</td><td>' + esc(x.batch || '') + '</td><td>' + esc(x.barcode || '') + '</td><td>' + esc(x.desc || '') + '</td><td class="n"><b>' + esc(x.qty) + '</b></td><td class="ppspec">' + esc(U(x.spec)) + '</td><td class="ppuom">' + esc(U(x.uom)) + '</td></tr>';
           }).join('') + '</tbody></table>' +
-          '<div class="ppf"><span>拣货人：________________</span><span>复核人：________________</span><span>DO ' + esc(D.doNo) + ' · 第 ' + (di + 1) + ' / ' + docs.length + ' 张</span></div></section>';
+          '<div class="ppf"><span>' + L('拣货人') + '：________________</span><span>' + L('复核人') + '：________________</span><span>DO ' + esc(D.doNo) + ' · ' + L('第') + ' ' + (di + 1) + ' / ' + docs.length + ' ' + L('张') + '</span></div></section>';
       }).join('');
       var box = $('#printArea'); if (!box) { box = document.createElement('div'); box.id = 'printArea'; document.body.appendChild(box); }
       box.innerHTML = html; document.body.classList.add('printing');
