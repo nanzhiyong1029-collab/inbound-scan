@@ -3,7 +3,7 @@
  * 原则：只采集原始资料，不做任何核对。先存手机（离线队列），再上传云端。 */
 (function () {
   'use strict';
-  var VERSION = '1.9.5';
+  var VERSION = '1.9.6';
   var $ = function (s, el) { return (el || document).querySelector(s); };
   var app = $('#app');
 
@@ -2244,7 +2244,15 @@
         };
         var cur = null, gap = 0;
         rows.slice(hi + 1).forEach(function (r) {
-          var o = {}; r.items.forEach(function (t) { var f = colOf(t); o[f] = (o[f] ? o[f] + ' ' : '') + t.s; });
+          var o = {}; r.items.forEach(function (t) {
+            var f = colOf(t), s0 = t.s;
+            // v1.9.6 品名太长（如“（英文版）”）的一截会被算到数量列：数量列里不是数字的部分还给品名
+            if (f === 'qty' && !/^[\d,]+(\.\d+)?$/.test(s0)) {
+              var mq = /^(.*?)\s*([\d,]+(?:\.\d+)?)$/.exec(s0);
+              if (mq && mq[1]) { o.desc = (o.desc || '') + mq[1]; s0 = mq[2]; } else if (!mq) { o.desc = (o.desc || '') + s0; return; }
+            }
+            o[f] = (o[f] ? o[f] + ' ' : '') + s0;
+          });
           if (/^\d+\.?$/.test(o.seq || '')) {
             seq++;
             cur = { row: seq, batch: o.batch || '', barcode: (o.barcode || '').replace(/\s+/g, ''), desc: o.desc || '', qtyRaw: o.qty || '', spec: o.spec || '', uom: o.uom || '', y: r.y };
