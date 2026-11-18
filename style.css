@@ -654,3 +654,6 @@ body.wcon header#bar { display: none; }
 .fenmini { margin: 8px 0; padding: 8px 10px; background: #eef6fb; border: 1px solid #b9d8ea; border-radius: 8px; }
 .fenmini > div { display: flex; justify-content: space-between; gap: 8px; padding: 3px 0; border-top: 1px dashed #cfe3ef; } .fenmini > div:first-of-type { border-top: 0; }
 .fenmini > div b { font-size: 1.15em; white-space: nowrap; }
+
+/* v1.9.11 入库单批量 */
+.inb-log { margin: 6px 0; padding: 6px 10px; background: #f1f8f2; border: 1px solid #cfe6d3; border-radius: 8px; } .inb-log ul { margin: 4px 0 0; padding-left: 18px; }
