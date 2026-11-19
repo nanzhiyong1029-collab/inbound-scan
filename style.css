@@ -696,3 +696,29 @@ body.wcon header#bar { display: none; }
 .ladem { font-size: 13px; color: #b45309; font-weight: 600; } .ladem.hot { color: #b42318; } .ladem.none { color: #98a2b3; font-weight: 400; } .lasort { margin: 0 0 6px; }
 .laloc { margin: 4px 0 2px; } .laloc input { font-size: 20px; font-weight: 700; letter-spacing: 1px; }
 .newin { color: #1d4ed8; font-weight: 600; white-space: nowrap; }
+/* v1.9.25 覆盖确认防看错规格 */
+mark.spec { background: #fde68a; color: #7a2e0e; padding: 0 3px; border-radius: 3px; font-weight: 700; }
+.tovnew { margin: 8px 0 0; padding: 8px 10px; background: #ecfdf3; border: 1px solid #abefc6; border-radius: 8px; font-size: 14px; } .tovnew b { color: #101828; }
+.tover li .tovr, .tover li .tovtw, .tover li .tovw { display: block; margin-top: 3px; font-size: 13px; font-weight: 600; }
+.tover li .tovr { color: #b54708; } .tover li .tovtw { color: #b42318; }
+.tover li .tovw { color: #fff; background: #d92d20; padding: 4px 8px; border-radius: 6px; }
+.tover li.recent { border-color: #f79009; border-width: 2px; }
+/* v1.9.25 查库位 */
+.topline .tlq { margin-left: auto; }
+.lqhelp { padding: 12px; line-height: 1.6; }
+.lqh { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; margin: 10px 0 6px; } .lqh b { font-size: 20px; } .lqh span { color: #475467; font-size: 14px; }
+.lql, .lqlog { list-style: none; margin: 0; padding: 0; }
+.lqr { display: flex; gap: 10px; align-items: flex-start; padding: 10px; border: 1px solid #d0d5dd; border-radius: 8px; margin-bottom: 6px; background: #fff; }
+.lqr.recent { border-color: #f79009; border-width: 2px; }
+.lqt { flex: 1; min-width: 0; } .lqt > b { display: block; font-size: 15px; } .lqt > span { display: block; font-size: 13px; color: #475467; margin-top: 2px; } .lqt > span b { color: #b42318; }
+.lqt .lqm { color: #1a7f37; }
+.lqloc { font-weight: 700; font-size: 15px; padding: 6px 8px; border: 1px solid #84adff; background: #eff4ff; color: #1d4ed8; border-radius: 6px; white-space: nowrap; }
+.lqsub { margin: 14px 0 6px; font-size: 14px; color: #344054; }
+.lqlog li { font-size: 13px; padding: 6px 0; border-bottom: 1px dashed #e4e7ec; }
+.lqsync { margin: 10px 0; }
+/* v1.9.25 摄像头同时认出几个库位码：点选 */
+.campick { position: absolute; left: 0; right: 0; bottom: 0; z-index: 5; background: rgba(16,24,40,.96); padding: 14px 14px 18px; display: flex; flex-direction: column; gap: 10px; }
+.campick-h { color: #fff; font-size: 17px; font-weight: 700; }
+.campick-b { display: flex; align-items: center; gap: 14px; padding: 14px 16px; border-radius: 10px; border: 2px solid #84adff; background: #fff; font-size: 16px; text-align: left; }
+.campick-b span { color: #475467; min-width: 54px; font-weight: 600; } .campick-b b { font-size: 26px; font-family: ui-monospace, Menlo, Consolas, monospace; color: #101828; }
+.campick-r { margin-top: 4px; }
