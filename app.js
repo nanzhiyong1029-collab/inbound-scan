@@ -3,7 +3,7 @@
  * 原则：只采集原始资料，不做任何核对。先存手机（离线队列），再上传云端。 */
 (function () {
   'use strict';
-  var VERSION = '1.9.22';
+  var VERSION = '1.9.23';
   var $ = function (s, el) { return (el || document).querySelector(s); };
   var app = $('#app');
 
@@ -2622,7 +2622,7 @@
         var e = [], w = [];
         if (!l.doNo) e.push('缺 DO 号'); if (!l.barcode && !l.desc && !l.itemCode) e.push('缺条码 / 品名');
         if (!(l.qty > 0)) e.push('数量不对（' + (l.qtyRaw || '空') + '）');
-        if (l.barcode && !/^\d{6,14}$/.test(l.barcode)) w.push('条码不是 6–14 位数字');
+        if (l.barcode && !/^\d{5,20}$/.test(l.barcode)) w.push('条码不是 5–20 位数字');      // v1.9.23 AutoCount 有 15 位的箱码（湖南乡村农家腊肉 694067431801515），以前 6–14 位会误报
         if (!l.barcode && !l.itemCode && l.desc) w.push('没有条码，PDA 上只能按品名搜索');
         if (!l.uom) w.push('没有单位');
         var k = [l.doNo, l.itemCode, l.barcode, l.desc, l.batch, l.qty, l.uom].join('|');
@@ -3160,7 +3160,7 @@
             labels++;
             var val = (t.slice(li + 1).filter(Boolean)[0] || '').trim();
             if (lab === 'u') uom = val;
-            else if (cur) { rows.push([cur.code, cur.desc, uom, /^\d{6,14}$/.test(val) ? val : '']); got++; }
+            else if (cur) { rows.push([cur.code, cur.desc, uom, /^\d{5,20}$/.test(val) ? val : '']); got++; }
             continue;
           }
           var o = {}; cs.forEach(function (x) { o[x.c1] = cellText(x.v); });
