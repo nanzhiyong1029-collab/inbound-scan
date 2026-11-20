@@ -1651,6 +1651,30 @@
         return '<button class="tshelfb" data-sh="' + i + '"><b data-nt>' + esc(x[2] || x[1]) + '</b><span data-nt>' + esc(x[1]) + (x[3] ? ' · 批次 ' + esc(x[3]) : '') + (bb && bb[2] ? ' · 到期 <b>' + esc(bb[2]) + '</b>' : '') + (x[4] !== '已核实' ? ' · 待核实' : '') + '</span></button>';
       }).join('') + '</div>';
     }
+    function itemName(it) { var x = masters && masters.byItem[it]; return x ? x[2] : ''; }
+    /** v1.9.27 箱码栏打字搜商品：选了就用 Item Code 当箱码（和点来源库位上的货一样），不记备用箱码 */
+    function pickItem(item, desc) {
+      st.bc = item; st.item = item; st.desc = desc || itemName(item); st.match = '搜索选择'; st.learn = false; st.newName = ''; st.edit = '';
+      st.batch = ''; st.bexp = ''; st.bok = false; st.bnew = false; st.bst = '';
+      beep(); msg = { cls: 'good', text: '✓ ' + item + ' ' + (st.desc || '') }; loadBatches(); mkSteps(); draw();
+    }
+    function searchItem(q) {
+      var words = q.toUpperCase().split(/\s+/).filter(Boolean), out = [];
+      Object.keys((masters && masters.byItem) || {}).some(function (it) {
+        var d = itemName(it), hay = (d + ' ' + it).toUpperCase();
+        if (words.every(function (w) { return hay.indexOf(w) >= 0 || pyHit(d, w); })) out.push([it, d]);
+        return out.length >= 40;
+      });
+      if (!out.length) { errBeep(); msg = { cls: 'bad', text: '找不到「' + q + '」' + (masters ? '，换个字试试或直接扫箱码' : '（商品资料还没下载好）') }; draw(); return; }
+      if (out.length === 1) return pickItem(out[0][0], out[0][1]);
+      out.sort(function (a, b) { return a[1].length - b[1].length; });
+      modal('<div class="ldq"><div class="ldq-h">搜索「' + esc(q) + '」：' + out.length + (out.length >= 40 ? '+' : '') + ' 个商品，点一个</div><ul class="lql">' +
+        out.map(function (h, i) { return '<li><button class="lqhit" data-si="' + i + '"><b>' + specHtml(h[1] || h[0]) + '</b><span>' + esc(h[0]) + '</span></button></li>'; }).join('') +
+        '</ul><div class="row"><button class="btn ghost" id="siX">取消</button></div></div>', function (m) {
+          Array.prototype.forEach.call(m.querySelectorAll('[data-si]'), function (b) { b.onclick = function () { closeModal(); var h = out[+b.dataset.si]; pickItem(h[0], h[1]); }; });
+          $('#siX', m).onclick = function () { closeModal(); draw(); };
+        });
+    }
     function pickShelf(i) {
       var x = (trSnapAt(st.src) || [])[i]; if (!x) return;
       st.bc = x[1]; st.item = x[1]; st.desc = x[2]; st.match = '库位记录'; st.learn = false; st.newName = ''; st.edit = '';
@@ -1891,6 +1915,9 @@
         var code = bcClean(raw);                                   // v1.9.27 GS1 箱标（(01)…(10)…）/ 隐藏字符 → 后台会退回，先整理
         if (!code) return;
         if (locRe().test(normLoc(raw))) return fail('这是库位条码，请扫描商品箱码');
+        var rq = String(raw).trim();                               // v1.9.27 打字：品名 / 首字母（KSF）/ Item Code → 列出来点选
+        if (masters && masters.byItem[code] && !lookupItem(code)) return pickItem(code, itemName(code));
+        if (/[^\x00-\x7f]/.test(rq) || /\s/.test(rq) || (/^[A-Za-z]{2,12}$/.test(rq) && !lookupItem(code))) return searchItem(rq);
         var it = lookupItem(code) || { itemCode: '', desc: '', match: '未识别' };   // 主档没有也照样记录
         var same = code === st.bc;
         st.bc = code; st.item = it.itemCode; st.desc = it.desc; st.match = it.match; if (!same) { st.learn = false; st.newName = ''; }
