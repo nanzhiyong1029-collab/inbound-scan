@@ -724,3 +724,6 @@ mark.spec { background: #fde68a; color: #7a2e0e; padding: 0 3px; border-radius: 
 .campick-r { margin-top: 4px; }
 .lqhit { display: block; width: 100%; text-align: left; padding: 10px 12px; border: 1px solid #d0d5dd; border-radius: 8px; margin-bottom: 6px; background: #fff; font-size: 15px; }
 .lqhit b { display: block; } .lqhit span { font-size: 13px; color: #475467; }
+/* v1.9.30 一个商品有几个库位：同一个框里一起显示 */
+.pkloc .pkmore { display: block; font-size: 0.72em; line-height: 1.25; margin-top: 2px; opacity: .9; }
+.pkloc.big.multi { line-height: 1.1; }
