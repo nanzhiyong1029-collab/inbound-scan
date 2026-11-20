@@ -3,7 +3,7 @@
  * 原则：只采集原始资料，不做任何核对。先存手机（离线队列），再上传云端。 */
 (function () {
   'use strict';
-  var VERSION = '1.9.25';
+  var VERSION = '1.9.26';
   var $ = function (s, el) { return (el || document).querySelector(s); };
   var app = $('#app');
 
@@ -1486,11 +1486,25 @@
       var it = lookupItem(q), code = it ? it[1] : q;
       return { items: [code], locs: L.filter(function (x) { return x[1] === code; }).map(function (x) { return [x[0], x[1], x[2], x[3], x[4], x[6] || '', x[7] || '', '']; }) };
     }
-    function run(v) {
+    function nameHits(q) {             // v1.9.26 打字搜品名 / Item Code / 首字母（手机里的商品资料）
+      var by = masters && masters.byItem, out = [], words = q.toUpperCase().split(/\s+/).filter(Boolean);
+      if (!by) return out;
+      Object.keys(by).some(function (it) {
+        var d = String(by[it][2] || ''), hay = (d + ' ' + it).toUpperCase();
+        if (words.every(function (w) { return hay.indexOf(w) >= 0; }) || pyHit(d, q)) out.push([it, d]);
+        return out.length >= 40;
+      });
+      return out.sort(function (a, b) { return a[1].length - b[1].length; });
+    }
+    function run(v, isItem) {
       v = normCode(v); if (!v) return;
-      var loc = normLoc(v), isLoc = locRe().test(loc);
+      var loc = normLoc(v), isLoc = !isItem && locRe().test(loc);
+      if (!isLoc && !isItem && !/^\d{5,}$/.test(v) && !lookupItem(v)) {          // 不是库位、不是条码 → 搜商品，点一个再查
+        LQ = { q: v, loc: false, res: null, err: '', busy: false, src: '', hits: nameHits(v) }; draw(); return;
+      }
       LQ = { q: isLoc ? loc : v, loc: isLoc, res: null, err: '', busy: true, src: '' }; draw();
-      var args = isLoc ? { p_loc: loc, p_q: null } : { p_loc: null, p_q: v };
+      var bx = isItem && masters && masters.byItem[v];            // 点的是搜索结果：用这个商品的条码去查（数据库按条码 / Item Code 找）
+      var args = isLoc ? { p_loc: loc, p_q: null } : { p_loc: null, p_q: bx && bx[0] ? String(bx[0]) : v };
       var useLocal = function (why) { return trSnapLoad(false).then(function () { LQ.res = localRes(isLoc ? loc : '', v); LQ.src = 'local'; LQ.err = why; }); };
       var p = navigator.onLine === false ? useLocal('没有网络') : lqRpc(args).then(function (d) { LQ.res = d; LQ.src = 'db'; }, function (e) {
         var m = e && e.message; return useLocal(m === 'NOSB' || m === 'NOFN' ? '数据库还没开通查库位' : e && (e.network || e.name === 'AbortError' || e.name === 'TypeError') ? '数据库连不上' : m);
@@ -1506,6 +1520,9 @@
     }
     function resHtml() {
       if (LQ.busy) return '<div class="empty">查询中…</div>';
+      if (LQ.hits) return !LQ.hits.length ? '<div class="empty">找不到「' + esc(LQ.q) + '」' + (masters ? '' : '（商品资料还没下载好，请稍后再试）') + '</div>' :
+        '<div class="lqh"><b>搜索「' + esc(LQ.q) + '」</b><span>' + LQ.hits.length + (LQ.hits.length >= 40 ? '+' : '') + ' 个商品，点一个看在哪些库位</span></div><ul class="lql">' +
+        LQ.hits.map(function (h) { return '<li><button class="lqhit" data-lqi="' + esc(h[0]) + '"><b>' + specHtml(h[1] || h[0]) + '</b><span>' + esc(h[0]) + '</span></button></li>'; }).join('') + '</ul>';
       var r = LQ.res; if (!r) return LQ.err ? '<div class="tmsg bad">' + esc(LQ.err) + '</div>' : '<div class="hint lqhelp">扫货架上的库位码，看系统记着这里放了什么；扫箱码，看这个货系统记在哪里。<br>和实物对一下：<b>系统有、货架上没有</b>，或者<b>货架上有、系统没有</b> → 用「库位转移」重新扫一次。</div>';
       var head = (LQ.src === 'local' ? '<div class="tmsg bad">' + esc(LQ.err || '') + '，下面是手机里的资料' + (trSnap && trSnap.at ? '（' + hhmm(new Date(trSnap.at).toISOString()) + '）' : '') + '，可能不是最新</div>' : '') +
         (tqCount ? '<div class="tmsg">手机里还有 ' + tqCount + ' 条移库没上传，上传后才会在这里</div>' : '');
@@ -1521,11 +1538,11 @@
       }
       var LL = r.locs || [];
       if (!(r.items || []).length && !LL.length) return head + '<div class="empty">箱码 / 编号 ' + esc(LQ.q) + ' 系统里找不到</div>';
-      return head + '<div class="lqh"><b>' + esc(LL[0] ? LL[0][2] : (lookupItem(LQ.q) || [])[2] || LQ.q) + '</b><span>' + (LL.length ? '系统记在 ' + LL.length + ' 个库位（点库位看那里有什么）' : '系统里还没有库位') + '</span></div>' +
+      return head + '<div class="lqh"><b>' + esc(LL[0] ? LL[0][2] : (lookupItem(LQ.q) || (masters && masters.byItem[LQ.q]) || [])[2] || LQ.q) + '</b><span>' + (LL.length ? '系统记在 ' + LL.length + ' 个库位（点库位看那里有什么）' : '系统里还没有库位') + '</span></div>' +
         (LL.length ? '<ul class="lql">' + LL.map(function (x) { return recHtml(x, true); }).join('') + '</ul>' : '') + foot;
     }
     function draw() {
-      app.innerHTML = '<div class="bcrow tscan"><input id="lqIn" inputmode="text" maxlength="64" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="扫库位码 / 箱码"><button class="btn cam" id="lqCam">📷 扫描</button></div>' +
+      app.innerHTML = '<div class="bcrow tscan"><input id="lqIn" inputmode="text" maxlength="64" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="扫码 / 搜品名（首字母也行）"><button class="btn cam" id="lqCam">📷 扫描</button></div>' +
         '<div id="lqRes">' + resHtml() + '</div><div class="row"><button class="btn ghost" id="lqBack">← 回库位转移</button></div>';
       var inp = $('#lqIn'), prev = 0, t;
       inp.addEventListener('keydown', function (e) { if (e.key === 'Enter' || e.keyCode === 13 || e.key === 'Tab') { e.preventDefault(); run(inp.value); } });
@@ -1534,6 +1551,7 @@
       $('#lqCam').onclick = function () { openCamera('src', function (c) { run(c); }, { label: '库位码 / 箱码', qr: true, multi: camLocOf }); };
       $('#lqBack').onclick = function () { location.hash = '#/t'; };
       Array.prototype.forEach.call(app.querySelectorAll('[data-lq]'), function (b) { b.onclick = function () { run(b.dataset.lq); }; });
+      Array.prototype.forEach.call(app.querySelectorAll('[data-lqi]'), function (b) { b.onclick = function () { run(b.dataset.lqi, true); }; });
     }
     currentRedraw = function () { if (location.hash === '#/tq') draw(); };
     draw();
