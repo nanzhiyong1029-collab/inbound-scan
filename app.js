@@ -3,7 +3,7 @@
  * 原则：只采集原始资料，不做任何核对。先存手机（离线队列），再上传云端。 */
 (function () {
   'use strict';
-  var VERSION = '1.9.26';
+  var VERSION = '1.9.27';
   var $ = function (s, el) { return (el || document).querySelector(s); };
   var app = $('#app');
 
@@ -1322,6 +1322,14 @@
     return m ? ('0' + m[1]).slice(-2) + '-' + m[2] + '-' + ('0' + m[3]).slice(-2) : s;
   }
   function normCode(v) { return String(v || '').replace(/[\r\n\t]/g, '').trim(); }
+  /** v1.9.27 移库箱码：去掉扫描枪前缀（]C1）、GS1 分隔符等隐藏字符、括号和空格；GS1-128 箱标只取 (01) 后面的 14 位商品码。
+   *  以前这些会被后台以「箱码格式不对」退回（后台只收 字母 / 数字 / - . /） */
+  function bcClean(v) {
+    var raw = String(v == null ? '' : v), s = raw.replace(/^\][A-Za-z]\d/, '').replace(/[\u0000-\u001f\u007f\u00a0]/g, ' ').replace(/[()\s]/g, '');
+    var gs1 = /[()\u001d]|^\]/.test(raw) || (s.length > 16 && /^01\d{14}(1[0-7]|2[0-2]|3\d|4\d|9\d)/.test(s));
+    var m = /^01(\d{14})/.exec(s);
+    return gs1 && m ? m[1] : s;
+  }
   function lookupItem(code) {
     if (!masters) return null;
     var x = masters.byBarcode[code] || masters.byBarcode[String(code).replace(/^0+/, '')];
@@ -1397,13 +1405,16 @@
     if (tqFlushing) { tqAgain = true; return tqFlushing; }   // 正在上传时又提交了新的：这轮结束后马上再传一轮
     if (!cfg || !sess) return Promise.resolve();
     tqFlushing = refreshTq().then(function (list) {
+      list.forEach(function (r) {                 // v1.9.27 以前因为箱码有隐藏字符 / GS1 括号被退回的：整理后重新上传
+        if (r.rejected && /箱码格式不对/.test(r.rejected) && r.operator === operator) { var c = bcClean(r.barcode); if (c && /^[0-9A-Za-z][0-9A-Za-z\-.\/]*$/.test(c)) { r.barcode = c; delete r.rejected; IDB.put(r).catch(function () { }); } }
+      });
       var mine = list.filter(function (r) { return !r.rejected && r.operator === operator; })
         .sort(function (a, b) { return String(a.clientTime).localeCompare(String(b.clientTime)); });
       var done = 0;
       function next(i) {
         if (i >= mine.length) return Promise.resolve();
         var r = mine[i];
-        var body = { transferId: r.transferId, source: r.source, dest: r.dest, barcode: r.barcode, qty: r.qty || '', photo: r.photo, clientTime: r.clientTime };
+        var body = { transferId: r.transferId, source: r.source, dest: r.dest, barcode: bcClean(r.barcode), qty: r.qty || '', photo: r.photo, clientTime: r.clientTime };
         if (r.batch != null) body.batch = r.batch;
         if (r.learnItem) body.learnItem = r.learnItem; else if (r.newName) body.newName = r.newName;     // v1.9.2 当场认出的箱码
         if (r.over === true || r.over === false) { body.over = r.over; body.seen = r.seen || []; if (r.kept) body.kept = r.kept; }
@@ -1765,7 +1776,7 @@
           '<input id="tPhotoAlt" class="vh" type="file" accept="image/*" tabindex="-1" aria-hidden="true">' : '') +
         (tqCount ? '<p class="hint">待上传 ' + tqCount + ' 笔（联网后自动上传）</p>' : '') +
         (tqRejected.length ? '<div class="card"><b class="err">被退回 ' + tqRejected.length + ' 笔（请检查后删除）</b>' + tqRejected.map(function (r) {
-          return '<div class="trow"><div>' + esc(r.source || '—') + ' → ' + esc(r.dest) + ' · ' + esc(r.itemCode || r.barcode) + '<div class="err hint">' + esc(r.rejected) + '</div></div><button class="tbtn" data-tdel="' + esc(r.transferId) + '">删除</button></div>';
+          return '<div class="trow"><div>' + esc(r.source || '—') + ' → ' + esc(r.dest) + ' · ' + esc(r.itemCode || r.barcode) + (r.itemCode ? ' · 箱码 ' + esc(JSON.stringify(String(r.barcode || '')).slice(1, -1)) : '') + '<div class="err hint">' + esc(r.rejected) + '</div></div><button class="tbtn" data-tdel="' + esc(r.transferId) + '">删除</button></div>';
         }).join('') + '</div>' : '') +
         '<div id="tRecent">' + recentHtml() + '</div>' +
         '<div id="dock" class="dock"><button class="btn ghost" id="tReset" style="flex:0 0 32%">重新开始</button><button class="btn save' + (missing().length ? ' notready' : '') + '" id="tSubmit"' + (busy ? ' disabled' : '') + '>' + (missing().length ? '提交 <small>（还差 ' + missing().length + ' 项）</small>' : '提交') + '</button></div>';
@@ -1877,7 +1888,7 @@
         if (k === 'src' && st.dst && loc === st.dst) return fail('来源库位和目的库位相同：' + loc);
         st[k] = loc;
       } else if (k === 'bc') {
-        var code = normCode(raw);
+        var code = bcClean(raw);                                   // v1.9.27 GS1 箱标（(01)…(10)…）/ 隐藏字符 → 后台会退回，先整理
         if (!code) return;
         if (locRe().test(normLoc(raw))) return fail('这是库位条码，请扫描商品箱码');
         var it = lookupItem(code) || { itemCode: '', desc: '', match: '未识别' };   // 主档没有也照样记录
