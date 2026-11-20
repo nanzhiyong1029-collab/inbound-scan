@@ -3,7 +3,7 @@
  * 原则：只采集原始资料，不做任何核对。先存手机（离线队列），再上传云端。 */
 (function () {
   'use strict';
-  var VERSION = '1.9.27';
+  var VERSION = '1.9.28';
   var $ = function (s, el) { return (el || document).querySelector(s); };
   var app = $('#app');
 
@@ -1406,7 +1406,7 @@
     if (!cfg || !sess) return Promise.resolve();
     tqFlushing = refreshTq().then(function (list) {
       list.forEach(function (r) {                 // v1.9.27 以前因为箱码有隐藏字符 / GS1 括号被退回的：整理后重新上传
-        if (r.rejected && /箱码格式不对/.test(r.rejected) && r.operator === operator) { var c = bcClean(r.barcode); if (c && /^[0-9A-Za-z][0-9A-Za-z\-.\/]*$/.test(c)) { r.barcode = c; delete r.rejected; IDB.put(r).catch(function () { }); } }
+        if (r.rejected && /箱码格式不对/.test(r.rejected) && r.operator === operator) { var c = bcClean(r.barcode); if (/^\d{6,20}$/.test(c)) { r.barcode = c; delete r.rejected; IDB.put(r).catch(function () { }); } }
       });
       var mine = list.filter(function (r) { return !r.rejected && r.operator === operator; })
         .sort(function (a, b) { return String(a.clientTime).localeCompare(String(b.clientTime)); });
@@ -2021,8 +2021,8 @@
       });
       var choose = function (item, desc) {
         if (st.bc !== code) return closeModal();
-        closeModal(); st.item = item; st.desc = desc || nameOf(item); st.match = '仓管认出'; st.learn = true; st.newName = '';
-        beep(); msg = { cls: 'good', text: '✓ 箱码 ' + code + ' 是 ' + st.item + ' ' + (st.desc || '') + '（提交时系统记住）' };
+        closeModal(); st.item = item; st.desc = desc || nameOf(item); st.match = '仓管认出'; st.learn = /^\d{6,20}$/.test(bcClean(st.bc)); st.newName = ''; if (!st.learn) st.bc = item;     // v1.9.28 不像条码（随便打的字）：不记住，当作选了这个商品
+        beep(); msg = { cls: 'good', text: st.learn ? '✓ 箱码 ' + code + ' 是 ' + st.item + ' ' + (st.desc || '') + '（提交时系统记住）' : '✓ ' + st.item + ' ' + (st.desc || '') };
         loadBatches(); draw();
       };
       var listHtml = function (arr, empty) { return arr.length ? arr.map(function (x, i) { return '<button class="lmpi" data-uk="' + i + '"><b data-nt>' + esc(x.desc || x.item) + '</b><span data-nt>' + esc(x.item) + (x.exp ? ' · 到期 ' + esc(x.exp) : '') + '</span></button>'; }).join('') : '<p class="hint">' + empty + '</p>'; };
