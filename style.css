@@ -727,3 +727,17 @@ mark.spec { background: #fde68a; color: #7a2e0e; padding: 0 3px; border-radius: 
 /* v1.9.30 一个商品有几个库位：同一个框里一起显示 */
 .pkloc .pkmore { display: block; font-size: 0.72em; line-height: 1.25; margin-top: 2px; opacity: .9; }
 .pkloc.big.multi { line-height: 1.1; }
+/* v1.9.31 拣货单库位格：本批次库位 + 备用（相近批次），每个库位前一个圈 */
+.pploc { white-space: normal; min-width: 30mm; }
+.ppm { display: flex; flex-wrap: wrap; gap: 1mm 2mm; }
+.ppo { display: inline-flex; align-items: center; gap: 1mm; font-size: 12pt; font-weight: 700; white-space: nowrap; }
+.ppo::before { content: ''; display: inline-block; width: 3.6mm; height: 3.6mm; border: 1.2px solid #000; border-radius: 50%; }
+.ppo.unv { font-weight: 400; border: 1px dashed #555; padding: 0 1mm; border-radius: 2px; }
+.ppnone { font-size: 10pt; font-weight: 700; }
+.ppalt { margin-top: 1.5mm; padding-top: 1mm; border-top: 1px dotted #777; font-size: 9pt; }
+.ppalt i { font-style: normal; font-size: 8pt; color: #333; display: block; }
+.ppalt > div { display: flex; flex-wrap: wrap; align-items: center; gap: 1mm 2mm; margin-top: 0.5mm; }
+.ppalt .ppab { font-weight: 700; font-size: 9pt; }
+.ppalt .ppo { font-size: 10pt; }
+.pplg { margin-top: 3mm; font-size: 9pt; border: 1px solid #999; padding: 1.5mm 2mm; }
+.pkalt { color: #b54708; }
