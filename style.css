@@ -741,3 +741,44 @@ mark.spec { background: #fde68a; color: #7a2e0e; padding: 0 3px; border-radius: 
 .ppalt .ppo { font-size: 10pt; }
 .pplg { margin-top: 3mm; font-size: 9pt; border: 1px solid #999; padding: 1.5mm 2mm; }
 .pkalt { color: #b54708; }
+/* v1.9.32 托盘：托盘页（贴码 / 拿空了 / 查询）+ 库位转移的托盘模式 */
+.pltabs { display: flex; gap: 6px; margin-bottom: 8px; }
+.plt { flex: 1; padding: 11px 4px; font: 600 16px/1.2 inherit; border-radius: 10px; border: 2px solid var(--line); background: #fff; color: inherit; }
+.plt.on { background: #0f766e; border-color: #0f766e; color: #fff; }
+.plcard { padding: 10px 12px; border-left: 5px solid #0f766e; }
+.plcard.plout { border-left-color: #9ca3af; background: #f6f7f9; }
+.plcard.plin { margin: 6px 0 0; }
+.plc-h { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.pllpn { font-size: 18px; letter-spacing: .3px; }
+.plwhere { font-weight: 700; color: #0f766e; }
+.plout .plwhere { color: #6b7280; }
+.plln, .plbl { border-top: 1px solid var(--line); padding: 7px 0 4px; margin-top: 6px; }
+.plln-t { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
+.plln-b { font-size: 14px; margin-top: 2px; }
+.plpend { color: #b45309; font-weight: 700; }
+.plsrc { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin: 8px 0; }
+.plf { display: flex; flex-direction: column; gap: 3px; margin: 6px 0; font-size: 13px; color: var(--mute); }
+.plf input, .plf select { font: 16px inherit; padding: 9px 8px; border: 1px solid var(--line); border-radius: 8px; color: var(--ink, #111); background: #fff; }
+.plf2 { display: flex; gap: 10px; } .plf2 .plf { flex: 1; min-width: 0; }
+.plf input, .plf select { width: 100%; box-sizing: border-box; min-width: 0; }
+.plsides { display: flex; gap: 10px; margin: 8px 0; }
+.plside { flex: 1; min-height: 110px; display: flex; flex-direction: column; gap: 4px; align-items: flex-start; text-align: left; padding: 10px; border-radius: 12px; border: 2px dashed #9ca3af; background: #fff; font: 14px/1.3 inherit; color: inherit; }
+.plside.full { border: 2px solid #0f766e; background: #ecfdf5; }
+.plside:disabled { opacity: .45; }
+.plside i { font-style: normal; color: #1f3864; font-weight: 700; margin-top: auto; }
+.pls-h { font-weight: 700; font-size: 16px; }
+.plqs { border-top: 1px solid var(--line); padding-top: 6px; margin-top: 8px; }
+.plul { display: flex; flex-direction: column; align-items: flex-start; width: 100%; padding: 8px 4px; border: 0; border-bottom: 1px solid var(--line); background: none; text-align: left; font: 14px inherit; color: inherit; }
+.plsteps { display: flex; gap: 6px; margin-bottom: 8px; }
+.plsteps span { flex: 1; text-align: center; padding: 6px 2px; border-radius: 8px; background: #eef0f3; font-size: 13px; }
+.plsteps .on { background: #0f766e; color: #fff; font-weight: 700; }
+.plsteps .ok { background: #dcfce7; color: #1a7f37; }
+.plone { border-left: 5px solid #b45309; }
+.pldone { border-left: 5px solid #1a7f37; font-size: 16px; }
+.plhint { margin: 6px 0; }
+.plh { display: flex; flex-wrap: wrap; gap: 6px; padding: 5px 0; border-top: 1px solid var(--line); font-size: 13px; }
+.plk { font-weight: 700; color: #0f766e; min-width: 4.5em; }
+.mods.m6 { gap: 4px; } .mods.m6 .mod { font-size: 14px; padding: 10px 0; letter-spacing: 0; }
+/* v1.9.33 托盘：提交中 / 更新中 */
+.plbusy { margin: 8px 0; padding: 8px 10px; border-radius: 8px; background: #fff4ce; color: #7a5b00; font-weight: 600; text-align: center; }
+.plupd { display: inline-block; margin: 4px 0; padding: 2px 8px; border-radius: 10px; background: #eef2f7; color: #555; font-size: 12px; font-weight: normal; }
