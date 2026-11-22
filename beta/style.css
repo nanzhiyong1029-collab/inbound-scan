@@ -812,3 +812,7 @@ mark.spec { background: #fde68a; color: #7a2e0e; padding: 0 3px; border-radius: 
 .ofdel td{color:#888}
 .ofdet{max-height:60vh;overflow:auto}
 .tbtn.red{color:#b42318;border-color:#f3c3be}
+/* v1.9.35 规格书 6.4 改正 */
+.plfix{border:2px solid #f59e0b}
+.plfixadd{background:#fffbeb}
+.plpf .rtab-t select{max-width:220px}
