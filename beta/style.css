@@ -740,6 +740,8 @@ mark.spec { background: #fde68a; color: #7a2e0e; padding: 0 3px; border-radius: 
 .ppalt .ppab { font-weight: 700; font-size: 9pt; }
 .ppalt .ppo { font-size: 10pt; }
 .pplg { margin-top: 3mm; font-size: 9pt; border: 1px solid #999; padding: 1.5mm 2mm; }
+.pplg.pprule { margin-top: 1.5mm; font-weight: 700; border: 1.5px solid #000; }
+.ppo.ppplt { font-weight: 700; }
 .pkalt { color: #b54708; }
 /* v1.9.32 托盘：托盘页（贴码 / 拿空了 / 查询）+ 库位转移的托盘模式 */
 .pltabs { display: flex; gap: 6px; margin-bottom: 8px; }
@@ -816,5 +818,6 @@ mark.spec { background: #fde68a; color: #7a2e0e; padding: 0 3px; border-radius: 
 .plfix{border:2px solid #f59e0b}
 .plfixadd{background:#fffbeb}
 .plpf .rtab-t select{max-width:220px}
-/* v1.9.42-1 紧急切回按钮 */
+/* v1.9.42 紧急切回按钮 */
 .btn.red{background:#b42318;color:#fff}
+.oldn { display: block; font-size: 10px; font-weight: 400; opacity: .7; line-height: 1.1; }
