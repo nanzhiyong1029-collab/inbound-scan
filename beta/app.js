@@ -3,7 +3,7 @@
  * 原则：只采集原始资料，不做任何核对。先存手机（离线队列），再上传云端。 */
 (function () {
   'use strict';
-  var VERSION = '1.9.42-2';
+  var VERSION = '1.9.44-1';
   var $ = function (s, el) { return (el || document).querySelector(s); };
   var app = $('#app');
 
@@ -166,7 +166,7 @@
       clearTimeout(timer);
       setOnline(true);
       // AWMS 0.9 过渡版：旧后台（Apps Script）搬家后回 MOVED + 新后台网址 → 本机改连新后台，同一个请求再送一次
-      if (d && d.error === 'MOVED' && typeof d.to === 'string' && /^https:\/\/([a-z0-9-]+\.onrender\.com|script\.google\.com\/macros\/s\/[\w-]{20,})\/exec$/.test(d.to) && !params.__moved) {      // v1.9.42-1 切回旧后台也一样
+      if (d && d.error === 'MOVED' && typeof d.to === 'string' && /^https:\/\/([a-z0-9-]+\.onrender\.com|script\.google\.com\/macros\/s\/[\w-]{20,})\/exec$/.test(d.to) && !params.__moved) {      // v1.9.42 切回旧后台也一样
         if (cfg.u !== d.to) { cfg.u = d.to; LS.set('cfg', cfg); sbForget(); }      // 换了后台 = 换了数据库：手机记住的数据库地址作废；同时发出的几个请求，别的已经改过了也照样再送一次
         return api(Object.assign({}, params, { __moved: true }), post);
       }
@@ -1649,8 +1649,10 @@
   }
   /** v1.9.35 作废的标签（并入别托 / 整托换了新标签）：提示文字；没作废 = '' */
   function plVoidMsg(v) { return !v ? '' : v.status === 'MERGED' ? '这张标签已作废（已并入 ' + v.into + '），请撕掉' : v.status === 'REPLACED' ? '这张标签已作废（已换成 ' + v.into + '），请撕掉' : ''; }
-  function plLineHtml(x, btn) {
+  function plLineHtml(x, btn, v) {
+    var ls = v && x.st && (x.st + '|' + x.sc) !== (v.st + '|' + v.sc) ? plSrcTxt(x) : '';      // v1.9.44-1 来源记在每一行货上：和这托（最初贴码的任务）不一样就写出来
     return '<div class="plln"><div class="plln-t"><b data-nt>' + esc(x.desc || (x.item ? x.item : '待认商品')) + '</b>' + (btn || '') + '</div>' +
+      (ls ? '<div class="hint plsrc" data-nt>来源：' + esc(ls) + '</div>' : '') +
       '<div class="hint" data-nt>' + (x.item ? esc(x.item) + ' · ' : '') + '箱码 ' + esc(x.bc) + '</div>' +
       '<div class="plln-b">' + (x.conf ? '批次 <b>' + esc(x.batch) + '</b>' : '<span class="plpend">批次待定</span>') + (x.exp ? ' · 到期 <b>' + esc(x.exp.slice(0, 2) + '/' + x.exp.slice(2)) + '</b>' : '') + (x.ctn !== '' && x.ctn != null ? ' · ' + esc(x.ctn) + ' 箱' : '') + '</div></div>';
   }
@@ -1658,8 +1660,8 @@
     opts = opts || {};
     if (!v) return '';
     return '<div class="card plcard' + (v.status !== 'IN_STOCK' ? ' plout' : '') + (opts.cls ? ' ' + opts.cls : '') + '"><div class="plc-h"><b class="pllpn">' + esc(v.lpn) + '</b><span class="plwhere">' + esc(plWhere(v)) + '</span></div>' +
-      (plSrcTxt(v) ? '<div class="hint">' + esc(plSrcTxt(v)) + '</div>' : '') +
-      (v.items || []).map(function (x) { return plLineHtml(x, opts.lineBtn ? opts.lineBtn(x) : ''); }).join('') + (opts.extra || '') + '</div>';
+      (plSrcTxt(v) ? '<div class="hint">' + esc(plSrcTxt(v)) + ((v.items || []).some(function (x) { return x.st && (x.st + '|' + x.sc) !== (v.st + '|' + v.sc); }) ? '（最初贴码的任务）' : '') + '</div>' : '') +
+      (v.items || []).map(function (x) { return plLineHtml(x, opts.lineBtn ? opts.lineBtn(x) : '', v); }).join('') + (opts.extra || '') + '</div>';
   }
   var PL_KIND = { PRINT: '登记标签', BIND: '贴码', PUTAWAY: '上架', MOVE: '移库', SPLIT: '拆托', MERGE: '并托', ITEM_OUT: '一样拿完了', EMPTY: '拿空了', RESTORE: '恢复', EDIT: '补批次' };
   var PL_EDIT = { add: '补一样', remove: '删掉一样', task: '改任务', batch: '改批次', unpair: '取消配对', relabel: '换标签', identify: '认出商品' };
