@@ -3,7 +3,7 @@
  * 原则：只采集原始资料，不做任何核对。先存手机（离线队列），再上传云端。 */
 (function () {
   'use strict';
-  var VERSION = '1.9.42-1';
+  var VERSION = '1.9.42-2';
   var $ = function (s, el) { return (el || document).querySelector(s); };
   var app = $('#app');
 
@@ -166,8 +166,8 @@
       clearTimeout(timer);
       setOnline(true);
       // AWMS 0.9 过渡版：旧后台（Apps Script）搬家后回 MOVED + 新后台网址 → 本机改连新后台，同一个请求再送一次
-      if (d && d.error === 'MOVED' && typeof d.to === 'string' && /^https:\/\/([a-z0-9-]+\.onrender\.com|script\.google\.com\/macros\/s\/[\w-]{20,})\/exec$/.test(d.to) && cfg.u !== d.to && !params.__moved) {      // v1.9.42-1 切回旧后台也一样
-        cfg.u = d.to; LS.set('cfg', cfg); sbForget();      // 换了后台 = 换了数据库：手机记住的数据库地址作废
+      if (d && d.error === 'MOVED' && typeof d.to === 'string' && /^https:\/\/([a-z0-9-]+\.onrender\.com|script\.google\.com\/macros\/s\/[\w-]{20,})\/exec$/.test(d.to) && !params.__moved) {      // v1.9.42-1 切回旧后台也一样
+        if (cfg.u !== d.to) { cfg.u = d.to; LS.set('cfg', cfg); sbForget(); }      // 换了后台 = 换了数据库：手机记住的数据库地址作废；同时发出的几个请求，别的已经改过了也照样再送一次
         return api(Object.assign({}, params, { __moved: true }), post);
       }
       if (!d.ok) {
