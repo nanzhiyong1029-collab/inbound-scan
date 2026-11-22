@@ -3,7 +3,7 @@
  * 原则：只采集原始资料，不做任何核对。先存手机（离线队列），再上传云端。 */
 (function () {
   'use strict';
-  var VERSION = '1.9.36-1';
+  var VERSION = '1.9.37-1';
   var $ = function (s, el) { return (el || document).querySelector(s); };
   var app = $('#app');
 
@@ -167,7 +167,7 @@
       setOnline(true);
       // AWMS 0.9 过渡版：旧后台（Apps Script）搬家后回 MOVED + 新后台网址 → 本机改连新后台，同一个请求再送一次
       if (d && d.error === 'MOVED' && typeof d.to === 'string' && /^https:\/\/[a-z0-9-]+\.onrender\.com\/exec$/.test(d.to) && cfg.u !== d.to && !params.__moved) {
-        cfg.u = d.to; LS.set('cfg', cfg);
+        cfg.u = d.to; LS.set('cfg', cfg); sbForget();      // 换了后台 = 换了数据库：手机记住的数据库地址作废
         return api(Object.assign({}, params, { __moved: true }), post);
       }
       if (!d.ok) {
@@ -1503,18 +1503,21 @@
 
   // —— v1.9.25 查库位：扫库位 → 系统里这里有什么货；扫箱码 → 这个货系统记在哪些库位。
   //    读 Supabase（表格每分钟推一次，比读表格快很多）；连不上 → 用手机里的库位资料
+  /** AWMS 0.9 过渡版：切换到新数据库后，手机 / 中控台记住的旧数据库地址作废，下次重新问后台要（不会还连旧库） */
+  function sbForget() { lqSb = null; LS.del('lqsb'); if (WC) WC.sb = null; }
   var lqSb = LS.get('lqsb', null), LQ = { q: '', res: null, err: '', busy: false, src: '' };
   var LQ_ACT = { BIND: '绑定', MOVE: '移库', VERIFY: '核实', REMOVE: '移走', UNDO: '撤回', OVERWRITE: '覆盖移走', MERGE: '合并', IMPORT: '导入', INBOUND: '入库单' };
   function lqCfg(push) {
-    if (lqSb && lqSb.url && !push) return Promise.resolve(lqSb);
-    return api({ action: 'lqSbCfg', push: push ? 1 : 0 }, true).then(function (c) { if (!c || !c.url) throw new Error('NOSB'); lqSb = c; LS.set('lqsb', { url: c.url, anon: c.anon }); return c; });
+    if (lqSb && lqSb.url && lqSb.api === cfg.u && !push) return Promise.resolve(lqSb);      // 只认同一个后台给的地址
+    return api({ action: 'lqSbCfg', push: push ? 1 : 0 }, true).then(function (c) { if (!c || !c.url) throw new Error('NOSB'); lqSb = { url: c.url, anon: c.anon, api: cfg.u }; LS.set('lqsb', lqSb); return lqSb; });
   }
   function lqRpc(args, again) {
     return lqCfg(again).then(function (c) {
       var h = { 'Content-Type': 'application/json', apikey: c.anon }; if (!/^sb_publishable_/.test(c.anon)) h.Authorization = 'Bearer ' + c.anon;
       var ac = typeof AbortController === 'function' ? new AbortController() : null, tm = ac && setTimeout(function () { ac.abort(); }, 8000);
       return fetch(c.url + '/rest/v1/rpc/pda_loc', { method: 'POST', headers: h, body: JSON.stringify(Object.assign({ p_token: cfg.d, p_sess: sess ? sess.t : '' }, args)), signal: ac ? ac.signal : undefined })
-        .then(function (r) { clearTimeout(tm); if (r.status === 404) throw new Error('NOFN'); if (!r.ok) throw new Error('数据库 ' + r.status); return r.json(); });
+        .then(function (r) { clearTimeout(tm); if (r.status === 404) throw new Error('NOFN'); if (!r.ok) throw new Error('数据库 ' + r.status); return r.json(); })
+        .catch(function (e) { clearTimeout(tm); if (!again && e.message !== 'NOFN') { lqSb = null; LS.del('lqsb'); return lqRpc(args, true); } throw e; });      // 数据库连不上（例如旧库已停）：重新问后台要地址再试一次
     }).then(function (d) {
       if (d && d.error === 'DEVICE') { if (!again) return lqRpc(args, true); throw new Error('数据库还不认得这次登录，请 1 分钟后再试'); }
       return d;
@@ -4744,15 +4747,16 @@
       if (PF === 'wc') args = Object.assign({ p_sess: sess ? sess.t : '' }, args);
       var h = { 'Content-Type': 'application/json', apikey: W.sb.anon }; if (!/^sb_publishable_/.test(W.sb.anon)) h.Authorization = 'Bearer ' + W.sb.anon;
       return fetch(W.sb.url + '/rest/v1/rpc/' + fn, { method: 'POST', headers: h, body: JSON.stringify(args) }).then(function (r) {
-        if (!r.ok) throw new Error('数据库 ' + r.status); return r.json();
-      }).then(function (d) { if (d && d.error === 'DEVICE') throw new Error(PF === 'wc' ? '数据库还没认得这次登录（刚登录请等 1 分钟再点重试），或登录已过期请重新登录' : '这台设备没有中控台权限（或已被撤销）'); return d; });
+        if (!r.ok) { W.sb = null; throw new Error('数据库 ' + r.status); } return r.json();      // 出错就忘掉数据库地址：下次重新问后台要（切换新库后不会还连旧库）
+      }, function (e) { W.sb = null; throw e; }).then(function (d) { if (d && d.error === 'DEVICE') throw new Error(PF === 'wc' ? '数据库还没认得这次登录（刚登录请等 1 分钟再点重试），或登录已过期请重新登录' : '这台设备没有中控台权限（或已被撤销）'); return d; });
     }
-    function load(force) {
+    function load(force, again) {
       if (PF === 'wc' && !sess) return Promise.resolve();
       W.busy = true; paintTop();
-      var cfgP = W.sb ? Promise.resolve(W.sb) : api({ action: PF + 'SbCfg' }, true).then(function (c) { if (!c.url) throw new Error('还没设置中控台数据库：请在表格菜单【中控台数据库（Supabase）设置】'); W.sb = c; return c; });
+      var cached = !!W.sb, cfgP = W.sb ? Promise.resolve(W.sb) : api({ action: PF + 'SbCfg' }, true).then(function (c) { if (!c.url) throw new Error('还没设置中控台数据库：请在表格菜单【中控台数据库（Supabase）设置】'); W.sb = c; return c; });
       return cfgP.then(function () { return rpc('wc_snapshot', { p_token: cfg.d }); }).then(function (s) { W.snap = build(s); W.err = ''; W.busy = false; W.at = Date.now(); draw(); },
-        function (e) { W.busy = false; W.err = e.network ? '网络不可用' : e.message; draw(); });
+        function (e) { if (cached && !W.sb && !again) return load(force, true);      // 记着的数据库连不上（例如切换后旧库已停）：重新问后台要地址，马上再读一次
+          W.busy = false; W.err = e.network ? '网络不可用' : e.message; draw(); });
     }
     /** 原始快照 → 好用的索引 */
     function build(s) {
