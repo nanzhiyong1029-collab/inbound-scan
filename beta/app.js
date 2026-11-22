@@ -3,7 +3,7 @@
  * 原则：只采集原始资料，不做任何核对。先存手机（离线队列），再上传云端。 */
 (function () {
   'use strict';
-  var VERSION = '1.9.45-1';
+  var VERSION = '1.9.46-1';
   var $ = function (s, el) { return (el || document).querySelector(s); };
   var app = $('#app');
 
@@ -1664,7 +1664,7 @@
       (v.items || []).map(function (x) { return plLineHtml(x, opts.lineBtn ? opts.lineBtn(x) : '', v); }).join('') + (opts.extra || '') + '</div>';
   }
   var PL_KIND = { PRINT: '登记标签', BIND: '贴码', PUTAWAY: '上架', MOVE: '移库', SPLIT: '拆托', MERGE: '并托', ITEM_OUT: '单品出完', EMPTY: '拿空了', RESTORE: '恢复', EDIT: '补批次' };
-  var PL_EDIT = { add: '添加商品', remove: '移除商品', task: '更改任务', batch: '更改批次', unpair: '取消批次', relabel: '更换标签', identify: '识别商品' };      // v1.9.45-1 规格书 6.4 按钮改名（只改显示）
+  var PL_EDIT = { add: '添加商品', remove: '移除商品', task: '更改任务', batch: '更改批次', unpair: '取消批次', relabel: '更换标签', identify: '识别商品' };      // v1.9.45 规格书 6.4 按钮改名（只改显示）
   function plKindTxt(e) { var d = e.d || {}; if (e.kind !== 'EDIT') return PL_KIND[e.kind] || e.kind; return d.op && PL_EDIT[d.op] ? PL_EDIT[d.op] : d.grn ? 'GRN 配批次' : d.source_code ? '改来源' : PL_KIND.EDIT; }
   function plHistHtml(v) {
     if (!v || !v.hist) return '';
@@ -2226,7 +2226,7 @@
     }
     function fixTaskName(id) { var t = plSnap && plSnap.tasks ? plSnap.tasks.filter(function (x) { return x.id === id; })[0] : null; return t ? t.sc : id; }
     function fixHtml() {
-      var F = S.fix, v = F.pal, conf = v.items.some(function (x) { return x.conf; }), A = F.add;
+      var F = S.fix, v = F.pal, conf = v.items.some(function (x) { return x.conf; }), pend = v.items.filter(function (x) { return !x.conf; }), A = F.add;      // v1.9.46-1 有待定的行就能更改任务（只改待定的，和后台一样）
       return '<div class="card plfix"><div class="plc-h"><b class="pllpn">' + esc(v.lpn) + '</b><span class="hint">更正托盘 · ' + esc(plWhere(v)) + '</span></div>' +
         '<div class="hint">贴码任务：<b>' + esc(v.task ? fixTaskName(v.task) : '（没有任务）') + '</b> · ' + esc(plSrcTxt(v)) + (v.task && curTask() && v.task !== curTask().id ? ' <span class="plpend">不是现在选的任务</span>' : '') + '</div>' +
         v.items.map(function (x) { return plLineHtml(x, v.items.length > 1 ? '<button class="tbtn red" data-fxrm="' + x.id + '">✕ 移除商品</button>' : ''); }).join('') +
@@ -2234,7 +2234,7 @@
           '<div class="plf2"><label class="plf"><span>到期年月（选填）</span><input id="fxExp" inputmode="numeric" maxlength="4" placeholder="例 2709" value="' + esc(A.exp || '') + '"></label><label class="plf"><span>箱数（选填）</span><input id="fxCtn" inputmode="numeric" maxlength="5" placeholder="不填" value="' + esc(A.ctn || '') + '"></label></div>' +
           '<div class="row"><button class="btn save" id="fxAOk"' + (S.busy ? ' disabled' : '') + '>补上这一样</button></div></div>'
           : (v.items.length < 2 ? '<p class="hint">👉 漏贴了一样：直接扫那样货的箱码 = 添加商品（批次待定）</p>' : '<p class="hint">这托已经有 2 样了；贴错了先「✕ 移除商品」再添加</p>')) +
-        '<div class="row">' + (!conf ? '<button class="btn ghost" id="fxTask">更改任务</button>' : '<span class="hint">批次已配上：更改任务要先在后台「取消批次」（回到批次待定）</span>') + '<button class="btn save" id="fxDone">完成</button></div>' +
+        '<div class="row">' + (pend.length ? '<button class="btn ghost" id="fxTask">更改任务</button>' + (conf ? '<span class="hint">只改批次待定的；已配上批次的那样不改</span>' : '') : '<span class="hint">批次都已配上：更改任务要先在后台「取消批次」（回到批次待定）</span>') + '<button class="btn save" id="fxDone">完成</button></div>' +
         '<p class="hint">PDA 不能更改批次；批次配错了在后台「更改批次」。</p></div>';
     }
     function fixScan(v, pc) {
@@ -2290,9 +2290,10 @@
         confirmBox('从 ' + F.pal.lpn + ' 移除「' + (x.desc || x.bc) + '」？（贴错了才移除；会写进历史）', '移除商品', function () { fixSend({ op: 'remove', lineId: x.id, reason: '贴错' }, '已移除商品'); });
       }; });
       var tk = $('#fxTask'); if (tk) tk.onclick = function () {
-        var open = (plSnap && plSnap.tasks || []).filter(function (t) { return t.status === 'OPEN' && t.id !== F.pal.task; });
+        var pd = F.pal.items.filter(function (x) { return !x.conf; }), cf = pd.length < F.pal.items.length;
+        var open = (plSnap && plSnap.tasks || []).filter(function (t) { return t.status === 'OPEN' && !pd.every(function (x) { return (x.task || F.pal.task) === t.id; }); });
         if (!open.length) return say('bad', '没有别的进行中的贴码任务（要先新建）');
-        modal('<div class="ldq"><div class="ldq-h">' + esc(F.pal.lpn) + ' 改到哪个任务？</div><p class="hint">来源跟着任务改；只有批次还没配上的托能改</p>' + open.map(function (t) { return '<button class="pltask" data-fxt="' + esc(t.id) + '"><b>' + esc(t.sc) + '</b><span>' + stTxt(t.st) + '</span></button>'; }).join('') +
+        modal('<div class="ldq"><div class="ldq-h">' + esc(F.pal.lpn) + ' 改到哪个任务？</div><p class="hint">来源跟着任务改；只改批次待定的货' + (cf ? '（已配上批次的那样不改）' : '') + '</p>' + open.map(function (t) { return '<button class="pltask" data-fxt="' + esc(t.id) + '"><b>' + esc(t.sc) + '</b><span>' + stTxt(t.st) + '</span></button>'; }).join('') +
           '<div class="row"><button class="btn ghost" id="fxTX">取消</button></div></div>', function (m) {
             $('#fxTX', m).onclick = closeModal;
             Array.prototype.forEach.call(m.querySelectorAll('[data-fxt]'), function (b) { b.onclick = function () { closeModal(); fixSend({ op: 'task', taskId: b.dataset.fxt, reason: '挂错任务' }, '已更改任务'); }; });
@@ -4337,10 +4338,10 @@
         '<table class="rtab-t"><thead><tr><th>商品</th><th>箱码</th><th>批次</th><th>到期</th><th>更改批次</th><th></th></tr></thead><tbody>' +
         v.items.map(function (x) {
           return '<tr><td><b>' + esc(x.desc || (x.item ? x.item : '待认商品')) + '</b><div class="hint">' + esc(x.item || '') + '</div></td><td>' + esc(x.bc) + '</td><td>' + (x.conf ? '<b>' + esc(x.batch) + '</b>' : '<span class="plpend">批次待定</span>') + '</td><td>' + esc(x.exp || '') + '</td>' +
-            '<td>' + (x.item && v.status === 'IN_STOCK' ? '<select data-pfb="' + x.id + '"><option value="">选批次…</option>' + (x.batches || []).map(function (b) { return '<option value="' + esc(b.base) + '"' + (x.conf && b.base === x.batch ? ' selected' : '') + '>' + esc(b.base) + (b.ym ? '（到期 ' + esc(b.ym) + '）' : '') + '</option>'; }).join('') + '</select> <button class="tbtn" data-pfbo="' + x.id + '">更改批次</button>' : '<span class="hint">' + (x.item ? '' : '待认商品要先认出商品') + '</span>') + '</td>' +
+            '<td>' + (x.item && v.status === 'IN_STOCK' ? '<select data-pfb="' + x.id + '"><option value="">选批次…</option>' + (x.batches || []).map(function (b) { return '<option value="' + esc(b.base) + '"' + (x.conf && b.base === x.batch ? ' selected' : '') + '>' + esc(b.base) + (b.ym ? '（到期 ' + esc(b.ym) + '）' : '') + '</option>'; }).join('') + '</select> <button class="tbtn" data-pfbo="' + x.id + '">更改批次</button>' : '<span class="hint">' + (x.item ? '' : '待认商品要先识别商品') + '</span>') + '</td>' +
             '<td>' + (x.conf && v.status === 'IN_STOCK' ? '<button class="tbtn red" data-pfu="' + x.id + '" title="回到批次待定">取消批次</button>' : '') + '</td></tr>';
         }).join('') + '</tbody></table>' +
-        (v.status === 'IN_STOCK' ? '<div class="ofrow"><span>更改任务：</span><select id="pfT"><option value="">选任务…</option>' + tasks.filter(function (t) { return t.id !== v.task; }).map(function (t) { return '<option value="' + esc(t.id) + '">' + esc(t.sc) + (t.status === 'DONE' ? '（已完成）' : '') + '</option>'; }).join('') + '</select><button class="tbtn" id="pfTo"' + (v.items.some(function (x) { return x.conf; }) ? ' disabled title="批次已配上：先取消批次"' : '') + '>更改任务</button></div>' : '') +
+        (v.status === 'IN_STOCK' ? '<div class="ofrow"><span>更改任务：</span><select id="pfT"><option value="">选任务…</option>' + tasks.filter(function (t) { return !v.items.filter(function (x) { return !x.conf; }).every(function (x) { return (x.task || v.task) === t.id; }); }).map(function (t) { return '<option value="' + esc(t.id) + '">' + esc(t.sc) + (t.status === 'DONE' ? '（已完成）' : '') + '</option>'; }).join('') + '</select><button class="tbtn" id="pfTo"' + (v.items.every(function (x) { return x.conf; }) ? ' disabled title="批次都已配上：先取消批次"' : '') + '>更改任务</button>' + (v.items.some(function (x) { return x.conf; }) && v.items.some(function (x) { return !x.conf; }) ? '<span class="hint">只改批次待定的；已配上批次的那样不改</span>' : '') + '</div>' : '') +
         '</div>' + plHistHtml(v);
       return h + '</div>';
     }
