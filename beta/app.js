@@ -1444,6 +1444,7 @@
         if (r.learnItem) body.learnItem = r.learnItem; else if (r.newName) body.newName = r.newName;     // v1.9.2 当场认出的箱码
         if (r.over === true || r.over === false) { body.over = r.over; body.seen = r.seen || []; if (r.kept) body.kept = r.kept; }
         if (r.alt) body.alt = r.alt;                // v1.9.22
+        if (r.plOverride) body.plOverride = r.plOverride;      // v1.9.34 旧货放进有批次已确认的托的库位（仓管确认过）
         return api({ action: 'transfer', transfer: body }, true).then(function (d) {
           if (d.status === 'saved' || d.status === 'duplicate') { done++; return IDB.del(r.transferId); }
           r.rejected = d.message || '被服务器退回'; toast('有一笔库位转移被退回：' + r.rejected, 4000);
@@ -1738,6 +1739,11 @@
       return { kind: 'loc', loc: loc, L: L, R: R, local: true, loose: plSnap.loose.filter(function (x) { return x[0] === loc; }).map(function (x) { return { item: x[1], desc: x[2], base: x[3], status: x[4], same: !!onPl[x[1] + '|' + x[3]] }; }) };
     }
     return null;
+  }
+  /** v1.9.34 库位上有批次已确认的托（在库、左右都算）→ 托盘码列表（手机里的托盘资料） */
+  function plConfAt(loc) {
+    if (!plSnap || !loc) return [];
+    return plSnap.pal.filter(function (v) { return v.status === 'IN_STOCK' && v.pos === loc && v.items.some(function (x) { return x.conf; }); }).map(function (v) { return v.lpn; });
   }
   /** 扫码查：手机里有 → 马上回答；要问后台 → 先 wait('正在查 …')（清掉上一条提示） */
   function plLook(code, wait) {
@@ -2750,6 +2756,8 @@
       if (st.qty && !/^\d{1,7}(\.\d{1,3})?$/.test(st.qty)) return infoBox('数量不对', '数量只能填数字（例如 24 或 2.5），不需要可以留空。');
       if (st.qty && !(Number(st.qty) > 0)) return infoBox('数量不对', '数量要大于 0；不需要数量请留空。');
       st.edit = ''; showNeed = false;                  // 正在重扫某一栏但资料都齐了：直接用现有资料提交
+      // v1.9.34 规格书 8.1：旧货不能放进有批次已确认的托的库位 —— 过渡期先警告，确认了照样放（记 override）；AWMS 0.9 硬拦
+      if (st.plOk !== st.dst) { var hp = plConfAt(st.dst); if (hp.length) return askPlWarn(hp, skipSrc); }
       busy = true;
       // v1.8.3 库位释放系统不知道：目的库位系统里还记着别的货 → 当场确认旧货还在不在（覆盖 / 一起放）。离线问不了：后台转仓管
       if (!st.item) return save(null, []);
@@ -2779,6 +2787,14 @@
         if (asked) return; asked = true; clearTimeout(tm);
         askOver((d && d.others) || [], false);
       }, function () { if (asked) return; asked = true; clearTimeout(tm); save(null, []); });
+    }
+    function askPlWarn(lpns, skipSrc) {
+      errBeep();
+      modal('<div class="tmiss tplw"><div class="tmiss-h"><span class="tmiss-ic">!</span><div><h3>这个库位有批次已确认的托</h3><div class="hint">这个库位有批次已确认的托（<b data-nt>' + esc(lpns.join('、')) + '</b>），旧货最好不要放进来，确定要放吗？</div></div></div>' +
+        '<div class="tovb"><button class="btn ghost" id="pwN">不放了</button><button class="btn save" id="pwY">确定要放</button></div></div>', function (m) {
+          $('#pwN', m).onclick = function () { closeModal(); draw(); };
+          $('#pwY', m).onclick = function () { closeModal(); st.plOk = st.dst; st.plOv = lpns.join(' '); submit(skipSrc); };
+        });
     }
     function askSrc(ls) {
       busy = false; errBeep();
@@ -2863,6 +2879,8 @@
       if (st.learn && st.item) r.learnItem = st.item; else if (st.newName) r.newName = st.newName;      // v1.9.2 当场认出：后台记住箱码
       if (r.learnItem && masters) masters.byBarcode[r.barcode] = [r.barcode, r.itemCode, r.desc];       // 这台手机马上认得
       if (over === true || over === false) { r.over = over; if (seen) r.seen = seen; if (kept && kept.length) r.kept = kept; }
+      if (st.plOk && st.plOk === st.dst) r.plOverride = st.plOv;
+      st.plOk = ''; st.plOv = '';
       trSnapApply(r.alt || r.source, r.dest, r.itemCode, r.desc, r.batch != null ? r.batch : null, over, over === true ? seen || [] : null);
       IDB.put(r).then(function () {
         recent.unshift({ id: r.transferId, src: r.source, dst: r.dest, bc: r.barcode, item: r.itemCode || (r.newName ? '新商品' : r.barcode), desc: r.itemCode || r.newName ? r.desc : '', qty: r.qty, batch: r.batch || '', bexp: r.bexp || '', t: hhmm(r.clientTime), status: '待上传' });
@@ -3908,7 +3926,7 @@
     function trRows() {
       var f = R.trF, all = (R.tr && R.tr.list) || [];
       if (f.hist) return all.filter(function (x) { return x.bc === f.hist; }).slice().sort(function (a, b) { return a.ts - b.ts; });
-      return all.filter(function (x) { return (f.status === 'all' || x.status === f.status) && inRange(x.ts, f) && (has(x.bc, f.q) || has(x.item, f.q) || has(x.desc, f.q) || pyHit(x.desc, String(f.q || '').trim())) && has(x.src, f.src) && has(x.dst, f.dst); });
+      return all.filter(function (x) { return (!f.plw || x.plWarn) && (f.status === 'all' || x.status === f.status) && inRange(x.ts, f) && (has(x.bc, f.q) || has(x.item, f.q) || has(x.desc, f.q) || pyHit(x.desc, String(f.q || '').trim())) && has(x.src, f.src) && has(x.dst, f.dst); });
     }
     function pkRows() {
       var f = R.pkF, all = (R.pk && R.pk.list) || [];
@@ -4031,7 +4049,7 @@
         [['待处理', '待处理'], ['有问题', '有问题'], ['已完成', '已完成'], ['all', '全部']].map(function (t) { return '<button class="rtab' + (f.status === t[0] ? ' on' : '') + '" data-st="' + t[0] + '">' + t[1] + ' ' + (t[0] === 'all' ? (c.all || 0) : (c[t[0]] || 0)) + '</button>'; }).join('')) + '</div>';
       if (!f.hist) h += '<div class="rfil"><label>SKU / 箱码 <input id="trQ" value="' + esc(f.q) + '"></label><label>From Location <input id="trS" value="' + esc(f.src) + '"></label><label>To Location <input id="trD" value="' + esc(f.dst) + '"></label>' +
         '<label>日期 <input type="date" id="trF" value="' + esc(f.from) + '"></label><label>到 <input type="date" id="trT" value="' + esc(f.to) + '"></label>' +
-        '<button class="tbtn" id="trR">刷新</button><button class="btn save rexp" id="trX"' + (rows.length ? '' : ' disabled') + '>⬇ 导出 Excel（' + rows.length + '）</button></div>' +
+        '<label class="hint"><input type="checkbox" id="trPw"' + (f.plw ? ' checked' : '') + '> 只看旧货放进托盘库位（override）</label><button class="tbtn" id="trR">刷新</button><button class="btn save rexp" id="trX"' + (rows.length ? '' : ' disabled') + '>⬇ 导出 Excel（' + rows.length + '）</button></div>' +
         '<p class="hint">PDA 移库会直接更新系统库位（整批：商品 + 批次）；“系统库位”一栏显示更新结果，⚠ 的已转给仓管处理。点箱码或库位即可复制。看过后点“✓ 已完成”；不对点“有问题”并写原因；录错的可“删除”。点 📜 看这个箱码的全部移库历史。时间为马来西亚时间。</p>';
       if (!f.hist) h = inbHtml() + h;
       if (!d) return h + '<p class="hint">读取中…</p>';
@@ -4043,7 +4061,7 @@
             (x.item ? '<div class="hint">' + esc(x.item) + ' ' + esc(x.desc) + '</div>' : '') + (x.qty !== '' ? '<div class="rqty">数量 <b>' + esc(x.qty) + '</b></div>' : '') + '</td>' +
             '<td>' + big(x.src) + '</td><td class="hint">→</td><td>' + big(x.dst) + '</td>' +
             '<td>' + (x.batch ? '<b>' + esc(x.batch) + '</b>' + (x.bexp ? '<div class="hint">到期 ' + esc(x.bexp) + '</div>' : '') : '<span class="hint">—</span>') + '</td>' +
-            '<td>' + (!x.locResult ? '<span class="hint">—（旧记录）</span>' : /^已更新/.test(x.locResult) ? '<span class="rlok">✓ ' + esc(x.locResult) + '</span>' : '<span class="rlbad">⚠ ' + esc(x.locResult) + '</span>') + '</td>' +
+            '<td>' + (x.plWarn ? '<div class="rlbad">⚠ 托盘库位：' + esc(x.plWarn) + '</div>' : '') + (!x.locResult ? '<span class="hint">—（旧记录）</span>' : /^已更新/.test(x.locResult) ? '<span class="rlok">✓ ' + esc(x.locResult) + '</span>' : '<span class="rlbad">⚠ ' + esc(x.locResult) + '</span>') + '</td>' +
             '<td><button class="tbtn" data-ph="' + esc(x.id) + '">📷 查看</button></td>' +
             '<td class="rmeta">' + esc(x.time) + '<br>' + esc(x.op) + (x.edits ? '<br><span class="red">已修改 ' + x.edits + ' 次（' + esc(x.editedAt) + '）</span>' : '') + '</td>' +
             '<td><span class="rst ' + (ST[x.status] || '') + '">' + esc(x.status) + '</span>' + (x.note || x.processedBy ? '<div class="rmeta">' + esc(x.note) + (x.processedBy ? '<br>' + esc(x.processedBy) + ' ' + esc(x.processedAt) : '') + '</div>' : '') + '</td>' +
@@ -4326,11 +4344,12 @@
         Array.prototype.forEach.call(app.querySelectorAll('[data-st]'), function (b) { b.onclick = function () { R.trF.status = b.dataset.st; draw(); }; });
         inp('trQ', R.trF, 'q'); inp('trS', R.trF, 'src'); inp('trD', R.trF, 'dst'); inp('trF', R.trF, 'from'); inp('trT', R.trF, 'to');
         var r = $('#trR'); if (r) r.onclick = function () { load('tr'); };
+        var pw = $('#trPw'); if (pw) pw.onchange = function () { R.trF.plw = pw.checked; draw(); };
         var hx = $('#trHx'); if (hx) hx.onclick = function () { R.trF.hist = ''; draw(); };
         var x = $('#trX'); if (x) x.onclick = function () {
           var rows = trRows();
-          download(xlsxBlob('Shelf Transfer', [['提交时间', '员工', '箱码 / SKU', 'Item Code', '品名', 'From Location', 'To Location', '批次', '到期', '系统库位', '数量', '状态', '办公室备注', '处理人', '处理时间', '修改次数', '设备', 'Transfer ID']].concat(rows.map(function (t) {
-            return [t.time, t.op, t.bc, t.item, t.desc, t.src, t.dst, t.batch || '', t.bexp || '', t.locResult || '', t.qty === '' ? '' : t.qty, t.status, t.note, t.processedBy, t.processedAt, t.edits || 0, t.device, t.id];
+          download(xlsxBlob('Shelf Transfer', [['提交时间', '员工', '箱码 / SKU', 'Item Code', '品名', 'From Location', 'To Location', '批次', '到期', '系统库位', '数量', '状态', '办公室备注', '处理人', '处理时间', '修改次数', '设备', 'Transfer ID', '托盘库位警告']].concat(rows.map(function (t) {
+            return [t.time, t.op, t.bc, t.item, t.desc, t.src, t.dst, t.batch || '', t.bexp || '', t.locResult || '', t.qty === '' ? '' : t.qty, t.status, t.note, t.processedBy, t.processedAt, t.edits || 0, t.device, t.id, t.plWarn || ''];
           }))), 'Shelf Transfer ' + myToday(0) + '.xlsx');
         };
       } else {
