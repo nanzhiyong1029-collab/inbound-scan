@@ -3,7 +3,7 @@
  * 原则：只采集原始资料，不做任何核对。先存手机（离线队列），再上传云端。 */
 (function () {
   'use strict';
-  var VERSION = '1.9.47-1';
+  var VERSION = '1.9.48-1';
   var $ = function (s, el) { return (el || document).querySelector(s); };
   var app = $('#app');
 
@@ -656,6 +656,27 @@
       else if (x.tagName === 'INPUT' && x.placeholder) { var q = myText(x.placeholder); if (q !== x.placeholder) x.placeholder = q; }
     }
   }
+  /** v1.9.48-1 托位「两格图」（用词表 4c）：左 = [■□]、右 = [□■]。文字里写这两个记号，页面上自动换成同一个 SVG 小图标（网页、打印都一样；数据照旧存 L / R） */
+  var SIDE_MARK = { L: '[■□]', R: '[□■]' }, SIDE_RE = /\[(■□|□■)\]/;
+  function sideSvg(sd, big) {
+    var r = function (x, on) { return '<rect x="' + x + '" y="1" width="9" height="12" rx="2" fill="' + (on ? 'currentColor' : 'none') + '" stroke="currentColor" stroke-width="1.6"/>'; };
+    return '<svg class="sic' + (big ? ' big' : '') + '" viewBox="0 0 22 14" role="img" aria-label="' + (sd === 'R' ? '右' : '左') + '" data-side-ic="' + sd + '">' + r(1, sd === 'L') + r(12, sd === 'R') + '</svg>';
+  }
+  function sideIcFix(n) {
+    var list = [];
+    if (n.nodeType === 3) list = [n];
+    else if (n.nodeType === 1 && !/^(SCRIPT|STYLE|TEXTAREA|INPUT)$/.test(n.tagName)) { var w = document.createTreeWalker(n, NodeFilter.SHOW_TEXT), x; while ((x = w.nextNode())) list.push(x); }
+    list.forEach(function (t) {
+      if (!t.parentNode || !SIDE_RE.test(t.nodeValue) || /^(TEXTAREA|SCRIPT|STYLE|OPTION|TITLE)$/.test(t.parentNode.tagName)) return;
+      var span = document.createElement('span');
+      span.innerHTML = esc(t.nodeValue).replace(/\[(■□|□■)\]/g, function (m, k) { return sideSvg(k === '■□' ? 'L' : 'R'); });
+      while (span.firstChild) t.parentNode.insertBefore(span.firstChild, t);
+      t.parentNode.removeChild(t);
+    });
+  }
+  if (window.MutationObserver) new MutationObserver(function (ms) {
+    ms.forEach(function (m) { if (m.type === 'characterData') sideIcFix(m.target); else Array.prototype.forEach.call(m.addedNodes, sideIcFix); });
+  }).observe(document.documentElement, { childList: true, subtree: true, characterData: true });
   if (window.MutationObserver) new MutationObserver(function (ms) {
     if (!myOn()) return;
     ms.forEach(function (m) { if (m.type === 'characterData') myFix(m.target); else Array.prototype.forEach.call(m.addedNodes, myFix); });
@@ -1242,7 +1263,7 @@
   // 库位转移（v1.3）：扫来源库位 → 扫箱码（自动识别 Item Code）→ 扫目的库位 → 拍照 → 提交
   // 商品条码主档下载到本机（IndexedDB），离线也能识别；提交先存本机队列（含照片），联网自动上传
   // =====================================================================
-  /** v1.9.47-1 改名过渡：新名字下面一行小字写旧叫法（一个月后去掉：把 OLDN_ON 改成 false） */
+  /** v1.9.47 改名过渡：新名字下面一行小字写旧叫法（一个月后去掉：把 OLDN_ON 改成 false） */
   var OLDN_ON = true;
   function OLDN(old) { return OLDN_ON ? '<small class="oldn" data-nt>原：' + old + '</small>' : ''; }
   function modTabs(active) {
@@ -1336,9 +1357,8 @@
     var a = p.m.slice(); if (loc) a.sort(function (x, y) { return (y[0] === loc) - (x[0] === loc); });
     return a;
   }
-  /** v1.9.47-1 库位后面的「左 / 右」和托盘号末 5 位（批次已确认的托：[库位, 已核实, 'L'/'R', 托盘号]；历史库位记录只有一边能放时也带左右） */
-  var SIDE_MY = { L: 'ဘယ်', R: 'ညာ' };
-  function sideTxt(sd, my) { return !sd ? '' : my ? SIDE_MY[sd] : (sd === 'R' ? '右' : '左'); }
+  /** v1.9.47 库位后面的「左 / 右」和托盘号末 5 位（批次已确认的托：[库位, 已核实, 'L'/'R', 托盘号]；历史库位记录只有一边能放时也带左右） */
+  function sideTxt(sd) { return SIDE_MARK[sd] || ''; }      // v1.9.48-1 两格图（中缅一样，不翻译）
   function locLbl(l, my) { return esc(l[0]) + (l[2] ? ' ' + sideTxt(l[2], my) : '') + (l[3] ? ' · ' + esc(String(l[3]).slice(-5)) : ''); }
   function altLine(alt) { var p = pickAlt(alt); return p && p.a.length ? ' · <span class="pkalt" data-nt>备用 ' + p.a.map(function (a) { return esc(a[0]) + ' ' + a[1].map(function (l) { return locLbl(l, LANG === 'my'); }).join('/'); }).join('；') + '</span>' : ''; }
   function locBox(loc, note, alt) { var a = mainLocs(loc, note, alt).map(function (x) { return locLbl(x, LANG === 'my'); }); if (!a.length && loc) a = [esc(loc)]; return !a.length ? '' : a[0] + (a.length > 1 ? '<small class="pkmore">' + a.slice(1).join('<br>') + '</small>' : ''); }
@@ -1645,7 +1665,7 @@
   var PL = null, PM = null;          // PL = 托盘页状态；PM = 库位转移页的托盘模式（null = 按箱码移库）
   var PL_NONET = '无网络，托盘移库需要联网，请到有信号的地方再扫';
   function plCode(raw) { var s = String(raw == null ? '' : raw).replace(/^\][A-Za-z]\d/, '').replace(/[\s\u0000-\u001f\u007f\u00a0]/g, '').toUpperCase(); return /^PLT[-_]?\d/.test(s) || /^PLT-/.test(s) ? s : ''; }
-  function plSide(s) { return s === 'L' ? '左' : s === 'R' ? '右' : ''; }
+  function plSide(s) { return SIDE_MARK[s] || ''; }      // v1.9.48-1 托位用两格图 [■□] / [□■]（页面上自动画成图标）
   function plSrcTxt(v) { return v.st === 'SEA' ? '海运柜 ' + v.sc : v.st === 'LOCAL' ? '本地供应商 ' + v.sc : v.st === 'UNKNOWN' ? '来源不知道' : ''; }
   function plWhere(v) {
     if (!v) return '';
@@ -1707,7 +1727,7 @@
   /** 那一边已经有托：【还在 → 换另一边】/【已经空了】 */
   function plOccupiedAsk(r, onOther, onEmpty, onCancel) {
     errBeep();
-    modal('<div class="ldq"><div class="ldq-h">' + esc(r.loc) + ' ' + plSide(r.side) + '边已经有一托</div>' + plCardHtml(r.other) +
+    modal('<div class="ldq"><div class="ldq-h">' + esc(r.loc) + ' ' + plSide(r.side) + ' 已经有一托</div>' + plCardHtml(r.other) +
       '<p>那一托还在吗？</p><div class="row"><button class="btn ghost" id="ocStay">还在 → 换另一边</button><button class="btn save" id="ocGone">已经空了</button></div><div class="row"><button class="tbtn" id="ocX">取消</button></div></div>', function (m) {
         $('#ocStay', m).onclick = function () { closeModal(); onOther(); };
         $('#ocGone', m).onclick = function () { closeModal(); onEmpty(r.other.lpn); };
@@ -1719,9 +1739,9 @@
     opts = opts || {};
     var box = function (s) {
       var v = info[s];
-      return '<button class="plside' + (v ? ' full' : ' free') + '" data-side="' + s + '"' + (!v && opts.noEmpty ? ' disabled' : '') + '><span class="pls-h">' + plSide(s) + '边</span>' +
-        (v ? '<b>' + esc(v.lpn) + '</b>' + v.items.map(function (x) { return '<span data-nt>' + esc(x.desc || x.bc) + '</span>'; }).join('') + (opts.fullTxt ? '<i>' + esc(opts.fullTxt) + '</i>' : '')
-          : '<span class="hint">空的</span>' + (opts.emptyTxt ? '<i>' + esc(opts.emptyTxt) + '</i>' : '')) + '</button>';
+      return '<button class="plside' + (v ? ' full' : ' free') + '" data-side="' + s + '"' + (!v && opts.noEmpty ? ' disabled' : '') + '><span class="pls-h pls-ic">' + sideSvg(s, true) + '</span>' +
+        (v ? '<b class="pls-no">' + esc(String(v.lpn).slice(-5)) + '</b>' + v.items.map(function (x) { return '<span data-nt>' + esc(x.desc || x.bc) + '</span>'; }).join('') + (opts.fullTxt ? '<i>' + esc(opts.fullTxt) + '</i>' : '')
+          : '<b class="pls-no pls-empty">空</b>' + (opts.emptyTxt ? '<i>' + esc(opts.emptyTxt) + '</i>' : '')) + '</button>';
     };
     modal('<div class="ldq"><div class="ldq-h">' + esc(title || ('放在 ' + loc + ' 哪一边？')) + '</div><div class="plsides">' + box('L') + box('R') + '</div>' +
       (info.loose && info.loose.length ? '<p class="hint">这个库位还记着没组托的货：' + info.loose.map(function (x) { return esc(x.desc || x.item); }).join('、') + '</p>' : '') +
@@ -1824,10 +1844,10 @@
     var S = PM, busy = false;
     function hintTxt() {
       if (S.done) return '扫下一个托盘码；或点「回到按箱码移库」';
-      if (S.step === 'dst') return '扫目的地：库位 = 整托移 · 另一个托盘码 = 整托并托 · 箱码 = 只移这一样 · 空白标签 = 整托更换标签';
-      if (S.step === 'item') return '「' + (S.line.desc || S.line.bc) + '」要去哪里：扫托盘码 = 并到那托 · 扫库位 = 选左右 · 扫空白标签 = 成新托';
-      if (S.step === 'newloc') return '新托 ' + S.newLpn + '：扫库位，再选左右';
-      if (S.step === 'newlbl') return S.loc + ' ' + plSide(S.side) + '边是空的：扫一张空白标签，成新托';
+      if (S.step === 'dst') return '扫目的地：库位 = 整托移 · 另一个托盘码 = 整托并托 · 箱码 = 只移这种商品 · 空白标签 = 整托更换标签';
+      if (S.step === 'item') return '「' + (S.line.desc || S.line.bc) + '」要去哪里：扫托盘码 = 并到那托 · 扫库位 = 选托位 · 扫空白标签 = 成新托';
+      if (S.step === 'newloc') return '新托 ' + S.newLpn + '：扫库位，再选托位';
+      if (S.step === 'newlbl') return S.loc + ' ' + plSide(S.side) + ' 是空的：扫一张空白标签，成新托';
       return '';
     }
     function draw() {
@@ -1837,7 +1857,7 @@
         '<div class="topline"><span>员工：' + esc(operator) + '</span><button class="tbtn" id="plBack">← 回到按箱码移库</button></div>' +
         (S.done ? '<div class="card pldone"><b>✓ ' + esc(S.done.text || '已保存') + '</b></div>' + (S.done.tear ? '<div class="tmsg bad">请撕掉 ' + esc(S.done.tear) + ' 的旧标签（这张以后扫到会提示已作废）</div>' : '') + plCardHtml(S.done.pallet) + plCardHtml(S.done.target)
           : '<div class="plsteps"><span class="' + (S.step === 'dst' ? 'on' : 'ok') + '">1 托盘 ✓</span><span class="' + (S.step === 'dst' ? 'on' : 'ok') + '">2 目的地</span>' + (S.step !== 'dst' ? '<span class="on">3 去哪里</span>' : '') + '</div>' +
-            plCardHtml(S.pal, { lineBtn: S.step === 'dst' && S.pal.items.length > 1 ? function (x) { return '<button class="tbtn" data-one="' + x.id + '">只移这样</button>'; } : null }) +
+            plCardHtml(S.pal, { lineBtn: S.step === 'dst' && S.pal.items.length > 1 ? function (x) { return '<button class="tbtn" data-one="' + x.id + '">只移这种商品</button>'; } : null }) +
             (S.line ? '<div class="card plone">只移：<b data-nt>' + esc(S.line.desc || S.line.bc) + '</b>' + (S.line.conf ? ' · 批次 ' + esc(S.line.batch) : ' · 批次待确认') + ' <button class="tbtn" id="plOneX">改成整托</button></div>' : '')) +
         (S.msg && S.msg.text ? '<div class="tmsg ' + S.msg.cls + '">' + esc(S.msg.text) + '</div>' : '') +
         '<p class="hint plhint">👉 ' + esc(hintTxt()) + '</p>' +
@@ -1895,7 +1915,7 @@
             if (S.msg && !S.msg.cls) { S.msg = null; draw(); }
             plSidePick(loc, info, '「' + (S.line.desc || S.line.bc) + '」放到 ' + loc + ' 哪一边？', function (side, other) {
               if (other) { if (other.lpn === S.lpn) return say('bad', '那一边就是原托'); return askStill(function (still) { send({ mode: 'item', lineId: S.line.id, still: still, to: { type: 'pallet', lpn: other.lpn } }); }); }
-              S.loc = loc; S.side = side; S.step = 'newlbl'; say('good', loc + ' ' + plSide(side) + '边：扫一张空白标签');
+              S.loc = loc; S.side = side; S.step = 'newlbl'; say('good', loc + ' ' + plSide(side) + '：扫一张空白标签');
             }, { fullTxt: '并到这托', emptyTxt: '扫空白标签成新托' });
           }, netFail);
         }
@@ -2002,7 +2022,7 @@
       return '<div class="card"><b>这个任务已贴的托（' + ps.length + '）</b>' + ps.map(function (v) {
         var pend = v.items.filter(function (x) { return !x.conf; }).length;
         return '<div class="pltp"><b class="pllpn">' + esc(v.lpn) + '</b><span data-nt>' + v.items.map(function (x) { return esc(x.desc || x.bc); }).join('、') + '</span>' +
-          '<span class="' + (pend ? 'plpend' : 'plok') + '">' + (pend ? '批次待确认 ' + pend + ' 样' : '批次已配') + '</span><span class="hint">' + esc(plWhere(v)) + '</span></div>';
+          '<span class="' + (pend ? 'plpend' : 'plok') + '">' + (pend ? '批次待确认 ' + pend + ' 种商品' : '批次已配') + '</span><span class="hint">' + esc(plWhere(v)) + '</span></div>';
       }).join('') + '</div>';
     }
     function newTask() {
@@ -2043,9 +2063,9 @@
     function hint() {
       if (S.tab === 'bind' && S.fix && !S.b.lpn) return S.fix.pal.items.length < 2 ? '更正托盘 ' + S.fix.pal.lpn + '：扫箱码 = 添加商品' : '更正托盘 ' + S.fix.pal.lpn;
       if (S.tab === 'bind' && !curTask()) return '请先选择收货任务';
-      if (S.tab === 'bind') return !S.b.lpn ? '扫一张空白托盘标签（扫已贴过的托 = 更正托盘）' : S.b.lines.length >= 2 ? '已经 2 样了，检查后点「保存」' : '扫箱码（或打字搜品名 / 首字母）' + (S.b.lines.length ? '；或点「保存」' : '');
-      if (S.tab === 'empty') return '扫库位（选左右）或扫托盘码';
-      return '扫托盘码看托上的货和历史；扫库位看左右两托';
+      if (S.tab === 'bind') return !S.b.lpn ? '扫一张空白托盘标签（扫已贴过的托 = 更正托盘）' : S.b.lines.length >= 2 ? '已有 2 种商品，检查后点「保存」' : '扫箱码（或打字搜品名 / 首字母）' + (S.b.lines.length ? '；或点「保存」' : '');
+      if (S.tab === 'empty') return '扫库位（选托位）或扫托盘码';
+      return '扫托盘码看托上的货和历史；扫库位看两边的托';
     }
     function bindHtml() {
       var B = S.b;
@@ -2058,12 +2078,12 @@
             '<div class="plf2"><label class="plf"><span>到期年月（选填）</span><input data-exp="' + i + '" inputmode="numeric" maxlength="4" placeholder="例 2709" value="' + esc(x.exp || '') + '"></label>' +
             '<label class="plf"><span>箱数（选填）</span><input data-ctn="' + i + '" inputmode="numeric" maxlength="5" placeholder="不填" value="' + esc(x.ctn === '' || x.ctn == null ? '' : x.ctn) + '"></label></div></div>';
         }).join('') +
-        '<div class="row"><button class="btn ghost" id="plBX">取消</button><button class="btn save" id="plBOk"' + (!B.lines.length || S.busy ? ' disabled' : '') + '>保存（' + B.lines.length + ' 样）</button></div></div>';
+        '<div class="row"><button class="btn ghost" id="plBX">取消</button><button class="btn save" id="plBOk"' + (!B.lines.length || S.busy ? ' disabled' : '') + '>保存（' + B.lines.length + ' 种商品）</button></div></div>';
     }
     function emptyHtml() {
       var E = S.e; if (!E || !E.pal) return '';
       var v = E.pal, multi = v.items.length > 1;
-      return plCardHtml(v, { lineBtn: multi && v.status === 'IN_STOCK' ? function (x) { return '<button class="tbtn" data-iout="' + x.id + '">只有这样拿完了</button>'; } : null }) +
+      return plCardHtml(v, { lineBtn: multi && v.status === 'IN_STOCK' ? function (x) { return '<button class="tbtn" data-iout="' + x.id + '">只有该商品出完了</button>'; } : null }) +
         (v.status === 'IN_STOCK' ? '<div class="row"><button class="btn ghost" id="plEX">取消</button><button class="btn save" id="plEAll"' + (S.busy ? ' disabled' : '') + '>整托空了</button></div>' : '<div class="row"><button class="btn ghost" id="plEX">好</button></div>');
     }
     function queryHtml() {
@@ -2075,7 +2095,7 @@
         h += plCardHtml(v, { lineBtn: v.status === 'IN_STOCK' ? function (x) { return x.item && !x.conf ? '<span class="plpend">批次待确认（后台导 GRN 配）</span>' : ''; } : null,
           extra: v.status === 'OUT' ? '<div class="row"><button class="btn save" id="plRes">托还在，恢复（位置待确认）</button></div>' : v.status === 'IN_STOCK' ? '<div class="row"><button class="btn ghost" id="plGoFix">更正托盘</button><button class="btn ghost" id="plGoMv">🔁 移库 / 更换标签</button></div>' : '' }) + plHistHtml(v);
       } else if (Q && Q.kind === 'loc') {
-        h += '<div class="card"><b>' + esc(Q.loc) + '</b>' + ['L', 'R'].map(function (s) { return '<div class="plqs"><span class="pls-h">' + plSide(s) + '边</span>' + (Q[s] ? plCardHtml(Q[s], { cls: 'plin' }) : '<span class="hint">没有托盘</span>') + '</div>'; }).join('') +
+        h += '<div class="card"><b>' + esc(Q.loc) + '</b>' + ['L', 'R'].map(function (s) { return '<div class="plqs"><span class="pls-h">' + sideSvg(s, true) + '</span>' + (Q[s] ? plCardHtml(Q[s], { cls: 'plin' }) : '<span class="hint">没有托盘</span>') + '</div>'; }).join('') +
           '<div class="plqs"><span class="pls-h">没组托的货</span>' + (Q.loose.length ? Q.loose.map(function (x) { return '<div class="plln"><b data-nt>' + esc(x.desc || x.item) + '</b><div class="hint" data-nt>' + esc(x.item) + (x.base ? ' · 批次 ' + esc(x.base) : '') + ' · ' + esc(x.status) + (x.same ? ' · 和托上的货一样' : '') + '</div></div>'; }).join('') : '<span class="hint">没有记录</span>') + '</div></div>';
       }
       var L = S.list;
@@ -2239,8 +2259,8 @@
         v.items.map(function (x) { return plLineHtml(x, v.items.length > 1 ? '<button class="tbtn red" data-fxrm="' + x.id + '">✕ 移除商品</button>' : ''); }).join('') +
         (A ? '<div class="plbl plfixadd"><div class="plln-t"><b data-nt>＋ ' + esc(A.desc || '未识别商品') + '</b><button class="tbtn" id="fxAX">✕</button></div><div class="hint" data-nt>' + (A.item ? esc(A.item) + ' · ' : '') + '箱码 ' + esc(A.bc) + ' · <span class="plpend">批次待确认</span></div>' +
           '<div class="plf2"><label class="plf"><span>到期年月（选填）</span><input id="fxExp" inputmode="numeric" maxlength="4" placeholder="例 2709" value="' + esc(A.exp || '') + '"></label><label class="plf"><span>箱数（选填）</span><input id="fxCtn" inputmode="numeric" maxlength="5" placeholder="不填" value="' + esc(A.ctn || '') + '"></label></div>' +
-          '<div class="row"><button class="btn save" id="fxAOk"' + (S.busy ? ' disabled' : '') + '>补上这一样</button></div></div>'
-          : (v.items.length < 2 ? '<p class="hint">👉 漏贴了一样：直接扫那样货的箱码 = 添加商品（批次待确认）</p>' : '<p class="hint">这托已经有 2 样了；贴错了先「✕ 移除商品」再添加</p>')) +
+          '<div class="row"><button class="btn save" id="fxAOk"' + (S.busy ? ' disabled' : '') + '>添加这种商品</button></div></div>'
+          : (v.items.length < 2 ? '<p class="hint">👉 漏组了一种商品：直接扫该商品的箱码 = 添加商品（批次待确认）</p>' : '<p class="hint">这个托盘已有 2 种商品；贴错了先「✕ 移除商品」再添加</p>')) +
         '<div class="row">' + (pend.length ? '<button class="btn ghost" id="fxTask">更改收货任务</button>' + (conf ? '<span class="hint">只更改批次待确认的商品；批次已确认的商品不变</span>' : '') : '<span class="hint">批次都已配上：更改收货任务要先在后台「取消批次」（回到批次待确认）</span>') + '<button class="btn save" id="fxDone">完成</button></div>' +
         '<p class="hint">PDA 不能更改批次；批次配错了在后台「更改批次」。</p></div>';
     }
@@ -2258,9 +2278,9 @@
       var take = function (bc, r) {
         var item = r ? r.item : '';
         if (F.pal.items.some(function (x) { return (item && x.item === item) || nz(x.bc) === nz(bc); })) return say('bad', '该商品已在这个托盘上');
-        if (full) return say('bad', '这托已经有 2 样了；贴错了先「✕ 移除商品」再添加');
+        if (full) return say('bad', '这个托盘已有 2 种商品；贴错了先「✕ 移除商品」再添加');
         F.add = { bc: bc, item: item, desc: r ? r.desc : '', uom: r ? r.uom || '' : '', exp: '', ctn: '' };
-        say('good', item ? '＋ ' + (F.add.desc || item) + '：到期年月、箱数选填，点「补上这一样」' : '⚠ 系统不认识箱码 ' + bc + '：照样补成未识别商品');
+        say('good', item ? '＋ ' + (F.add.desc || item) + '：到期年月、箱数选填，点「添加这种商品」' : '⚠ 系统不认识箱码 ' + bc + '：照样补成未识别商品');
       };
       wait('正在查 ' + q + '…');
       return plScanApi(q).then(function (r) {
@@ -2323,7 +2343,7 @@
         }
         plAfter(r);
         S.b = newBind(); S.list = null;
-        say('good', '✓ ' + B.lpn + ' 已组托（' + B.lines.length + ' 样）。上架：到「移库」扫这个托盘码，再扫库位');
+        say('good', '✓ ' + B.lpn + ' 已组托（' + B.lines.length + ' 种商品）。上架：到「移库」扫这个托盘码，再扫库位');
       }, net);
     }
     function showEmpty(v) {
@@ -4416,7 +4436,7 @@
       var h = '';
       if (pl.issues.length) h += '<div class="grnb"><b>对不上，要手动处理 ' + pl.issues.length + ' 托</b><span class="hint">（到 PDA 托盘页「查询」扫托盘码 → 补批次）</span><table class="rtab-t"><thead><tr><th>任务</th><th>托盘</th><th>在哪</th><th>商品</th><th>托上到期</th><th>原因</th></tr></thead><tbody>' +
         pl.issues.slice().sort(function (a, b) { return (a.taskName || a.sc) < (b.taskName || b.sc) ? -1 : 1; }).map(function (a) { return '<tr><td>' + esc(a.taskName || (a.st === 'UNKNOWN' ? '来源不知道' : a.sc + '（无任务，按来源配）')) + '</td><td><b>' + esc(a.lpn) + '</b></td><td>' + esc(a.where) + '</td><td>' + esc(a.desc || a.bc) + '</td><td>' + esc(a.exp || '—') + '</td><td>' + esc(a.why) + (a.opts && a.opts.length ? '<div class="hint">可选：' + esc(a.opts.join('、')) + '</div>' : '') + '</td></tr>'; }).join('') + '</tbody></table></div>';
-      if (pl.noPallet.length) h += '<div class="grnb"><b>GRN 有、没找到批次待确认的托 ' + pl.noPallet.length + ' 样</b><ul class="hint">' + pl.noPallet.map(function (b) { return '<li>' + esc(b.desc || b.item) + ' · ' + esc(b.batch) + ' · ' + esc(b.qty) + ' ' + esc(b.uom) + '</li>'; }).join('') + '</ul></div>';
+      if (pl.noPallet.length) h += '<div class="grnb"><b>GRN 有、没找到批次待确认的托 ' + pl.noPallet.length + ' 种商品</b><ul class="hint">' + pl.noPallet.map(function (b) { return '<li>' + esc(b.desc || b.item) + ' · ' + esc(b.batch) + ' · ' + esc(b.qty) + ' ' + esc(b.uom) + '</li>'; }).join('') + '</ul></div>';
       return h;
     }
     function grnSend(gi, commit) {
