@@ -3,7 +3,7 @@
  * 原则：只采集原始资料，不做任何核对。先存手机（离线队列），再上传云端。 */
 (function () {
   'use strict';
-  var VERSION = '1.9.37-1';
+  var VERSION = '1.9.38-1';
   var $ = function (s, el) { return (el || document).querySelector(s); };
   var app = $('#app');
 
@@ -162,7 +162,7 @@
     // 凭据只放在 POST 内容里，不出现在网址中
     var body = Object.assign({}, params, { dev: cfg.d, sess: sess ? sess.t : '' }); delete body.__moved;
     var req = fetch(cfg.u, { method: 'POST', body: JSON.stringify(body), headers: { 'Content-Type': 'text/plain;charset=utf-8' }, redirect: 'follow', signal: ctl && ctl.signal });
-    return req.then(function (r) { return r.json(); }).then(function (d) {
+    return req.then(function (r) { if (r.status === 503) { var x = new Error('S503'); x.s503 = true; throw x; } return r.json(); }).then(function (d) {
       clearTimeout(timer);
       setOnline(true);
       // AWMS 0.9 过渡版：旧后台（Apps Script）搬家后回 MOVED + 新后台网址 → 本机改连新后台，同一个请求再送一次
@@ -182,7 +182,7 @@
     }, function (err) {
       clearTimeout(timer);
       setOnline(false);
-      var e = new Error('网络不可用'); e.network = true; throw e;
+      var e = new Error('网络不可用'); e.network = true; if (err && err.s503) e.s503 = true; throw e;      // s503 = 连上了服务器，但服务器存不进去
     });
   }
 
@@ -1431,6 +1431,7 @@
       return list;
     }, function () { return []; });
   }
+  var TQ_DROP_PHOTO = 3;
   function flushTransfers() {
     if (tqFlushing) { tqAgain = true; return tqFlushing; }   // 正在上传时又提交了新的：这轮结束后马上再传一轮
     if (!cfg || !sess) return Promise.resolve();
@@ -1445,15 +1446,20 @@
         if (i >= mine.length) return Promise.resolve();
         var r = mine[i];
         var body = { transferId: r.transferId, source: r.source, dest: r.dest, barcode: bcClean(r.barcode), qty: r.qty || '', photo: r.photo, clientTime: r.clientTime };
+        if (r.photo && (r.tries || 0) >= TQ_DROP_PHOTO) { delete body.photo; body.photoDropped = true; }      // v1.9.38-1 服务器连着几次都存不进去：不带照片再送（后台标「照片没传上」），不无限重传
         if (r.batch != null) body.batch = r.batch;
         if (r.learnItem) body.learnItem = r.learnItem; else if (r.newName) body.newName = r.newName;     // v1.9.2 当场认出的箱码
         if (r.over === true || r.over === false) { body.over = r.over; body.seen = r.seen || []; if (r.kept) body.kept = r.kept; }
         if (r.alt) body.alt = r.alt;                // v1.9.22
         if (r.plOverride) body.plOverride = r.plOverride;      // v1.9.34 旧货放进有批次已确认的托的库位（仓管确认过）
         return api({ action: 'transfer', transfer: body }, true).then(function (d) {
-          if (d.status === 'saved' || d.status === 'duplicate') { done++; return IDB.del(r.transferId); }
+          if (d.status === 'saved' || d.status === 'duplicate') { done++; if (d.photoFailed) toast('移库已保存，但照片没传上（办公室看得到）：' + (r.dest || ''), 4000); return IDB.del(r.transferId); }
           r.rejected = d.message || '被服务器退回'; toast('有一笔库位转移被退回：' + r.rejected, 4000);
           return IDB.put(r);
+        }, function (e) {
+          if (!e.s503) throw e;                // 没网：整批停，等联网
+          r.tries = (r.tries || 0) + 1; r.lastErr = '服务器存不进去（第 ' + r.tries + ' 次）';
+          return IDB.put(r).then(function () { lastSyncError = r.lastErr; });      // 这一笔存不进去：先跳过，后面的照传
         }).then(function () { return next(i + 1); });
       }
       return next(0).then(function () { return done; });
@@ -2237,11 +2243,13 @@
         say('bad', r.message || '标签不对');
       }, net);
       var loc = normLoc(v); if (loc && locRe().test(loc)) return say('bad', '改正不动库位：要搬到别的库位请到「库位转移」');
-      if (F.pal.items.length >= 2) return say('bad', '这托已经有 2 样了；贴错了先「✕ 删掉」再补');
-      var code = bcClean(v), q = /[^\x00-\x7f]|\s/.test(v) || /^[A-Za-z]{2,12}$/.test(v) ? v : code;
+      var code = bcClean(v), nz = function (b) { return String(b || '').replace(/^0+/, ''); };
+      if (F.pal.items.some(function (x) { return x.bc && nz(x.bc) === nz(code) || x.item && x.item === code; })) return say('bad', '这样货已经在这托上了');      // v1.9.37
+      var full = F.pal.items.length >= 2, q = /[^\x00-\x7f]|\s/.test(v) || /^[A-Za-z]{2,12}$/.test(v) ? v : code;
       var take = function (bc, r) {
         var item = r ? r.item : '';
-        if (F.pal.items.some(function (x) { return (item && x.item === item) || (!item && !x.item && x.bc === bc); })) return say('bad', '这托上已经有这个商品了（一托上同一个商品只能有一个批次）');
+        if (F.pal.items.some(function (x) { return (item && x.item === item) || nz(x.bc) === nz(bc); })) return say('bad', '这样货已经在这托上了');
+        if (full) return say('bad', '这托已经有 2 样了；贴错了先「✕ 删掉」再补');
         F.add = { bc: bc, item: item, desc: r ? r.desc : '', uom: r ? r.uom || '' : '', exp: '', ctn: '' };
         say('good', item ? '＋ ' + (F.add.desc || item) + '：到期年月、箱数选填，点「补上这一样」' : '⚠ 系统不认识箱码 ' + bc + '：照样补成待认商品');
       };
@@ -4316,7 +4324,7 @@
     }
     // ---- v1.9.35 规格书 6.4 第 2、3 条：托盘查询 / 改正（后台）——改批次 / 取消配对（必须写原因）、改任务
     function pfHtml() {
-      var F = (R.grn && R.grn.pf) || {}, v = F.v, h = '<div class="inb plpf"><div class="inb-h"><b>🔧 托盘查询 / 改正</b><span class="hint">批次配错（GRN 配错、GRN 开错）在这里改；PDA 不能改批次。改完拣货单马上按新批次找库位。每次改正都写进历史。</span></div>' +
+      var F = (R.grn && R.grn.pf) || {}, v = F.v, h = '<div class="inb plpf"><div class="inb-h"><b>🔧 托盘查询 / 改正</b><span class="hint">批次配错（GRN 配错、GRN 开错）在这里改；PDA 不能改批次。改完拣货单马上按新批次找库位。每次改正都写进历史（记登录的办公室员工）。要先在「办公室 · Office」页登录。</span></div>' +
         '<div class="ofrow"><input id="pfL" class="pkq" maxlength="20" placeholder="托盘码，例如 PLT-2611-00001" value="' + esc(F.lpn || '') + '"><button class="btn save" id="pfGo">查</button></div>';
       if (F.msg) h += '<p class="' + (F.bad ? 'err' : 'tmsg good') + '">' + esc(F.msg) + '</p>';
       if (!v) return h + '</div>';
@@ -4343,7 +4351,9 @@
       var F = R.grn.pf, rs = $('#pfR'); F.reason = rs ? rs.value.trim() : F.reason || '';
       if (needReason && !F.reason) { F.msg = '请先写原因'; F.bad = true; draw(); var x = $('#pfR'); if (x) x.focus(); return; }
       F.msg = '提交中…'; F.bad = false; draw();
-      api(Object.assign({ action: 'rcPlEdit', lpn: F.v.lpn, reason: F.reason }, body), true).then(function (r) {
+      var os = LS.get('ofSess', null);      // v1.9.37 改正要办公室登录：历史记是谁改的
+      api(Object.assign({ action: 'rcPlEdit', lpn: F.v.lpn, reason: F.reason, osess: os && os.exp > Date.now() ? os.t : '' }, body), true).then(function (r) {
+        if (r.status === 'login') { LS.del('ofSess'); if (R.of) R.of.sess = null; F.msg = r.message; F.bad = true; return draw(); }
         if (r.status !== 'ok') { F.msg = r.message || '做不了'; F.bad = true; return draw(); }
         F.reason = ''; pfLoad(F.v.lpn, '✓ ' + r.text + (r.linked && r.linked.picks ? ' · 拣货单已换上新库位（' + r.linked.picks + ' 行）' : ''));
       }, function (e) { F.msg = e.network ? '网络不可用，没有保存' : e.message; F.bad = true; draw(); });
