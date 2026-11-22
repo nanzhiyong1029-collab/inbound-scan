@@ -1,6 +1,6 @@
 {
-  "name": "入库条码采集",
-  "short_name": "入库扫码",
+  "name": "AWMS 0.9 过渡版",
+  "short_name": "AWMS 过渡版",
   "start_url": "./#/",
   "scope": "./",
   "display": "standalone",
