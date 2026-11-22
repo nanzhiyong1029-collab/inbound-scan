@@ -3,7 +3,7 @@
  * 原则：只采集原始资料，不做任何核对。先存手机（离线队列），再上传云端。 */
 (function () {
   'use strict';
-  var VERSION = '1.9.38-1';
+  var VERSION = '1.9.42-1';
   var $ = function (s, el) { return (el || document).querySelector(s); };
   var app = $('#app');
 
@@ -166,7 +166,7 @@
       clearTimeout(timer);
       setOnline(true);
       // AWMS 0.9 过渡版：旧后台（Apps Script）搬家后回 MOVED + 新后台网址 → 本机改连新后台，同一个请求再送一次
-      if (d && d.error === 'MOVED' && typeof d.to === 'string' && /^https:\/\/[a-z0-9-]+\.onrender\.com\/exec$/.test(d.to) && cfg.u !== d.to && !params.__moved) {
+      if (d && d.error === 'MOVED' && typeof d.to === 'string' && /^https:\/\/([a-z0-9-]+\.onrender\.com|script\.google\.com\/macros\/s\/[\w-]{20,})\/exec$/.test(d.to) && cfg.u !== d.to && !params.__moved) {      // v1.9.42-1 切回旧后台也一样
         cfg.u = d.to; LS.set('cfg', cfg); sbForget();      // 换了后台 = 换了数据库：手机记住的数据库地址作废
         return api(Object.assign({}, params, { __moved: true }), post);
       }
@@ -1446,7 +1446,7 @@
         if (i >= mine.length) return Promise.resolve();
         var r = mine[i];
         var body = { transferId: r.transferId, source: r.source, dest: r.dest, barcode: bcClean(r.barcode), qty: r.qty || '', photo: r.photo, clientTime: r.clientTime };
-        if (r.photo && (r.tries || 0) >= TQ_DROP_PHOTO) { delete body.photo; body.photoDropped = true; }      // v1.9.38-1 服务器连着几次都存不进去：不带照片再送（后台标「照片没传上」），不无限重传
+        if (r.photo && (r.tries || 0) >= TQ_DROP_PHOTO) { delete body.photo; body.photoDropped = true; }      // v1.9.38 服务器连着几次都存不进去：不带照片再送（后台标「照片没传上」），不无限重传
         if (r.batch != null) body.batch = r.batch;
         if (r.learnItem) body.learnItem = r.learnItem; else if (r.newName) body.newName = r.newName;     // v1.9.2 当场认出的箱码
         if (r.over === true || r.over === false) { body.over = r.over; body.seen = r.seen || []; if (r.kept) body.kept = r.kept; }
@@ -4498,6 +4498,8 @@
         if (d) {
           h += '<h4>库位条码格式</h4><p class="hint">员工扫的库位必须符合这个格式（正则表达式），防止把商品条码误扫成库位。默认：<code>' + esc(d.locDefault) + '</code>（例如 15-O-02）。留空 = 恢复默认。</p>' +
             '<div class="ofrow"><input id="ofLp" class="pkq" value="' + esc(d.locPattern === d.locDefault ? '' : d.locPattern) + '" placeholder="' + esc(d.locDefault) + '"><button class="btn save" id="ofLs">保存</button></div>';
+          h += '<h4>紧急切回旧后台（Google 表格）</h4><p class="hint">只在新后台出了大问题时用。输入「切回」后点按钮：所有手机 / 电脑下一次联网就改连旧后台。切回后要按切换步骤书把新后台这段时间的资料补回表格。' + (d.sw ? (d.sw.ready ? '已记下旧后台（' + esc(d.sw.backHost) + '）。' : '<b class="err">没有记下旧后台网址，不能一键切回。</b>') : '') + '</p>' +
+            '<div class="ofrow"><input id="ofSw" class="pkq" placeholder="输入：切回" maxlength="4"><button class="btn red" id="ofSwGo">切回旧后台</button></div>';
           h += '<h4>库位分配：新柜柜号</h4><p class="hint">一行一个：柜号 + 到柜日期（例如 <code>LX26300 2026-11-20</code>），后面可以写备注。PDA【库位分配】列这些柜里还没有库位的货。</p>' +
             '<textarea id="ofLa" class="oftext">' + esc(d.laConts.map(function (r) { return [r[0], r[1], r[2]].filter(Boolean).join(' '); }).join('\n')) + '</textarea><div class="ofrow"><button class="btn save" id="ofLc2">保存柜号</button></div>';
         }
@@ -4571,6 +4573,10 @@
       var bx = $('#ofBx'); if (bx) bx.onclick = function () { O.bc = null; draw(); };
       // 设置
       var ls = $('#ofLs'); if (ls) ls.onclick = function () { ofDo({ action: 'rcOfSettings', set: 'locPattern', value: $('#ofLp').value.trim() }, function (r) { return '✓ 库位格式已保存：' + r.locPattern; }, function (r) { O.d.set = r; }); };
+      var sw = $('#ofSwGo'); if (sw) sw.onclick = function () {
+        var v = $('#ofSw').value.trim(); if (v !== '切回') { O.msg = '请先在框里输入「切回」两个字'; O.bad = true; return draw(); }
+        confirmBox('确定切回旧后台？所有设备下一次联网就会改连 Google 表格后台。', '切回', function () { ofDo({ action: 'rcOfSwitch', do: 'back', confirm: v }, '✓ 已切回：这台电脑下一次操作也会改连旧后台'); });
+      };
       var lc = $('#ofLc2'); if (lc) lc.onclick = function () {
         var rows = $('#ofLa').value.split(/\n/).map(function (l) { var p = l.trim().split(/\s+/); if (!p[0]) return null; var dt = /^\d{4}-\d{2}-\d{2}$/.test(p[1] || '') ? p[1] : ''; return [p[0], dt, p.slice(dt ? 2 : 1).join(' ')]; }).filter(Boolean);
         ofDo({ action: 'rcOfSettings', set: 'laConts', rows: rows }, '✓ 新柜柜号已保存（' + rows.length + ' 个）', function (r) { O.d.set = r; });
