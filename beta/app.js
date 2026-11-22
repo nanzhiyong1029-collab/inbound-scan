@@ -3,7 +3,7 @@
  * 原则：只采集原始资料，不做任何核对。先存手机（离线队列），再上传云端。 */
 (function () {
   'use strict';
-  var VERSION = '1.9.34';
+  var VERSION = '1.9.35-1';
   var $ = function (s, el) { return (el || document).querySelector(s); };
   var app = $('#app');
 
@@ -160,11 +160,16 @@
     var ctl = window.AbortController ? new AbortController() : null;
     var timer = setTimeout(function () { if (ctl) ctl.abort(); }, post ? 45000 : 30000);
     // 凭据只放在 POST 内容里，不出现在网址中
-    var body = Object.assign({}, params, { dev: cfg.d, sess: sess ? sess.t : '' });
+    var body = Object.assign({}, params, { dev: cfg.d, sess: sess ? sess.t : '' }); delete body.__moved;
     var req = fetch(cfg.u, { method: 'POST', body: JSON.stringify(body), headers: { 'Content-Type': 'text/plain;charset=utf-8' }, redirect: 'follow', signal: ctl && ctl.signal });
     return req.then(function (r) { return r.json(); }).then(function (d) {
       clearTimeout(timer);
       setOnline(true);
+      // AWMS 0.9 过渡版：旧后台（Apps Script）搬家后回 MOVED + 新后台网址 → 本机改连新后台，同一个请求再送一次
+      if (d && d.error === 'MOVED' && typeof d.to === 'string' && /^https:\/\/[a-z0-9-]+\.onrender\.com\/exec$/.test(d.to) && cfg.u !== d.to && !params.__moved) {
+        cfg.u = d.to; LS.set('cfg', cfg);
+        return api(Object.assign({}, params, { __moved: true }), post);
+      }
       if (!d.ok) {
         var e = new Error(d.message || d.error || '服务器错误'); e.server = true; e.code = d.error;
         if (d.mods) updateMods(d.mods);
@@ -1953,8 +1958,15 @@
       if (!plSnap || !plSnap.tasks) return '<p class="hint">读取贴码任务中…</p>';
       var open = plSnap.tasks.filter(function (t) { return t.status === 'OPEN'; });
       return '<div class="pltasks"><p class="hint">先点一个贴码任务（一个柜 / 一个供应商 = 一个任务），再扫标签、扫箱码</p>' +
-        open.map(function (t) { return '<button class="pltask" data-task="' + esc(t.id) + '"><b>' + esc(t.sc) + '</b><span>' + stTxt(t.st) + ' · 已贴 ' + taskPals(t.id).length + ' 托</span></button>'; }).join('') +
+        open.map(function (t) { var un = unsaved(t.id); return '<button class="pltask" data-task="' + esc(t.id) + '"><b>' + esc(t.sc) + '</b><span>' + stTxt(t.st) + ' · 已贴 ' + taskPals(t.id).length + ' 托</span>' + (un ? '<span class="plunsv">有 ' + un + ' 托没保存</span>' : '') + '</button>'; }).join('') +
         (open.length ? '' : '<p class="hint">还没有进行中的贴码任务。</p>') + '<button class="btn ghost" id="plTNew">＋ 新建贴码任务</button></div>';
+    }
+    /** 这个任务有几托扫了还没保存（换任务时留着的 + 现在手上的） */
+    function unsaved(id) {
+      var n = 0, d = S.drafts && S.drafts[id];
+      if (d && (d.lpn || d.lines.length)) n++;
+      if (S.b && S.b.task === id && (S.b.lpn || S.b.lines.length)) n++;
+      return n;
     }
     function taskHeadHtml(t) {
       var ps = taskPals(t.id);
@@ -3917,6 +3929,7 @@
       pkF: { res: '不一致', q: '', sys: '', act: '', from: myToday(-30), to: myToday(0) }, lmF: { st: 'all', q: '', loc: '' }, lmMsg: '', lm: null };
     function load(which) {
       R.err = '';
+      if (which === 'of') return ofLoad();
       if (which === 'grn') { R.grn = R.grn || { list: [] }; return api({ action: 'rcPlTasks' }, true).then(function (d) { R.grn.tasks = d.tasks; draw(); }, function (e) { R.err = e.network ? '网络不可用，请检查网络后再试' : e.message; draw(); }); }
       var a = which === 'pk' ? 'rcPickLocs' : which === 'lm' ? 'rcLmList' : 'rcTransfers';
       return api({ action: a }, true).then(function (d) { R[which] = d; draw(); }, function (e) { R.err = e.network ? '网络不可用，请检查网络后点“刷新”' : e.message; draw(); });
@@ -4272,14 +4285,180 @@
           function (e) { R.grn.list.push({ file: f.name, err: '读不出：' + e.message }); draw(); });
       }, Promise.resolve());
     }
+    // ---- AWMS 0.9 过渡版：办公室（原表格菜单）——员工 / PIN、设备链接、托盘标签、商品条码主档、设置、拣货 / 装车看板
+    //   要「办公室管理员」登录（员工 + PIN，名单在服务器设定）。只有新后台有这些功能（旧 Apps Script 后台不显示这个页）。
+    var OF_ON = !!(cfg && cfg.u && !/script\.google(usercontent)?\.com/.test(cfg.u));
+    var OF_PAGES = [['staff', '员工 / PIN'], ['dev', '设备链接'], ['pl', '托盘标签'], ['bc', '商品条码主档'], ['set', '设置'], ['pk', '拣货看板'], ['ld', '装车看板']];
+    function ofS() { if (!R.of) R.of = { sess: LS.get('ofSess', null), page: LS.get('ofPage', 'staff'), d: {}, msg: '', bad: false, busy: false }; if (R.of.sess && !(R.of.sess.exp > Date.now())) { R.of.sess = null; LS.del('ofSess'); } return R.of; }
+    function ofApi(body) {
+      var O = ofS();
+      return api(Object.assign({ osess: O.sess ? O.sess.t : '' }, body), true).then(function (r) {
+        if (r.status === 'login') { O.sess = null; LS.del('ofSess'); O.msg = r.message; O.bad = true; draw(); throw Object.assign(new Error(r.message), { login: true }); }
+        return r;
+      });
+    }
+    function ofFail(e) { var O = ofS(); O.busy = false; if (!e.login) { O.msg = e.network ? '网络不可用，没有保存' : e.message; O.bad = true; } draw(); }
+    function ofLoad() {
+      var O = ofS(); if (!O.sess) return draw();
+      var pg = O.page, body = pg === 'staff' ? { action: 'rcOfStaff' } : pg === 'dev' ? { action: 'rcOfDevices' } : pg === 'set' ? { action: 'rcOfSettings' } : pg === 'pk' || pg === 'ld' ? { action: 'rcOfLd', mod: pg } : null;
+      if (!body) return draw();
+      O.busy = true; draw();
+      return ofApi(body).then(function (r) { O.busy = false; O.d[pg] = r; draw(); }, ofFail);
+    }
+    function ofDo(body, okMsg, after) {
+      var O = ofS(); O.busy = true; O.msg = '提交中…'; O.bad = false; draw();
+      return ofApi(body).then(function (r) { O.busy = false; if (r.ok === false) { O.msg = r.message; O.bad = true; return draw(); } O.msg = typeof okMsg === 'function' ? okMsg(r) : okMsg; O.bad = false; if (after) after(r); draw(); }, ofFail);
+    }
+    var ofKind = { PDA: 'PDA / 手机', UP: '上传电脑（DO）', RC: '库位记录后台电脑', WC: '库位中控台平板' };
+    function ofLinkBox(c) {
+      modal('<h3>' + esc(c.id) + ' ' + esc(c.name) + ' 的设置链接</h3><p class="hint"><b>只显示这一次</b>，关掉就看不到了。链接就是这台设备的钥匙：只发给用这台设备的人，不要发到群里。</p>' +
+        '<textarea id="ofLk" class="oflink" readonly>' + esc(c.link) + '</textarea><div class="row"><button class="btn ghost" id="ofLc">复制</button><button class="btn save" id="ofLx">我已经存好 / 发给设备了</button></div>', function (m) {
+        $('#ofLc', m).onclick = function () { var t = $('#ofLk', m); t.select(); try { navigator.clipboard.writeText(t.value).then(function () { toast('已复制', 1500); }); } catch (e) { document.execCommand('copy'); toast('已复制', 1500); } };
+        $('#ofLx', m).onclick = closeModal;
+      });
+    }
+    function ofHtml() {
+      var O = ofS();
+      if (!OF_ON) return '<p class="hint">办公室功能只在新后台（AWMS 0.9 过渡版）上有。</p>';
+      if (!O.sess) return '<div class="oflogin"><h3>办公室管理员登录</h3><p class="hint">员工、设备链接、标签登记这些功能要管理员登录（员工姓名 + PIN）。</p>' +
+        '<label class="plf"><span>姓名</span><input id="ofN" maxlength="30" value="' + esc(LS.get('ofLast', '')) + '"></label><label class="plf"><span>PIN</span><input id="ofP" type="password" inputmode="numeric" maxlength="8"></label>' +
+        (O.msg ? '<p class="' + (O.bad ? 'err' : 'hint') + '">' + esc(O.msg) + '</p>' : '') + '<button class="btn save" id="ofGo"' + (O.busy ? ' disabled' : '') + '>登录</button></div>';
+      var h = '<div class="rbar ofbar">' + OF_PAGES.map(function (p) { return '<button class="rtab' + (O.page === p[0] ? ' on' : '') + '" data-ofp="' + p[0] + '">' + p[1] + '</button>'; }).join('') +
+        '<span class="hint">管理员 <b>' + esc(O.sess.name) + '</b></span><button class="tbtn" id="ofOut">退出</button></div>' +
+        (O.msg ? '<p class="' + (O.bad ? 'err' : 'tmsg good') + '">' + esc(O.msg) + '</p>' : '');
+      var d = O.d[O.page];
+      if (O.page === 'staff') {
+        h += '<p class="hint">员工在 PDA 上必须输入自己的 PIN。改 PIN 或停用后，这个员工在所有设备上的登录马上失效。打勾的模块才会出现在他的手机上。</p>';
+        if (d) h += '<div class="rtw"><table class="rtab-t"><thead><tr><th>姓名</th><th>状态</th><th>可用模块</th><th></th></tr></thead><tbody>' + d.staff.map(function (s) {
+          var mods = s.mods && s.mods.length ? s.mods : ['in', 't', 'ld', 'pk'];
+          return '<tr><td><b>' + esc(s.name) + '</b>' + (s.hasPin ? '' : ' <span class="err">未设 PIN，不能登录</span>') + '</td><td>' + (s.active ? '启用' : '<span class="err">已停用</span>') + '</td><td class="ofmods">' +
+            d.mods.map(function (m) { return '<label><input type="checkbox" data-ofm="' + esc(m[0]) + '" data-who="' + esc(s.name) + '"' + (mods.indexOf(m[0]) >= 0 ? ' checked' : '') + '> ' + esc(m[1]) + '</label>'; }).join('') +
+            '</td><td><button class="tbtn" data-ofpin="' + esc(s.name) + '">设 PIN</button> <button class="tbtn" data-ofact="' + esc(s.name) + '" data-v="' + (s.active ? 0 : 1) + '">' + (s.active ? '停用' : '启用') + '</button></td></tr>';
+        }).join('') + '</tbody></table></div>';
+        h += '<h4>新增员工 / 重设 PIN</h4><div class="ofrow"><label class="plf"><span>姓名</span><input id="ofSn" maxlength="30"></label><label class="plf"><span>PIN（4–8 位数字）</span><input id="ofSp" type="password" inputmode="numeric" maxlength="8"></label><button class="btn save" id="ofSs">保存</button></div>';
+      } else if (O.page === 'dev') {
+        h += '<p class="hint">每台 PDA / 电脑 / 平板一个设置链接。设备丢了、链接发错、员工离职：点「撤销」，马上失效。</p>';
+        if (d) h += '<div class="rtw"><table class="rtab-t"><thead><tr><th>编号</th><th>名称</th><th>状态</th><th>建立</th><th>最后使用</th><th></th></tr></thead><tbody>' + d.devices.map(function (x) {
+          var a = x.status === 'ACTIVE';
+          return '<tr><td><b>' + esc(x.id) + '</b></td><td>' + esc(x.name) + '</td><td>' + (a ? '有效' : '<span class="err">已撤销</span>') + '</td><td>' + esc(x.created) + '</td><td>' + esc(x.lastSeen || '—') + ' ' + esc(x.lastStaff || '') + '</td>' +
+            '<td><button class="tbtn" data-ofre="' + esc(x.id) + '">' + (a ? '重新生成链接' : '恢复（发新链接）') + '</button>' + (a ? ' <button class="tbtn red" data-ofrv="' + esc(x.id) + '">撤销</button>' : '') + '</td></tr>';
+        }).join('') + '</tbody></table></div>';
+        h += '<h4>新增设备</h4><div class="ofrow"><label class="plf"><span>设备名称</span><input id="ofDn" maxlength="30" placeholder="如：仓库PDA-1 / 阿明手机"></label><label class="plf"><span>类型</span><select id="ofDk">' +
+          Object.keys(ofKind).map(function (k) { return '<option value="' + k + '">' + ofKind[k] + '</option>'; }).join('') + '</select></label><button class="btn save" id="ofDc">生成设置链接</button></div>';
+      } else if (O.page === 'pl') {
+        h += '<p class="hint">登记外面打印好的托盘标签（起止号）。以前登记过的号会跳过。</p><div class="ofrow"><label class="plf"><span>起号</span><input id="ofPa" maxlength="20" placeholder="PLT-2611-00001"></label><label class="plf"><span>止号</span><input id="ofPb" maxlength="20" placeholder="PLT-2611-00020"></label>' +
+          '<label class="plf"><span>打印人</span><input id="ofPw" maxlength="30" value="外面打印"></label><label class="plf"><span>打印日期</span><input id="ofPd" type="date" value="' + myToday(0) + '"></label><button class="btn save" id="ofPg">登记</button></div>';
+      } else if (O.page === 'bc') {
+        var B = O.bc || {};
+        h += '<p class="hint">商品条码主档（Product Barcodes）：Excel 第 1 行要有 Barcode、Item Code 两列（Description、Status 可选）。已有的条码按新资料更新；主档里原有、这次没有的不变。先预览，确认才导入。</p>' +
+          '<button class="btn save" id="ofBb">📂 选择 Excel</button><input id="ofBf" class="vh" type="file" accept=".xlsx" tabindex="-1">';
+        if (B.pre) h += '<div class="grnb"><b>' + esc(B.file) + '：可导入 ' + B.pre.count + ' 个条码，有问题 ' + B.pre.errorCount + ' 行（不导入）</b>' +
+          (B.pre.errors.length ? '<ul class="hint">' + B.pre.errors.map(function (e) { return '<li>' + esc(e) + '</li>'; }).join('') + (B.pre.errorCount > B.pre.errors.length ? '<li>…</li>' : '') + '</ul>' : '') +
+          '<button class="btn save" id="ofBc">确认导入 ' + B.pre.count + ' 个</button> <button class="btn ghost" id="ofBx">取消</button></div>';
+      } else if (O.page === 'set') {
+        if (d) {
+          h += '<h4>库位条码格式</h4><p class="hint">员工扫的库位必须符合这个格式（正则表达式），防止把商品条码误扫成库位。默认：<code>' + esc(d.locDefault) + '</code>（例如 15-O-02）。留空 = 恢复默认。</p>' +
+            '<div class="ofrow"><input id="ofLp" class="pkq" value="' + esc(d.locPattern === d.locDefault ? '' : d.locPattern) + '" placeholder="' + esc(d.locDefault) + '"><button class="btn save" id="ofLs">保存</button></div>';
+          h += '<h4>库位分配：新柜柜号</h4><p class="hint">一行一个：柜号 + 到柜日期（例如 <code>LX26300 2026-11-20</code>），后面可以写备注。PDA【库位分配】列这些柜里还没有库位的货。</p>' +
+            '<textarea id="ofLa" class="oftext">' + esc(d.laConts.map(function (r) { return [r[0], r[1], r[2]].filter(Boolean).join(' '); }).join('\n')) + '</textarea><div class="ofrow"><button class="btn save" id="ofLc2">保存柜号</button></div>';
+        }
+      } else if (O.page === 'pk' || O.page === 'ld') {
+        h += '<div class="ofrow"><button class="tbtn" id="ofLr">刷新</button><span class="hint">' + (O.page === 'pk' ? '仓库拣货' : '装车点货') + '任务（最近 200 个）。删除、重新打开都要写原因；删除的可以恢复。</span></div>';
+        if (d) h += '<div class="rtw"><table class="rtab-t"><thead><tr><th>任务</th><th>状态</th><th>DO / 客户</th><th>进度</th><th>建立</th><th>分配</th><th></th></tr></thead><tbody>' + d.list.map(function (t) {
+          var del = t.status === '已删除';
+          return '<tr' + (del ? ' class="ofdel"' : '') + '><td><b>' + esc(t.id) + '</b><div class="hint">' + esc(t.file || '') + '</div></td><td>' + esc(t.status) + (del ? '<div class="hint">' + esc(t.deleted + ' ' + (t.deletedBy || '') + '：' + (t.deleteNote || '')) + '</div>' : '') + '</td>' +
+            '<td>' + esc([].concat(t.dos || []).join(' ')) + (t.customer ? '<div class="hint">' + esc(t.customer) + '</div>' : '') + '</td><td>' + esc((t.counted || 0) + ' / ' + (t.required || 0)) + '</td><td>' + esc(t.created) + '</td><td>' + esc(t.assignedTo || '') + '</td>' +
+            '<td><button class="tbtn" data-ofdt="' + esc(t.id) + '">明细</button>' + (del ? ' <button class="tbtn" data-ofrs="' + esc(t.id) + '">恢复</button>' : ' <button class="tbtn red" data-ofdl="' + esc(t.id) + '">删除</button>') + (t.status === '已完成' ? ' <button class="tbtn" data-ofro="' + esc(t.id) + '">重新打开</button>' : '') + '</td></tr>';
+        }).join('') + '</tbody></table></div>';
+      }
+      if (O.busy && !O.msg) h += '<p class="hint">读取中…</p>';
+      return h;
+    }
+    function ofAsk(title, label, cb) {
+      modal('<h3>' + esc(title) + '</h3><label class="plf"><span>' + esc(label) + '</span><input id="ofAq" class="pkq" maxlength="200"></label><p class="err" id="ofAe"></p><div class="row"><button class="btn ghost" id="ofAx">取消</button><button class="btn save" id="ofAo">确定</button></div>', function (m) {
+        var i = $('#ofAq', m); setTimeout(function () { i.focus(); }, 50);
+        $('#ofAx', m).onclick = closeModal;
+        $('#ofAo', m).onclick = function () { var v = i.value.trim(); if (!v) { $('#ofAe', m).textContent = '请写' + label; return; } closeModal(); cb(v); };
+      });
+    }
+    function ofBind() {
+      var O = ofS(), on = function (attr, fn) { Array.prototype.forEach.call(app.querySelectorAll('[data-' + attr + ']'), function (b) { b.onclick = function () { fn(b.getAttribute('data-' + attr), b); }; }); };
+      var go = $('#ofGo'); if (go) {
+        var login = function () {
+          var n = $('#ofN').value.trim(), p = $('#ofP').value.trim(); if (!n || !p) { O.msg = '请填姓名和 PIN'; O.bad = true; return draw(); }
+          O.busy = true; O.msg = '登录中…'; O.bad = false; draw();
+          api({ action: 'rcOfLogin', name: n, pin: p }, true).then(function (r) {
+            O.busy = false;
+            if (!r.login) { O.msg = r.message; O.bad = true; return draw(); }
+            O.sess = { t: r.session, name: r.name, exp: r.exp }; LS.set('ofSess', O.sess); LS.set('ofLast', n); O.msg = ''; ofLoad();
+          }, ofFail);
+        };
+        go.onclick = login; $('#ofP').onkeydown = function (e) { if (e.key === 'Enter') login(); };
+        return;
+      }
+      on('ofp', function (p) { O.page = p; LS.set('ofPage', p); O.msg = ''; if (!O.d[p]) ofLoad(); else draw(); });
+      var out = $('#ofOut'); if (out) out.onclick = function () { O.sess = null; LS.del('ofSess'); O.msg = ''; O.d = {}; draw(); };
+      // 员工
+      var ss = $('#ofSs'); if (ss) ss.onclick = function () { var n = $('#ofSn').value.trim(), p = $('#ofSp').value.trim(); if (!n) { O.msg = '请填姓名'; O.bad = true; return draw(); } ofDo({ action: 'rcOfStaffSave', name: n, pin: p }, '✓ 已保存：' + n, function (r) { O.d.staff.staff = r.staff; }); };
+      on('ofpin', function (n) { var i = $('#ofSn'); i.value = n; $('#ofSp').focus(); });
+      on('ofact', function (n, b) { ofDo({ action: 'rcOfStaffSave', name: n, active: b.getAttribute('data-v') === '1' }, '✓ 已' + (b.getAttribute('data-v') === '1' ? '启用 ' : '停用 ') + n, function (r) { O.d.staff.staff = r.staff; }); });
+      Array.prototype.forEach.call(app.querySelectorAll('[data-ofm]'), function (c) { c.onchange = function () {
+        var w = c.getAttribute('data-who'), m = Array.prototype.filter.call(app.querySelectorAll('[data-ofm]'), function (x) { return x.getAttribute('data-who') === w && x.checked; }).map(function (x) { return x.getAttribute('data-ofm'); });
+        var send = function () { ofDo({ action: 'rcOfStaffMods', name: w, mods: m }, '✓ 已保存 ' + w + ' 的可用模块', function (r) { O.d.staff.staff = r.staff; }); };
+        if (!m.length) return confirmBox(w + ' 一个模块都不能用（登录后什么都看不到），确定？', '确定', send);
+        send();
+      }; });
+      // 设备
+      var dc = $('#ofDc'); if (dc) dc.onclick = function () { var n = $('#ofDn').value.trim(), k = $('#ofDk').value; if (!n) { O.msg = '请填设备名称'; O.bad = true; return draw(); } ofDo({ action: 'rcOfDeviceCreate', name: n, kind: k }, function (r) { return '✓ 已建 ' + r.created.id; }, function (r) { O.d.dev.devices = r.devices; setTimeout(function () { ofLinkBox(r.created); }, 0); }); };
+      on('ofre', function (id) { confirmBox('给 ' + id + ' 生成新链接？旧链接会马上失效。', '生成新链接', function () { ofDo({ action: 'rcOfDeviceRelink', id: id }, '✓ ' + id + ' 新链接已生成', function (r) { O.d.dev.devices = r.devices; setTimeout(function () { ofLinkBox(r.created); }, 0); }); }); });
+      on('ofrv', function (id) { confirmBox('撤销 ' + id + '？这台设备会马上不能用（没上传的资料留在设备上）。', '撤销', function () { ofDo({ action: 'rcOfDeviceRevoke', id: id }, '✓ 已撤销 ' + id, function (r) { O.d.dev.devices = r.devices; }); }); });
+      // 托盘标签
+      var pg = $('#ofPg'); if (pg) pg.onclick = function () {
+        var a = $('#ofPa').value.trim().toUpperCase(), b = $('#ofPb').value.trim().toUpperCase() || a, w = $('#ofPw').value.trim(), dt = $('#ofPd').value;
+        if (!/^PLT-\d{4}-\d{5}$/.test(a) || !/^PLT-\d{4}-\d{5}$/.test(b)) { O.msg = '标签号要写成 PLT-2611-00001'; O.bad = true; return draw(); }
+        confirmBox('登记 ' + a + ' ～ ' + b + '（' + (w || '外面打印') + '，' + dt + '）？', '登记', function () { ofDo({ action: 'rcOfPlRegister', from: a, to: b, by: w, date: dt }, function (r) { return '✓ 已登记 ' + r.added + ' 张' + (r.skipped ? '（' + r.skipped + ' 张以前登记过，跳过）' : ''); }); });
+      };
+      // 商品条码主档
+      var bb = $('#ofBb'); if (bb) { bb.onclick = function () { $('#ofBf').click(); }; $('#ofBf').onchange = function () {
+        var f = this.files[0]; this.value = ''; if (!f) return;
+        O.busy = true; O.msg = '读取 ' + f.name + '…'; O.bad = false; draw();
+        f.arrayBuffer().then(xlsxRead).then(function (sh) {
+          var rows = []; for (var r = 1; r <= sh.maxRow; r++) { var row = []; rowCells(sh, r).forEach(function (c) { row[c.c1 - 1] = cellText(c.v); }); for (var i = 0; i < row.length; i++) if (row[i] == null) row[i] = ''; rows.push(row.slice(0, 6)); }
+          O.bc = { file: f.name, rows: rows };
+          return ofApi({ action: 'rcOfBarcodes', rows: rows }).then(function (r) { O.busy = false; if (r.ok === false) { O.msg = r.message; O.bad = true; return draw(); } O.bc.pre = r; O.msg = ''; draw(); });
+        }).catch(ofFail);
+      }; }
+      var bc = $('#ofBc'); if (bc) bc.onclick = function () { ofDo({ action: 'rcOfBarcodes', rows: O.bc.rows, confirm: true }, function (r) { return '✓ 完成：新增 ' + r.added + '，更新 ' + r.updated + '，不变 ' + r.unchanged + '，不导入 ' + r.rejected + (r.changedItem.length ? '。⚠ Item Code 被改了的条码：' + r.changedItem.join('；') : ''); }, function () { O.bc = null; }); };
+      var bx = $('#ofBx'); if (bx) bx.onclick = function () { O.bc = null; draw(); };
+      // 设置
+      var ls = $('#ofLs'); if (ls) ls.onclick = function () { ofDo({ action: 'rcOfSettings', set: 'locPattern', value: $('#ofLp').value.trim() }, function (r) { return '✓ 库位格式已保存：' + r.locPattern; }, function (r) { O.d.set = r; }); };
+      var lc = $('#ofLc2'); if (lc) lc.onclick = function () {
+        var rows = $('#ofLa').value.split(/\n/).map(function (l) { var p = l.trim().split(/\s+/); if (!p[0]) return null; var dt = /^\d{4}-\d{2}-\d{2}$/.test(p[1] || '') ? p[1] : ''; return [p[0], dt, p.slice(dt ? 2 : 1).join(' ')]; }).filter(Boolean);
+        ofDo({ action: 'rcOfSettings', set: 'laConts', rows: rows }, '✓ 新柜柜号已保存（' + rows.length + ' 个）', function (r) { O.d.set = r; });
+      };
+      // 拣货 / 装车看板
+      var lr = $('#ofLr'); if (lr) lr.onclick = ofLoad;
+      var mod = O.page, upd = function (r) { O.d[mod].list = r.list; };
+      on('ofdl', function (id) { ofAsk('删除 ' + id, '删除原因', function (v) { ofDo({ action: 'rcOfLd', mod: mod, do: 'delete', taskId: id, note: v }, '✓ 已删除 ' + id + '（可以恢复）', upd); }); });
+      on('ofrs', function (id) { confirmBox('恢复 ' + id + '？状态回到删除前。', '恢复', function () { ofDo({ action: 'rcOfLd', mod: mod, do: 'restore', taskId: id }, '✓ 已恢复 ' + id, upd); }); });
+      on('ofro', function (id) { ofAsk('重新打开 ' + id, '重新打开的原因', function (v) { ofDo({ action: 'rcOfLd', mod: mod, do: 'reopen', taskId: id, note: v }, '✓ 已重新打开 ' + id, upd); }); });
+      on('ofdt', function (id) {
+        ofApi({ action: 'rcOfLd', mod: mod, do: 'detail', taskId: id }).then(function (r) {
+          if (r.ok === false) { O.msg = r.message; O.bad = true; return draw(); }
+          modal('<h3>' + esc(id) + ' 明细</h3><div class="rtw ofdet"><table class="rtab-t"><thead><tr><th>商品</th><th>条码</th><th>批次 / 库位</th><th>应</th><th>实</th><th>差</th><th>状态</th></tr></thead><tbody>' +
+            (r.items || []).map(function (it) { return '<tr><td>' + esc(it.desc) + '</td><td>' + esc(it.bc || it.code) + '</td><td>' + esc([it.batch, it.loc].filter(Boolean).join(' · ')) + '</td><td>' + esc(it.req) + ' ' + esc(it.uom || '') + '</td><td>' + esc(it.counted) + '</td><td>' + esc(it.diff) + '</td><td>' + esc(it.status) + '</td></tr>'; }).join('') +
+            '</tbody></table></div><div class="row"><button class="btn save" id="ofDx">关闭</button></div>', function (m) { $('#ofDx', m).onclick = closeModal; });
+        }, ofFail);
+      });
+    }
     function draw() {
       var y = window.scrollY;
-      app.innerHTML = '<div class="mods rcmods">' + [['tr', 'Shelf Transfer · 移库记录'], ['pk', 'Picking Location Discrepancy · 拣货库位差异'], ['lm', 'Item Locations · 库位主档'], ['grn', 'Pallet · 贴码任务 / GRN']].map(function (t) { return '<button class="mod' + (R.tab === t[0] ? ' on' : '') + '" data-tab="' + t[0] + '">' + t[1] + '</button>'; }).join('') + '<a class="mod wcgo" href="#/wc">📊 库位中控台（平板）</a><button class="mod wcgo" id="plExp">🏷 导出托盘（AWMS）</button></div>' +
-        (R.err ? '<p class="err">' + esc(R.err) + '</p>' : '') + '<div class="card rcard">' + (R.tab === 'tr' ? trHtml() : R.tab === 'lm' ? lmHtml() : R.tab === 'grn' ? grnHtml() : pkHtml()) + '</div>';
+      app.innerHTML = '<div class="mods rcmods">' + [['tr', 'Shelf Transfer · 移库记录'], ['pk', 'Picking Location Discrepancy · 拣货库位差异'], ['lm', 'Item Locations · 库位主档'], ['grn', 'Pallet · 贴码任务 / GRN']].concat(OF_ON ? [['of', '办公室 · Office']] : []).map(function (t) { return '<button class="mod' + (R.tab === t[0] ? ' on' : '') + '" data-tab="' + t[0] + '">' + t[1] + '</button>'; }).join('') + '<a class="mod wcgo" href="#/wc">📊 库位中控台（平板）</a><button class="mod wcgo" id="plExp">🏷 导出托盘（AWMS）</button></div>' +
+        (R.err ? '<p class="err">' + esc(R.err) + '</p>' : '') + '<div class="card rcard">' + (R.tab === 'tr' ? trHtml() : R.tab === 'lm' ? lmHtml() : R.tab === 'grn' ? grnHtml() : R.tab === 'of' ? ofHtml() : pkHtml()) + '</div>';
       window.scrollTo(0, y); bind();
     }
     function bind() {
-      Array.prototype.forEach.call(app.querySelectorAll('[data-tab]'), function (b) { b.onclick = function () { R.tab = b.dataset.tab; LS.set('rcTab', R.tab); draw(); if (!R[R.tab]) load(R.tab); }; });
+      Array.prototype.forEach.call(app.querySelectorAll('[data-tab]'), function (b) { b.onclick = function () { R.tab = b.dataset.tab; LS.set('rcTab', R.tab); draw(); if (!R[R.tab] || R.tab === 'of') load(R.tab); }; });
       var pe = $('#plExp'); if (pe) pe.onclick = function () {          // v1.9.32 托盘导出（4 个工作表，给 AWMS 0.9 导入）
         pe.disabled = true; pe.textContent = '导出中…';
         api({ action: 'rcPlExport' }, true).then(function (d) {
@@ -4287,6 +4466,7 @@
           pe.disabled = false; pe.textContent = '🏷 导出托盘（AWMS）';
         }, function (e) { pe.disabled = false; pe.textContent = '🏷 导出托盘（AWMS）'; toast(e.network ? '网络不可用' : e.message, 3000); });
       };
+      if (R.tab === 'of') return ofBind();
       var inp = function (id, obj, k) { var e = $('#' + id); if (!e) return; e.oninput = e.onchange = function () { obj[k] = e.value; var pos = e.selectionStart; draw(); var n = $('#' + id); if (n) { n.focus(); try { n.setSelectionRange(pos, pos); } catch (x) { } } }; };
       if (R.tab === 'grn') {
         Array.prototype.forEach.call(app.querySelectorAll('[data-nst]'), function (b) { b.onclick = function () { R.grn.nst = b.dataset.nst; var n = $('#ptN'); R.grn.nname = n ? n.value : ''; draw(); }; });
