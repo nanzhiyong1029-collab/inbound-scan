@@ -3,7 +3,7 @@
  * 原则：只采集原始资料，不做任何核对。先存手机（离线队列），再上传云端。 */
 (function () {
   'use strict';
-  var VERSION = '1.9.50';
+  var VERSION = '1.9.51';
   var $ = function (s, el) { return (el || document).querySelector(s); };
   var app = $('#app');
 
@@ -160,7 +160,7 @@
     var ctl = window.AbortController ? new AbortController() : null;
     var timer = setTimeout(function () { if (ctl) ctl.abort(); }, post ? 45000 : 30000);
     // 凭据只放在 POST 内容里，不出现在网址中
-    var body = Object.assign({}, params, { dev: cfg.d, sess: sess ? sess.t : '' }); delete body.__moved;
+    var body = Object.assign({}, params, { dev: cfg.d, sess: sess ? sess.t : '', fv: VERSION }); delete body.__moved;      // v1.9.51 fv = 前端版本号（后台 A4b 请求记录用）
     var req = fetch(cfg.u, { method: 'POST', body: JSON.stringify(body), headers: { 'Content-Type': 'text/plain;charset=utf-8' }, redirect: 'follow', signal: ctl && ctl.signal });
     return req.then(function (r) { if (r.status === 503) { var x = new Error('S503'); x.s503 = true; throw x; } return r.json(); }).then(function (d) {
       clearTimeout(timer);
