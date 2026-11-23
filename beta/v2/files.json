@@ -1,0 +1,16 @@
+{
+ "build": "4f6705",
+ "target": "chrome61",
+ "files": [
+  "v2/boot.js",
+  "v2/c-chunk-NV4DFG7G.js",
+  "v2/c-chunk-WBC7NSCD.js",
+  "v2/c-chunk-WEARNE2C.js",
+  "v2/c-chunk-YDFPO5ZR.js",
+  "v2/p-pl.js",
+  "v2/p-q.js",
+  "v2/p-t.js",
+  "v2/perf.html",
+  "v2/perf.js"
+ ]
+}

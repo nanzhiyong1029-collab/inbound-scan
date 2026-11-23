@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; object-src 'none'; base-uri 'none'; form-action 'none'">
+<meta name="referrer" content="no-referrer">
+<title>速度记录</title>
+<style>
+  body { font: 15px/1.5 system-ui, sans-serif; margin: 12px; color: #111827; background: #EEF1F5; }
+  table { border-collapse: collapse; width: 100%; background: #fff; }
+  th, td { border: 1px solid #DDE1E7; padding: 6px; text-align: left; font-size: 14px; }
+  td:nth-child(n+4) { text-align: right; font-family: ui-monospace, monospace; }
+  .bar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 10px 0; }
+  button { min-height: 44px; padding: 0 14px; border-radius: 8px; border: 1px solid #1D4ED8; background: #fff; color: #1D4ED8; font-weight: 600; }
+  p { color: #4B5563; font-size: 12px; word-break: break-all; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="module" src="perf.js?b=4f6705"></script>
+</body>
+</html>

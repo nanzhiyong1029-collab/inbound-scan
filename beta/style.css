@@ -821,7 +821,7 @@ mark.spec { background: #fde68a; color: #7a2e0e; padding: 0 3px; border-radius: 
 /* v1.9.42 紧急切回按钮 */
 .btn.red{background:#b42318;color:#fff}
 .oldn { display: block; font-size: 10px; font-weight: 400; opacity: .7; line-height: 1.1; }
-/* v1.9.48-1 托位两格图（用词表 4c）：左 [■□] / 右 [□■]；高度跟字号，实心格 = 正文颜色 */
+/* v1.9.48 托位两格图（用词表 4c）：左 [■□] / 右 [□■]；高度跟字号，实心格 = 正文颜色 */
 .sic { display: inline-block; height: 1em; width: 1.57em; vertical-align: -0.14em; overflow: visible; }
 .sic.big { height: 2.2em; width: 3.45em; display: block; margin: 0 auto 4px; }
 .plside .pls-no { font-size: 20px; letter-spacing: 1px; display: block; text-align: center; }

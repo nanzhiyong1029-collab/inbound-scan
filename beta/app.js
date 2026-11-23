@@ -3,7 +3,7 @@
  * 原则：只采集原始资料，不做任何核对。先存手机（离线队列），再上传云端。 */
 (function () {
   'use strict';
-  var VERSION = '1.9.50-1';
+  var VERSION = '1.9.51-t1';
   var $ = function (s, el) { return (el || document).querySelector(s); };
   var app = $('#app');
 
@@ -160,7 +160,7 @@
     var ctl = window.AbortController ? new AbortController() : null;
     var timer = setTimeout(function () { if (ctl) ctl.abort(); }, post ? 45000 : 30000);
     // 凭据只放在 POST 内容里，不出现在网址中
-    var body = Object.assign({}, params, { dev: cfg.d, sess: sess ? sess.t : '' }); delete body.__moved;
+    var body = Object.assign({}, params, { dev: cfg.d, sess: sess ? sess.t : '', fv: VERSION }); delete body.__moved;      // v1.9.51 fv = 前端版本号（后台 A4b 请求记录用）
     var req = fetch(cfg.u, { method: 'POST', body: JSON.stringify(body), headers: { 'Content-Type': 'text/plain;charset=utf-8' }, redirect: 'follow', signal: ctl && ctl.signal });
     return req.then(function (r) { if (r.status === 503) { var x = new Error('S503'); x.s503 = true; throw x; } return r.json(); }).then(function (d) {
       clearTimeout(timer);
@@ -178,6 +178,7 @@
         throw e;
       }
       if (d.mods) updateMods(d.mods);
+      if (d.fe && window.AWMS_NEW) { try { window.AWMS_NEW.setServerCfg(d.fe); } catch (e) { } }      // B5 每页新 / 旧开关、显示操作说明（系统设置）
       return d;
     }, function (err) {
       clearTimeout(timer);
@@ -202,12 +203,14 @@
     setTimeout(function () { if (document.activeElement !== t) { t.setAttribute('inputmode', 'none'); t.removeAttribute('data-im'); } }, 150);
   }, true);
 
-  // ---------- v1.9.50-1 扫码不用先点输入框（所有 PDA 页：移库、查库位、托盘、拣货 / 装车、库位分配、库位）----------
+  // ---------- v1.9.50 扫码不用先点输入框（所有 PDA 页：移库、查库位、托盘、拣货 / 装车、库位分配、库位）----------
   //   ① 光标不在「真正要打字的框」里（到期年月、箱数、原因、搜索框…）时，扫码头打进来的字一律送进这一页的扫码框；
   //   ② 页面重画、保存后、弹窗关掉、切换步骤、点了按钮 / 空白处之后，自动对准扫码框；
   //   ③ 自动对准不弹手机键盘：扫码框先设成 inputmode="none"，手点扫码框才弹（照 v1.4.1 的做法）；
   //   ④ 拣货 SKU 页（#/pk/任务/i/行）有自己的页面数字键盘和扫描枪识别（kpKey），这里不管。
   var SCAN_SEL = '#tIn,#lqIn,#plIn,#ldIn,#laIn,#lmIn,#fenIn';
+  // B5 新前端（docs/24 A3）：这一页归新代码（v2/boot.js）画时，旧的扫码监听不管，交给新代码的扫码管家
+  function v2Owns(h) { try { return !!(window.AWMS_NEW && window.AWMS_NEW.owns(h == null ? location.hash : h)); } catch (e) { return false; } }
   var SCAN_TYPE_SKIP = /^(button|submit|checkbox|radio|file|range|color|reset|image|hidden)$/i;
   function scanSkipPage() { return /^#\/pk\/[^/]+\/i\/\d+$/.test(location.hash); }
   function isTypingEl(a) {
@@ -231,7 +234,7 @@
   document.addEventListener('input', function (e) { if (isTypingEl(e.target) && !e.target.matches(SCAN_SEL)) scanTyp.at = Date.now(); }, true);
   document.addEventListener('pointerdown', function (e) { if (!isTypingEl(e.target) && !(e.target.closest && e.target.closest('label'))) scanTyp.at = 0; }, true);    // 手点了别处 = 不打字了
   function scanFocus() {
-    if (camOpen || scanSkipPage()) return;
+    if (camOpen || scanSkipPage() || v2Owns()) return;
     var a = document.activeElement;
     if (isTypingEl(a)) return;                                            // 已经在扫码框或别的打字框里：不动
     var m = $('#modal'), open = m && !m.hidden;
@@ -248,9 +251,19 @@
   function scanFocusSoon(ms) { clearTimeout(scanFocusT); scanFocusT = setTimeout(scanFocus, ms == null ? 40 : ms); }
   // 扫码头的字：光标不在打字框里 → 先对准扫码框，字照样进去（和移库页原来的做法一样，不拦按键）
   document.addEventListener('keydown', function (e) {
-    if (camOpen || scanSkipPage() || !e.key || e.key.length !== 1 || e.ctrlKey || e.altKey || e.metaKey) return;
-    if (isTypingEl(document.activeElement)) return;
+    if (camOpen || scanSkipPage() || v2Owns() || !e.key || e.ctrlKey || e.altKey || e.metaKey) return;
+    var a0 = document.activeElement, end = e.key === 'Enter' || e.key === 'Tab';
+    if (e.key.length !== 1 && !end) return;
+    if (isTypingEl(a0)) return;
     var t = scanBox(); if (!t) return;
+    // B5 修（测试里约 1/5 次失败）：页面刚重画、扫码框被换掉的一瞬间光标掉到页面上，扫码头的回车就丢了（码留在框里没提交）。
+    // 光标掉了（不在任何框 / 按钮上）而扫码框里有字 → 把回车交给扫码框
+    if (end) {
+      if (!t.value || (a0 && a0 !== document.body && a0.isConnected)) return;
+      e.preventDefault(); clearTimeout(scanFocusT); t.focus();
+      t.dispatchEvent(new KeyboardEvent('keydown', { key: e.key, keyCode: e.keyCode, bubbles: true, cancelable: true }));
+      return;
+    }
     clearTimeout(scanFocusT); scanTyp.at = 0;
     if (t.getAttribute('inputmode') !== 'none') { t.setAttribute('inputmode', 'none'); t.setAttribute('data-im', 'none'); }
     t.focus();
@@ -289,9 +302,10 @@
 
   var online = navigator.onLine !== false;
   function setOnline(v) { online = v; renderNet(); }
+  function v2Pending() { try { return window.AWMS_NEW ? +window.AWMS_NEW.pending() || 0 : 0; } catch (e) { return 0; } }
   function renderNet() {
     var n = $('#net'), t = $('#netText');
-    var pend = outbox.length + (typeof tqCount === 'number' ? tqCount : 0) + (typeof ldPendN === 'number' ? ldPendN : 0);
+    var pend = outbox.length + (typeof tqCount === 'number' ? tqCount : 0) + (typeof ldPendN === 'number' ? ldPendN : 0) + v2Pending();
     if (!n) return;
     n.className = !online ? 'off' : (pend ? 'sync' : '');
     t.textContent = (!online ? '离线' : '在线') + (pend ? ' · 待同步 ' + pend : '');
@@ -780,7 +794,7 @@
 
   function openMenu() {
     modal('<div class="menu">' +
-      '<div class="hint">员工：<b>' + esc(operator || '未登录') + '</b> · 设备 ' + esc((sess && sess.dev) || device) + ' · v' + VERSION + '</div>' +
+      '<div class="hint">员工：<b>' + esc(operator || '未登录') + '</b> · 设备 ' + esc((sess && sess.dev) || device) + ' · v' + VERSION + (window.AWMS_NEW && window.AWMS_NEW.build ? ' · v2-' + esc(window.AWMS_NEW.build) : '') + '</div>' +
       '<div class="hint">本机长期保存：' + (persisted === true ? '<b style="color:#1a7f37">已批准</b>（清理缓存不会掉线）' : persisted === false ? '<b style="color:#b45309">未批准</b>（建议把 APP 添加到主屏幕）' : '不支持') + '</div>' +
       '<button id="mSync">立即上传（待同步 ' + (outbox.length + tqCount + ldPendN) + '）</button>' +
       othersNote() +
@@ -852,6 +866,7 @@
   document.addEventListener('synced', function () { if (currentRedraw) currentRedraw(); });
   var currentRedraw = null;
   function route() {
+    if (window.AWMS_NEW) { try { window.AWMS_NEW.routeStart(); window.AWMS_NEW.leave(); } catch (e) { } }
     stopCamera();
     kpPage = null; kpModal = null;
     setTimeout(langApply, 0);
@@ -877,7 +892,7 @@
     if (!sess) return viewLogin();
     var h = location.hash || '#/';
     var m;
-    if (myMods().indexOf(hashMod(h)) < 0) {          // 没有这个模块的权限 → 去第一个能用的模块
+    if (myMods().indexOf(hashMod(h)) < 0 && !(h === '#/tq' && myMods().indexOf('lm') >= 0 && v2Owns(h) && window.AWMS_NEW.flag('q') === 'new')) {          // 没有这个模块的权限 → 去第一个能用的模块（C3b：查询「新」时只有库位分配权限也能进，只读托盘资料）
       var home = modHome();
       if (home) { location.hash = home; return; }
       else {
@@ -887,6 +902,7 @@
         return;
       }
     }
+    if (v2Owns(h)) return window.AWMS_NEW.show(h);          // B5：这一页开关是「新」→ 新代码画（登录、模块权限上面已经查过）
     if ((m = h.match(/^#\/job\/([^/]+)$/))) return viewProducts(decodeURIComponent(m[1]));
     if ((m = h.match(/^#\/p\/([^/]+)\/([^/]+)$/))) return viewCollect(decodeURIComponent(m[1]), decodeURIComponent(m[2]));
     if (h === '#/t') return viewTransfer();
@@ -1618,7 +1634,11 @@
       return d;
     });
   }
+  function v2Perf(k, t0) { try { return window.AWMS_NEW ? window.AWMS_NEW.perfStart(k, 'tq', 'old', t0) : null; } catch (e) { return null; } }
+  function v2PerfS(page) { try { return window.AWMS_NEW ? window.AWMS_NEW.perfStart('save', page, 'old') : null; } catch (e) { return null; } }      // C3b 速度记录：保存 → 完成画出来
+  function v2PerfEnd(tk, painted) { try { if (tk && window.AWMS_NEW) window.AWMS_NEW[painted ? 'perfEndPainted' : 'perfEnd'](tk); } catch (e) { } }
   function viewLocQuery() {
+    var pfOpen = v2Perf('open', window.AWMS_NEW && window.AWMS_NEW.routeT0 ? window.AWMS_NEW.routeT0() : undefined), pfScan = null;
     setBar('查库位', true);
     function localRes(loc, q) {          // 手机里的库位资料（离线 / 数据库还没开）
       var L = trSnap ? trSnap.locs : [];
@@ -1660,18 +1680,20 @@
     }
     function run(v, isItem) {
       v = normCode(v); if (!v) return;
+      v2PerfEnd(v2Perf('recv')); pfScan = v2Perf('scan');
       var loc = normLoc(v), isLoc = !isItem && locRe().test(loc);
       if (!isLoc && !isItem && !/^\d{5,}$/.test(v) && !lookupItem(v)) {          // 不是库位、不是条码 → 搜商品，点一个再查
-        LQ = { q: v, loc: false, res: null, err: '', busy: false, src: '', hits: nameHits(v) }; draw(); return;
+        LQ = { q: v, loc: false, res: null, err: '', busy: false, src: '', hits: nameHits(v) }; draw(); v2PerfEnd(pfScan, true); return;
       }
       LQ = { q: isLoc ? loc : v, loc: isLoc, res: null, err: '', busy: true, src: '' }; draw();
+      var pfMine = pfScan;
       var bx = isItem && masters && masters.byItem[v];            // 点的是搜索结果：用这个商品的条码去查（数据库按条码 / Item Code 找）
       var args = isLoc ? { p_loc: loc, p_q: null } : { p_loc: null, p_q: bx && bx[0] ? String(bx[0]) : v };
       var useLocal = function (why) { return trSnapLoad(false).then(function () { LQ.res = localRes(isLoc ? loc : '', v); LQ.src = 'local'; LQ.err = why; }); };
       var p = navigator.onLine === false ? useLocal('没有网络') : lqRpc(args).then(function (d) { LQ.res = lqOverlay(d, isLoc ? loc : '', d && d.items); LQ.src = 'db'; }, function (e) {
         var m = e && e.message; return useLocal(m === 'NOSB' || m === 'NOFN' ? '数据库还没开通查库位' : e && (e.network || e.name === 'AbortError' || e.name === 'TypeError') ? '数据库连不上' : m);
       });
-      p.then(function () { LQ.busy = false; if (location.hash === '#/tq') draw(); }, function (e) { LQ.busy = false; LQ.err = e.message; if (location.hash === '#/tq') draw(); });
+      p.then(function () { LQ.busy = false; if (location.hash === '#/tq') { draw(); v2PerfEnd(pfMine, true); } }, function (e) { LQ.busy = false; LQ.err = e.message; if (location.hash === '#/tq') draw(); });
     }
     function recHtml(x, withLoc) {       // x = 库位记录
       var loc = withLoc ? x[0] : '', st = withLoc ? x[4] : x[4], at = withLoc ? x[5] : x[6], by = withLoc ? x[6] : x[7], exp = withLoc ? x[7] : x[8];
@@ -1718,6 +1740,7 @@
     }
     currentRedraw = function () { if (location.hash === '#/tq') draw(); };
     draw();
+    if (pfOpen) { v2PerfEnd(pfOpen, true); pfOpen = null; try { window.AWMS_NEW.perfCold('tq', 'old'); } catch (e) { } }      // 速度记录：扫码框画出来（1.9.50 扫码管家第一个键就对准）
     if (!masters) loadMasters().catch(function () { });
     refreshTq().then(function () { if (location.hash === '#/tq' && !LQ.busy) draw(); });
   }
@@ -2008,13 +2031,13 @@
         });
     }
     function send(body) {
-      busy = true; draw();
+      busy = true; draw(); var pfS = v2PerfS('t-pl');
       var params = Object.assign({ action: 'plMove', eventId: S.eid, lpn: S.lpn }, body);
       plSubmit(params, {
         ok: function (r) {
           busy = false; beep(); S.done = r; S.msg = null;
           var lk = r.linked || {}; if (lk.picks) S.done.text = (r.text || '') + ' · 拣货单已换上新库位（' + lk.picks + ' 行）';
-          draw();
+          draw(); v2PerfEnd(pfS, true);
         },
         fail: function (m) { busy = false; say('bad', m); },
         cancel: function () { busy = false; draw(); },
@@ -2394,7 +2417,7 @@
       var B = S.b;
       if (!B.task) return say('bad', '请先选择收货任务');
       for (var i = 0; i < B.lines.length; i++) { var x = B.lines[i]; if (x.exp && !/^\d{2}(0[1-9]|1[0-2])$/.test(x.exp)) return say('bad', '到期年月写 4 位：年年月月，例如 2709'); }
-      S.busy = true; draw();
+      S.busy = true; draw(); var pfS = v2PerfS('pl');
       api({ action: 'plBind', eventId: B.eid, lpn: B.lpn, taskId: B.task, srcType: B.st, srcCode: B.sc, mixOk: mixOk === true, lines: B.lines.map(function (x) { return { bc: x.bc, item: x.item, exp: x.exp, ctn: x.ctn, uom: x.uom }; }) }, true).then(function (r) {
         S.busy = false;
         if (r.status === 'confirm') { draw(); errBeep(); return confirmBox(r.message, '确定，保存', function () { saveBind(true); }); }      // v1.9.35 规格书 6.4 第 6 条：提醒，不拦
@@ -2405,7 +2428,7 @@
         }
         plAfter(r);
         S.b = newBind(); S.list = null;
-        say('good', '✓ ' + B.lpn + ' 已组托（' + B.lines.length + ' 种商品）。上架：到「移库」扫这个托盘码，再扫库位');
+        say('good', '✓ ' + B.lpn + ' 已组托（' + B.lines.length + ' 种商品）。上架：到「移库」扫这个托盘码，再扫库位'); v2PerfEnd(pfS, true);
       }, net);
     }
     function showEmpty(v) {
@@ -2691,7 +2714,9 @@
           if (now - prev >= 4) t = setTimeout(function () { if (document.activeElement === inp && inp.value) accept(inp.value); }, 250);
           prev = now;
         });
-        setTimeout(function () { var x = $('#tIn'); if (x && !(document.activeElement && document.activeElement.id === 'tQty')) x.focus(); }, 30);
+        // B5 修（测试里约 1/5 次失败）：箱码批次第二次读回来（后台）会再重画一次，30 ms 后把光标抢回扫码框——
+        // 这时「箱码不认识」弹窗已经开着、人正在弹窗的搜索框里打字，字就跑进了后面的扫码框。弹窗开着或在别的打字框里时不抢
+        setTimeout(function () { var x = $('#tIn'), a = document.activeElement; if (x && $('#modal').hidden && !(a && a !== x && isTypingEl(a))) x.focus(); }, 30);
         $('#tCam').onclick = function () {
           var k = step();
           openCamera(k, function (code) { accept(code); }, { label: STEPS.filter(function (s) { return s[0] === k; })[0][1], qr: k !== 'bc', multi: k !== 'bc' ? camLocOf : null });
@@ -3078,7 +3103,7 @@
           });
     }
     function save(over, seen, kept) {
-      busy = true;
+      busy = true; var pfS = v2PerfS('t');
       var r = { transferId: uuid(), source: st.src, dest: st.dst, barcode: st.bc, itemCode: st.item, desc: st.desc, photo: st.photo, qty: st.qty || '',
         clientTime: new Date().toISOString(), operator: operator };
       if (st.alt && st.src) r.alt = st.alt;                          // v1.9.22 系统原来记的库位已经没有了 → 后台把那条搬过去
@@ -3096,7 +3121,7 @@
         busy = false;
         var done = '✓ 已提交：' + (r.itemCode || (r.newName ? '新商品 ' + r.newName : r.barcode)) + (r.batch ? '（到期 ' + (r.bexp || '—') + '）' : st.bnew ? '（新批次，不分批次）' : '') + '  ' + (r.source || '（无来源）') + ' → ' + r.dest + (r.qty ? ' · 数量 ' + r.qty : '');
         reset(false);
-        msg = { cls: 'good', text: done }; draw();
+        msg = { cls: 'good', text: done }; draw(); v2PerfEnd(pfS, true);
         return refreshTq().then(flushTransfers).then(function () { trSnapLoad(true); return refreshRecent(); });
       }, function (e) { busy = false; draw(); infoBox('提交失败', '保存到手机失败（' + e.message + '）。请再点一次“提交”；如果一直这样，请清理手机空间后再试。已扫的资料还在。'); });
     }
@@ -3115,7 +3140,7 @@
     if (!document.hidden && location.hash === '#/t' && refreshRecentNow) refreshRecentNow();
     if (!document.hidden && (location.hash === '#/t' || location.hash === '#/pl')) plSnapLoad(true).then(function () { if (location.hash === '#/pl' && PL && PL.tab === 'query' && PL.list && PL.list.local && currentRedraw) currentRedraw(); });   // v1.9.33 切回 APP：重新下载托盘资料
   });
-  // v1.9.50-1 「焦点不在输入框时扫描头的按键送到扫描框」改成所有 PDA 页通用，见文件前面 scanFocus / SCAN_SEL
+  // v1.9.50 「焦点不在输入框时扫描头的按键送到扫描框」改成所有 PDA 页通用，见文件前面 scanFocus / SCAN_SEL
 
   // ---------------- 摄像头扫码 ----------------
   // ---------------- 摄像头扫码（v1.2.2 重写） ----------------
@@ -4586,6 +4611,11 @@
         if (d) {
           h += '<h4>库位条码格式</h4><p class="hint">员工扫的库位必须符合这个格式（正则表达式），防止把商品条码误扫成库位。默认：<code>' + esc(d.locDefault) + '</code>（例如 15-O-02）。留空 = 恢复默认。</p>' +
             '<div class="ofrow"><input id="ofLp" class="pkq" value="' + esc(d.locPattern === d.locDefault ? '' : d.locPattern) + '" placeholder="' + esc(d.locDefault) + '"><button class="btn save" id="ofLs">保存</button></div>';
+          var fe = d.fe || { pages: {}, hints: true }, fp = d.fePages || [['tq', '查库位']];
+          h += '<h4>PDA 新页面（逐页换新代码）</h4><p class="hint">每一页选「旧」或「新」。PDA 下次联网、下次进这一页时生效；切回「旧」不用发版本。</p>' +
+            fp.map(function (x) { var v = fe.pages && fe.pages[x[0]] === 'new' ? 'new' : 'old'; return '<div class="ofrow"><span>' + esc(x[1]) + '（' + esc(x[0]) + '）</span><select data-ofpg="' + esc(x[0]) + '"><option value="old"' + (v === 'old' ? ' selected' : '') + '>旧</option><option value="new"' + (v === 'new' ? ' selected' : '') + '>新</option></select></div>'; }).join('') +
+            '<div class="ofrow"><label><input type="checkbox" id="ofFeH"' + (fe.hints !== false ? ' checked' : '') + '> 显示操作说明（只管新页面）</label></div>' +
+            '<div class="ofrow"><button class="btn save" id="ofFeS">保存 PDA 新页面设置</button></div>';
           h += '<h4>紧急切回旧后台（Google 表格）</h4><p class="hint">只在新后台出了大问题时用。输入「切回」后点按钮：所有手机 / 电脑下一次联网就改连旧后台。切回后要按切换步骤书把新后台这段时间的资料补回表格。' + (d.sw ? (d.sw.ready ? '已记下旧后台（' + esc(d.sw.backHost) + '）。' : '<b class="err">没有记下旧后台网址，不能一键切回。</b>') : '') + '</p>' +
             '<div class="ofrow"><input id="ofSw" class="pkq" placeholder="输入：切回" maxlength="4"><button class="btn red" id="ofSwGo">切回旧后台</button></div>';
           h += '<h4>库位分配：新柜柜号</h4><p class="hint">一行一个：柜号 + 到柜日期（例如 <code>LX26300 2026-11-20</code>），后面可以写备注。PDA【库位分配】列这些柜里还无库位的货。</p>' +
@@ -4660,6 +4690,10 @@
       var bc = $('#ofBc'); if (bc) bc.onclick = function () { ofDo({ action: 'rcOfBarcodes', rows: O.bc.rows, confirm: true }, function (r) { return '✓ 完成：新增 ' + r.added + '，更新 ' + r.updated + '，不变 ' + r.unchanged + '，不导入 ' + r.rejected + (r.changedItem.length ? '。⚠ Item Code 被改了的条码：' + r.changedItem.join('；') : ''); }, function () { O.bc = null; }); };
       var bx = $('#ofBx'); if (bx) bx.onclick = function () { O.bc = null; draw(); };
       // 设置
+      var fs = $('#ofFeS'); if (fs) fs.onclick = function () {
+        var pg = {}; Array.prototype.forEach.call(app.querySelectorAll('[data-ofpg]'), function (x) { pg[x.getAttribute('data-ofpg')] = x.value; });
+        ofDo({ action: 'rcOfSettings', set: 'fe', pages: pg, hints: !!$('#ofFeH').checked }, '✓ PDA 新页面设置已保存', function (r) { O.d.set = r; });
+      };
       var ls = $('#ofLs'); if (ls) ls.onclick = function () { ofDo({ action: 'rcOfSettings', set: 'locPattern', value: $('#ofLp').value.trim() }, function (r) { return '✓ 库位格式已保存：' + r.locPattern; }, function (r) { O.d.set = r; }); };
       var sw = $('#ofSwGo'); if (sw) sw.onclick = function () {
         var v = $('#ofSw').value.trim(); if (v !== '切回') { O.msg = '请先在框里输入「切回」两个字'; O.bad = true; return draw(); }
@@ -6523,6 +6557,7 @@
   var lmLast = null;
   // 焦点不在输入框时，扫描头的按键送到点货扫描框
   document.addEventListener('keydown', function (e) {
+    if (v2Owns()) return;
     if (!camOpen && /^#\/pk\/[^/]+\/i\/\d+$/.test(location.hash) && kpKey(e)) return;     // v1.5.2 拣货 SKU 页：数字键 / 扫描枪
     var isLm = /^#\/lmx?(\/|\?|$)/.test(location.hash);
     if ((!isLm && !/^#\/(ld|pk)\/[^/]+(\/i\/\d+)?$/.test(location.hash)) || !$('#modal').hidden || camOpen) return;
@@ -6697,6 +6732,22 @@
     document.body.appendChild(b);
   }
 
+  // B5 新前端（docs/24 A3）：借给 v2/boot.js 的东西（只借，不复制；会变的用函数取当前值）
+  window.AWMS_OLD = {
+    version: VERSION, api: api, setBar: setBar, toast: toast, modal: modal, closeModal: closeModal, confirmBox: confirmBox,
+    beep: beep, errBeep: errBeep, openCamera: openCamera, stopCamera: stopCamera, camLocOf: camLocOf, isCamOpen: function () { return camOpen; },
+    loadMasters: loadMasters, getMasters: function () { return masters; }, lookupItem: lookupItem, normLoc: normLoc, normCode: normCode, locRe: locRe, pyHit: pyHit,
+    trSnapLoad: trSnapLoad, getTrSnap: function () { return trSnap; }, plSnapLoad: plSnapLoad, getPlSnap: function () { return plSnap; },
+    refreshTq: refreshTq, tqCount: function () { return tqCount; }, lqRpc: lqRpc, lqRecentGet: lqRecentGet, locAt: locAt, nowAt: nowAt, hhmm: hhmm,
+    setRedraw: function (fn) { currentRedraw = fn || null; }, myMods: myMods, renderNet: renderNet,
+    guardLeave: guardLeave, setLeaveGuard: function (fn) { leaveGuard = fn || null; }, getSess: function () { return sess; }, prefs: function () { return prefs; },
+    // C3b 移库 / 托盘新页面（docs/25 第 7 节）：同一个移库队列、同一份手机资料、同一个提交入口
+    uuid: uuid, modTabs: modTabs, bindModTabs: bindModTabs, idb: IDB, flushTransfers: flushTransfers, trBatches: trBatches, compressPhoto: compressPhoto,
+    trSnapApply: trSnapApply, tqRejected: function () { return tqRejected; }, isFlushing: function () { return !!tqFlushing; },
+    setRefreshRecent: function (fn) { refreshRecentNow = fn || null; }, plLook: plLook, plAfter: plAfter, plConfAt: plConfAt,
+    takePM: function () { var x = PM; PM = null; return x; }, operator: function () { return operator; },
+    plLocal: plLocal, plSnapSet: plSnapSet, plEnterMove: plEnterMove
+  };
   renderNet();
   (cfg ? Promise.resolve(null) : CFGK.restore()).then(function (c) {
     if (c && !cfg) { cfg = c; CFGK.save(c); toast('已从本机备份找回设备设置', 2500); }

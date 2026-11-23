@@ -1,0 +1,1 @@
+import{e as f}from"./c-chunk-WBC7NSCD.js";import{c as l}from"./c-chunk-YDFPO5ZR.js";import{a as d,i as r,j as t,n,o as m,v as s}from"./c-chunk-NV4DFG7G.js";var e={};d(e,{mount:()=>p,unmount:()=>u});function p(o,a){m(),o.textContent="",n(s(f,{}),o),r(a),t("pl","new")}function u(o){l(),n(null,o)}var i=window;(i.__awmsPages=i.__awmsPages||{}).pl=e;
