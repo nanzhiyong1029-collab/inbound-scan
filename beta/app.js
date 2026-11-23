@@ -3,7 +3,7 @@
  * 原则：只采集原始资料，不做任何核对。先存手机（离线队列），再上传云端。 */
 (function () {
   'use strict';
-  var VERSION = '1.9.48-1';
+  var VERSION = '1.9.50-1';
   var $ = function (s, el) { return (el || document).querySelector(s); };
   var app = $('#app');
 
@@ -201,6 +201,68 @@
     if (!t || !t.getAttribute || t.getAttribute('data-im') !== 'none') return;
     setTimeout(function () { if (document.activeElement !== t) { t.setAttribute('inputmode', 'none'); t.removeAttribute('data-im'); } }, 150);
   }, true);
+
+  // ---------- v1.9.50-1 扫码不用先点输入框（所有 PDA 页：移库、查库位、托盘、拣货 / 装车、库位分配、库位）----------
+  //   ① 光标不在「真正要打字的框」里（到期年月、箱数、原因、搜索框…）时，扫码头打进来的字一律送进这一页的扫码框；
+  //   ② 页面重画、保存后、弹窗关掉、切换步骤、点了按钮 / 空白处之后，自动对准扫码框；
+  //   ③ 自动对准不弹手机键盘：扫码框先设成 inputmode="none"，手点扫码框才弹（照 v1.4.1 的做法）；
+  //   ④ 拣货 SKU 页（#/pk/任务/i/行）有自己的页面数字键盘和扫描枪识别（kpKey），这里不管。
+  var SCAN_SEL = '#tIn,#lqIn,#plIn,#ldIn,#laIn,#lmIn,#fenIn';
+  var SCAN_TYPE_SKIP = /^(button|submit|checkbox|radio|file|range|color|reset|image|hidden)$/i;
+  function scanSkipPage() { return /^#\/pk\/[^/]+\/i\/\d+$/.test(location.hash); }
+  function isTypingEl(a) {
+    if (!a || a === document.body || a.disabled) return false;
+    if (a.isContentEditable || a.tagName === 'TEXTAREA' || a.tagName === 'SELECT') return true;
+    return a.tagName === 'INPUT' && !SCAN_TYPE_SKIP.test(a.type || '');
+  }
+  function scanBox() {
+    var m = $('#modal'), open = m && !m.hidden, root = open ? m : app;
+    if (!root) return null;
+    var x = root.querySelector(SCAN_SEL);
+    return x && !x.disabled && x.offsetParent !== null ? x : null;      // 弹窗开着但弹窗里没有扫码框：不管（弹窗自己的输入框）
+  }
+  var scanTyp = { sel: '', at: 0 };          // 最近在打字的框（不是扫码框）：页面重画后先还给它
+  document.addEventListener('focusin', function (e) {
+    var a = e.target; if (!isTypingEl(a) || a.matches(SCAN_SEL)) return;
+    var sel = a.id ? '#' + a.id : '';
+    if (!sel) for (var i = 0; i < a.attributes.length; i++) { var n = a.attributes[i].name; if (/^data-/.test(n)) { sel = '[' + n + '="' + String(a.attributes[i].value).replace(/"/g, '') + '"]'; break; } }
+    scanTyp = { sel: sel, at: Date.now() };
+  }, true);
+  document.addEventListener('input', function (e) { if (isTypingEl(e.target) && !e.target.matches(SCAN_SEL)) scanTyp.at = Date.now(); }, true);
+  document.addEventListener('pointerdown', function (e) { if (!isTypingEl(e.target) && !(e.target.closest && e.target.closest('label'))) scanTyp.at = 0; }, true);    // 手点了别处 = 不打字了
+  function scanFocus() {
+    if (camOpen || scanSkipPage()) return;
+    var a = document.activeElement;
+    if (isTypingEl(a)) return;                                            // 已经在扫码框或别的打字框里：不动
+    var m = $('#modal'), open = m && !m.hidden;
+    var lost = !a || a === document.body || !a.isConnected;
+    if (lost && !open && scanTyp.sel && Date.now() - scanTyp.at < 3000) {        // 刚才在打字的框被重画掉了（焦点丢了）：还给它，不抢去扫码框
+      var back = null; try { back = app.querySelector(scanTyp.sel); } catch (e) { }
+      if (back && !back.disabled && back.offsetParent !== null) { back.focus({ preventScroll: true }); return; }
+    }
+    var t = scanBox(); if (!t) return;
+    if (t.getAttribute('inputmode') !== 'none') { t.setAttribute('inputmode', 'none'); t.setAttribute('data-im', 'none'); }    // 自动对准不弹键盘
+    try { t.focus({ preventScroll: true }); } catch (e) { t.focus(); }
+  }
+  var scanFocusT = 0;
+  function scanFocusSoon(ms) { clearTimeout(scanFocusT); scanFocusT = setTimeout(scanFocus, ms == null ? 40 : ms); }
+  // 扫码头的字：光标不在打字框里 → 先对准扫码框，字照样进去（和移库页原来的做法一样，不拦按键）
+  document.addEventListener('keydown', function (e) {
+    if (camOpen || scanSkipPage() || !e.key || e.key.length !== 1 || e.ctrlKey || e.altKey || e.metaKey) return;
+    if (isTypingEl(document.activeElement)) return;
+    var t = scanBox(); if (!t) return;
+    clearTimeout(scanFocusT); scanTyp.at = 0;
+    if (t.getAttribute('inputmode') !== 'none') { t.setAttribute('inputmode', 'none'); t.setAttribute('data-im', 'none'); }
+    t.focus();
+  }, true);
+  // 点了按钮 / 空白处、页面重画（保存后、切换步骤、解锁）、弹窗关掉、切回 APP → 自动对准
+  document.addEventListener('click', function (e) { if (!isTypingEl(e.target)) scanFocusSoon(60); });
+  document.addEventListener('visibilitychange', function () { if (!document.hidden) scanFocusSoon(80); });
+  window.addEventListener('hashchange', function () { scanFocusSoon(80); });
+  try {
+    new MutationObserver(function () { if (!isTypingEl(document.activeElement)) scanFocusSoon(40); })
+      .observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['disabled', 'hidden'] });
+  } catch (e) { }
 
   // ---------- 员工可用模块（v1.4.1，办公室在【员工 / PIN 管理】打勾） ----------
   var ALL_MODS = [['in', '#/'], ['t', '#/t'], ['ld', '#/ld'], ['pk', '#/pk'], ['lm', '#/lm']];   // v1.9.32 #/pl 托盘也是仓管（lm）
@@ -656,7 +718,7 @@
       else if (x.tagName === 'INPUT' && x.placeholder) { var q = myText(x.placeholder); if (q !== x.placeholder) x.placeholder = q; }
     }
   }
-  /** v1.9.48-1 托位「两格图」（用词表 4c）：左 = [■□]、右 = [□■]。文字里写这两个记号，页面上自动换成同一个 SVG 小图标（网页、打印都一样；数据照旧存 L / R） */
+  /** v1.9.48 托位「两格图」（用词表 4c）：左 = [■□]、右 = [□■]。文字里写这两个记号，页面上自动换成同一个 SVG 小图标（网页、打印都一样；数据照旧存 L / R） */
   var SIDE_MARK = { L: '[■□]', R: '[□■]' }, SIDE_RE = /\[(■□|□■)\]/;
   function sideSvg(sd, big) {
     var r = function (x, on) { return '<rect x="' + x + '" y="1" width="9" height="12" rx="2" fill="' + (on ? 'currentColor' : 'none') + '" stroke="currentColor" stroke-width="1.6"/>'; };
@@ -1358,7 +1420,7 @@
     return a;
   }
   /** v1.9.47 库位后面的「左 / 右」和托盘号末 5 位（批次已确认的托：[库位, 已核实, 'L'/'R', 托盘号]；历史库位记录只有一边能放时也带左右） */
-  function sideTxt(sd) { return SIDE_MARK[sd] || ''; }      // v1.9.48-1 两格图（中缅一样，不翻译）
+  function sideTxt(sd) { return SIDE_MARK[sd] || ''; }      // v1.9.48 两格图（中缅一样，不翻译）
   function locLbl(l, my) { return esc(l[0]) + (l[2] ? ' ' + sideTxt(l[2], my) : '') + (l[3] ? ' · ' + esc(String(l[3]).slice(-5)) : ''); }
   function altLine(alt) { var p = pickAlt(alt); return p && p.a.length ? ' · <span class="pkalt" data-nt>备用 ' + p.a.map(function (a) { return esc(a[0]) + ' ' + a[1].map(function (l) { return locLbl(l, LANG === 'my'); }).join('/'); }).join('；') + '</span>' : ''; }
   function locBox(loc, note, alt) { var a = mainLocs(loc, note, alt).map(function (x) { return locLbl(x, LANG === 'my'); }); if (!a.length && loc) a = [esc(loc)]; return !a.length ? '' : a[0] + (a.length > 1 ? '<small class="pkmore">' + a.slice(1).join('<br>') + '</small>' : ''); }
@@ -1616,7 +1678,7 @@
       var t = locAt(at), mins = t ? Math.round((Date.now() - t) / 60000) : -1, today = t && new Date(t).toDateString() === new Date().toDateString();
       return '<li class="lqr' + (mins >= 0 && mins <= OV_RECENT_MIN ? ' recent' : '') + '">' + (withLoc ? '<button class="lqloc mono" data-lq="' + esc(loc) + '">' + esc(loc) + '</button>' : '') +
         '<div class="lqt"><b>' + specHtml(x[2] || x[1]) + '</b><span>' + esc(x[1]) + (x[3] ? ' · 批次 ' + esc(x[3]) : '') + (exp ? ' · 到期 <b>' + esc(exp) + '</b>' : '') + '</span>' +
-        '<span class="lqm">' + (st === '已核实' ? '✓ 已核实' : '○ ' + esc(st || '未核实')) + (at ? ' · ' + (today ? '今天 ' + esc(String(at).slice(-5)) : esc(at)) + (by ? ' ' + esc(by) : '') : '') + '</span></div></li>';
+        '<span class="lqm">' + (st === '已核实' ? '✓ 位置已核实' : '○ 位置' + esc(st || '待核实')) + (at ? ' · ' + (today ? '今天 ' + esc(String(at).slice(-5)) : esc(at)) + (by ? ' ' + esc(by) : '') : '') + '</span></div></li>';
     }
     function resHtml() {
       if (LQ.busy) return '<div class="empty">查询中…</div>';
@@ -1665,7 +1727,7 @@
   var PL = null, PM = null;          // PL = 托盘页状态；PM = 库位转移页的托盘模式（null = 按箱码移库）
   var PL_NONET = '无网络，托盘移库需要联网，请到有信号的地方再扫';
   function plCode(raw) { var s = String(raw == null ? '' : raw).replace(/^\][A-Za-z]\d/, '').replace(/[\s\u0000-\u001f\u007f\u00a0]/g, '').toUpperCase(); return /^PLT[-_]?\d/.test(s) || /^PLT-/.test(s) ? s : ''; }
-  function plSide(s) { return SIDE_MARK[s] || ''; }      // v1.9.48-1 托位用两格图 [■□] / [□■]（页面上自动画成图标）
+  function plSide(s) { return SIDE_MARK[s] || ''; }      // v1.9.48 托位用两格图 [■□] / [□■]（页面上自动画成图标）
   function plSrcTxt(v) { return v.st === 'SEA' ? '海运柜 ' + v.sc : v.st === 'LOCAL' ? '本地供应商 ' + v.sc : v.st === 'UNKNOWN' ? '来源不知道' : ''; }
   function plWhere(v) {
     if (!v) return '';
@@ -3053,13 +3115,7 @@
     if (!document.hidden && location.hash === '#/t' && refreshRecentNow) refreshRecentNow();
     if (!document.hidden && (location.hash === '#/t' || location.hash === '#/pl')) plSnapLoad(true).then(function () { if (location.hash === '#/pl' && PL && PL.tab === 'query' && PL.list && PL.list.local && currentRedraw) currentRedraw(); });   // v1.9.33 切回 APP：重新下载托盘资料
   });
-  // 焦点不在输入框时，扫描头的按键送到扫描框
-  document.addEventListener('keydown', function (e) {
-    if ((location.hash !== '#/t' && location.hash !== '#/tq') || !$('#modal').hidden || camOpen) return;
-    var a = document.activeElement;
-    if (a && (a.tagName === 'INPUT' || a.tagName === 'SELECT' || a.tagName === 'TEXTAREA')) return;
-    if (e.key && e.key.length === 1 && !e.ctrlKey && !e.altKey && !e.metaKey) { var t = $(location.hash === '#/tq' ? '#lqIn' : '#tIn'); if (t) t.focus(); }
-  }, true);
+  // v1.9.50-1 「焦点不在输入框时扫描头的按键送到扫描框」改成所有 PDA 页通用，见文件前面 scanFocus / SCAN_SEL
 
   // ---------------- 摄像头扫码 ----------------
   // ---------------- 摄像头扫码（v1.2.2 重写） ----------------
@@ -4245,12 +4301,12 @@
     }
     function lmHtml() {
       var d = R.lm, c = d ? d.counts : {}, rows = d ? lmRows() : [], f = R.lmF;
-      var h = '<div class="rstats"><div class="g"><b>' + (c.ok || 0) + '</b><span>已核实</span></div><div class="o"><b>' + (c.todo || 0) + '</b><span>待核实（AutoCount）</span></div><div><b>' + (c.noloc || 0) + '</b><span>有库存没库位</span></div><div><b>' + (c.tasks || 0) + '</b><span>仓管待办</span></div><div><b>' + (c.batches || 0) + '</b><span>AutoCount 批次行</span></div><div><b>' + (c.barcodes || 0) + '</b><span>条码' + (c.newItems ? ' · 新商品 ' + c.newItems : '') + '</span></div></div>' +
+      var h = '<div class="rstats"><div class="g"><b>' + (c.ok || 0) + '</b><span>位置已核实</span></div><div class="o"><b>' + (c.todo || 0) + '</b><span>位置待核实（AutoCount）</span></div><div><b>' + (c.noloc || 0) + '</b><span>有库存没库位</span></div><div><b>' + (c.tasks || 0) + '</b><span>仓管待办</span></div><div><b>' + (c.batches || 0) + '</b><span>AutoCount 批次行</span></div><div><b>' + (c.barcodes || 0) + '</b><span>条码' + (c.newItems ? ' · 新商品 ' + c.newItems : '') + '</span></div></div>' +
         '<div class="rfil lmimp"><label>导入 AutoCount「Stock Item with Batch」<button class="btn save" id="lmImp"' + (R.busy ? ' disabled' : '') + '>📂 选择 Excel</button><input id="lmImpF" class="vh" type="file" accept=".xlsx" tabindex="-1"></label>' +
         '<label>导入 AutoCount 条码表（Item Sales Price Listing with barcode）<button class="btn save" id="lmBc"' + (R.busy ? ' disabled' : '') + '>📂 选择 Excel</button><input id="lmBcF" class="vh" type="file" accept=".xlsx" tabindex="-1"></label>' +
         '<label>以前的移库记录更新到库位（从这天起）<span class="lmrow"><input type="date" id="lmTrD" value="' + esc(myToday(-30)) + '"><button class="tbtn" id="lmTr"' + (R.busy ? ' disabled' : '') + '>更新</button></span></label></div>' +
         (R.lmMsg ? '<p class="' + (/失败|不对|没有/.test(R.lmMsg) ? 'err' : 'hint') + '"><b>' + esc(R.lmMsg) + '</b></p>' : '') +
-        '<div class="rbar">' + [['all', '全部'], ['已核实', '已核实'], ['待核实', '待核实']].map(function (t) { return '<button class="rtab' + (f.st === t[0] ? ' on' : '') + '" data-lst="' + t[0] + '">' + t[1] + '</button>'; }).join('') + '</div>' +
+        '<div class="rbar">' + [['all', '全部'], ['已核实', '位置已核实'], ['待核实', '位置待核实']].map(function (t) { return '<button class="rtab' + (f.st === t[0] ? ' on' : '') + '" data-lst="' + t[0] + '">' + t[1] + '</button>'; }).join('') + '</div>' +
         '<div class="rfil"><label>商品 / Item Code / 批次 <input id="lmQ" value="' + esc(f.q) + '"></label><label>库位 <input id="lmL" value="' + esc(f.loc) + '"></label><button class="tbtn" id="lmR">刷新</button><button class="btn save rexp" id="lmX"' + (rows.length ? '' : ' disabled') + '>⬇ 导出 Excel（' + rows.length + '）</button></div>' +
         '<p class="hint">库位按「商品 + 批次」记，以后库位只看这里。AutoCount 导入的是“待核实”，仓管在 PDA【📍 库位】里核实 / 改库位后变成“已核实”。拣货上传 DO 时自动用这里已核实的库位。</p>';
       if (!d) return h + '<p class="hint">读取中…</p>';
@@ -4779,7 +4835,8 @@
     var PF = cfg.r === 'wc' ? 'wc' : 'rc';          // v1.9.1 平板（员工登录）用 wc*，后台电脑用 rc*
     var W = WC || (WC = { view: LS.get('wcView', 'map'), aisle: '', loc: '', q: '', found: null, item: '', days: 60, lf: '', snap: null, sb: null, err: '', busy: false, at: 0 });
     var NAV = [['map', '库位图'], ['inv', '库存查询'], ['tasks', '待办'], ['empty', '空库位'], ['exp', '快到期'], ['log', '库位调整记录'], ['tr', '移库记录']];
-    var ST = { ok: ['● 批次已确认', 'c-ok'], todo: ['○ 批次未确认', 'c-neu'], task: ['◐ 待核验', 'c-warn'], empty: ['空', 'c-empty'] };
+    // v1.9.49 库位记录的核实状态 = 位置有没有现场核实（不是批次；「批次已确认」只用在托盘）
+    var ST = { ok: ['● 位置已核实', 'c-ok'], todo: ['○ 位置待核实', 'c-neu'], task: ['◐ 待核验', 'c-warn'], empty: ['空', 'c-empty'] };
     /** v1.9.24 中控台查商品：数据库按名称 / 条码找；输入全是字母时再按首字母在本机商品名称里找（KSF = 康师傅） */
     function wcFind(q) {
       return rpc('wc_find', { p_token: cfg.d, p_q: q }).then(function (d) {
@@ -4882,10 +4939,10 @@
       if (!W.aisle || !A[W.aisle]) W.aisle = as[0] || '';
       var pct = function (x, n) { return (n ? x * 100 / n : 0).toFixed(1) + '%'; };
       var tot = { n: 0, ok: 0, todo: 0, task: 0, empty: 0 }; as.forEach(function (k) { ['n', 'ok', 'todo', 'task', 'empty'].forEach(function (f) { tot[f] += A[k][f]; }); });
-      var h = '<div class="wcstats">' + [['ok', '批次已确认（已核实）'], ['todo', '批次未确认（待核实）'], ['task', '待核验（有待办）'], ['empty', '空库位']].map(function (x) {
+      var h = '<div class="wcstats">' + [['ok', '位置已核实'], ['todo', '位置待核实'], ['task', '待核验（有待办）'], ['empty', '空库位']].map(function (x) {
         return '<div class="wcstat s-' + x[0] + '"><b>' + tot[x[0]] + '</b><span>' + x[1] + '</span></div>'; }).join('') + '</div>';
       h += '<div class="wcsplit"><div class="wcais">' + as.map(function (k) { var a = A[k];
-        return '<button class="wcai' + (k === W.aisle ? ' on' : '') + '" data-ai="' + k + '"><span class="wcain">' + k + ' 排</span><span class="wcpb"><i class="ok" style="width:' + pct(a.ok, a.n) + '"></i><i class="todo" style="width:' + pct(a.todo, a.n) + '"></i><i class="task" style="width:' + pct(a.task, a.n) + '"></i></span><small>' + a.ok + '/' + a.n + ' 批次已确认 · 空 ' + a.empty + (a.task ? ' · ◐ ' + a.task : '') + (a.note ? ' · 📝 ' + a.note : '') + '</small></button>'; }).join('') + '</div>';
+        return '<button class="wcai' + (k === W.aisle ? ' on' : '') + '" data-ai="' + k + '"><span class="wcain">' + k + ' 排</span><span class="wcpb"><i class="ok" style="width:' + pct(a.ok, a.n) + '"></i><i class="todo" style="width:' + pct(a.todo, a.n) + '"></i><i class="task" style="width:' + pct(a.task, a.n) + '"></i></span><small>' + a.ok + '/' + a.n + ' 位置已核实 · 空 ' + a.empty + (a.task ? ' · ◐ ' + a.task : '') + (a.note ? ' · 📝 ' + a.note : '') + '</small></button>'; }).join('') + '</div>';
       var cells = Object.keys(D.locs).filter(function (l) { return lmParts(l).a === W.aisle; }), P = {}, L = {};
       cells.forEach(function (l) { var p = lmParts(l); P[p.p] = 1; L[p.lv] = 1; });
       var ps = Object.keys(P).sort(), lvs = Object.keys(L).sort().reverse();
@@ -4903,7 +4960,7 @@
       h += c.recs.map(function (x) { var b = bInfo(x.item, x.base), dl = b ? daysLeft(b.exp) : null;
         return '<div class="wcrec"><div><b>' + esc(x.desc) + '</b><div class="hint mono">' + esc(x.item) + (x.base ? ' · 批次 ' + esc(x.base) : ' · 不分批次') + '</div>' +
           '<div class="wcrm">' + (b ? (isNewIn(b) ? newTag(b) + ' · ' : '') + '到期 <b' + (dl != null && dl < 60 ? ' class="red"' : '') + '>' + esc(b.exp || '—') + '</b>' : '<span class="hint">AutoCount 没有这个批次的库存</span>') + '</div>' +
-          '<div class="hint">' + (x.status === '已核实' ? '● 批次已确认' : '○ 批次未确认（' + esc(x.status) + '）') + ' · ' + esc(x.by || x.src || '') + ' ' + esc(x.at || '') + '</div></div>' +
+          '<div class="hint">' + (x.status === '已核实' ? '● 位置已核实' : '○ 位置待核实' + (x.status && x.status !== '待核实' ? '（' + esc(x.status) + '）' : '')) + ' · ' + esc(x.by || x.src || '') + ' ' + esc(x.at || '') + '</div></div>' +
           '<div class="wcracts">' + (x.status !== '已核实' ? '<button class="btn save" data-ver="' + esc(x.id) + '">已核实</button>' : '') + '<button class="tbtn" data-mv="' + esc(x.id) + '">改库位</button><button class="tbtn red" data-rm="' + esc(x.id) + '" data-what="' + esc(x.desc + ' ' + x.base) + '">不在这里了</button></div></div>'; }).join('');
       if (c.tasks.length) h += '<div class="wcpt"><b>这个库位的待办</b>' + c.tasks.map(function (t) { return '<div class="hint">◐ ' + esc(t.type) + ' · ' + esc(t.desc || t.bc) + ' · ' + esc(t.from || '—') + ' → ' + esc(t.to || '—') + '</div>'; }).join('') + '</div>';
       h += '<div class="wcadd"><button class="btn save" data-add="' + l + '">＋ 登记商品在这个库位</button></div>';
