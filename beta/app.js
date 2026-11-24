@@ -3,7 +3,7 @@
  * 原则：只采集原始资料，不做任何核对。先存手机（离线队列），再上传云端。 */
 (function () {
   'use strict';
-  var VERSION = '1.9.53-t11';
+  var VERSION = '1.9.53-t12';
   var $ = function (s, el) { return (el || document).querySelector(s); };
   var app = $('#app');
 
