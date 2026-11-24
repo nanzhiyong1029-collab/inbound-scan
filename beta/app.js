@@ -3,7 +3,7 @@
  * 原则：只采集原始资料，不做任何核对。先存手机（离线队列），再上传云端。 */
 (function () {
   'use strict';
-  var VERSION = '1.9.53-t4';
+  var VERSION = '1.9.53-t5';
   var $ = function (s, el) { return (el || document).querySelector(s); };
   var app = $('#app');
 
@@ -4862,7 +4862,7 @@
         (L.length ? L.map(function (x) {
           var ph = (x.photoLinks || []).map(function (f) { return f.thumb ? '<a href="' + esc(f.url || f.thumb) + '" target="_blank" rel="noopener"><img class="isph" src="' + esc(f.thumb) + '" alt="照片" style="width:64px;height:64px;object-fit:cover;border-radius:6px"></a>' : '<span class="hint">照片读不到</span>'; }).join(' ');
           var done = x.status === 'DONE';
-          return '<tr data-isrow="' + esc(x.id) + '"><td>' + esc(isWhen(x.reportedAt)) + '</td><td>' + esc(x.reportNo) + '</td><td>' + esc(x.kindZh || '') + '</td><td>' + esc(x.screen || '') + '</td><td>' + esc((x.positionCode || '') + (x.side ? (x.side === 'L' ? ' 左' : ' 右') : '')) + '</td><td>' + esc(x.lpnNo || x.context || '') + '</td><td>' + esc(x.reportedBy || '') + '<div class="rmeta">' + esc(x.deviceName || '') + '</div></td><td>' + ph + '</td><td>' +
+          return '<tr data-isrow="' + esc(x.id) + '"><td>' + esc(isWhen(x.reportedAt)) + '</td><td>' + esc(x.reportNo) + '</td><td>' + esc(x.kindZh || '') + '</td><td>' + esc(x.screen || '') + '</td><td>' + esc((x.positionCode || '') + (x.side ? (x.side === 'L' ? ' 左' : ' 右') : '')) + '</td><td>' + esc([x.lpnNo, x.context].filter(Boolean).join(' · ')) + '</td><td>' + esc(x.reportedBy || '') + '<div class="rmeta">' + esc(x.deviceName || '') + '</div></td><td>' + ph + '</td><td>' +
             (done ? '<span class="rst s3">' + esc(x.resultZh || '已处理') + '</span><div class="rmeta">' + esc(x.note || '') + '<br>' + esc(x.handledBy || '') + ' ' + esc(isWhen(x.handledAt)) + '</div>' : '<button class="btn save" data-isdone="' + esc(x.id) + '">已处理</button>') + '</td></tr>';
         }).join('') : '<tr><td colspan="9" class="hint">' + (st === 'OPEN' ? '没有待处理的异常上报。' : '没有记录。') + '</td></tr>') + '</tbody></table></div>';
     }
