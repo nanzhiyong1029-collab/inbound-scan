@@ -1,11 +1,11 @@
 // 离线缓存 APP 外壳（不缓存 API 请求）
-var CACHE = 'inbound-scan-v1.9.53-t9+v2-460594';
+var CACHE = 'inbound-scan-v1.9.53-t10+v2-aa488f';
 var LIB = 'https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js';
 // v1.6 缅甸文字体（拣货缅甸语用），离线也要能显示
 var FONTS = [400, 700].map(function (w) { return 'https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-myanmar@5.2.5/files/noto-sans-myanmar-myanmar-' + w + '-normal.woff2'; });
-var FILES = ['./', 'index.html', 'style.css?v=1.9.53-t9.1', 'app.js?v=1.9.53-t9.1', 'manifest.webmanifest', 'icon.svg', 'icon-192.png', 'icon-512.png'];
+var FILES = ['./', 'index.html', 'style.css?v=1.9.53-t10.1', 'app.js?v=1.9.53-t10.1', 'manifest.webmanifest', 'icon.svg', 'icon-192.png', 'icon-512.png'];
 // B5 新前端（docs/24 A5）：v2/ 的全部文件一起预缓存（没打开过的新页面断网也能开）。下一行由 AWMS 仓库 scripts/pda-publish.mjs 写入，缓存名也跟着带上新前端的构建号
-var V2 = ["v2/boot.js?b=460594","v2/c-chunk-54MJ6X46.js","v2/c-chunk-CLVDPOU2.js","v2/c-chunk-FC7XZGM5.js","v2/c-chunk-H3N6Z6WO.js","v2/c-chunk-HLESG2AZ.js","v2/c-chunk-ILFHIIB3.js","v2/c-chunk-VG6DC3LY.js","v2/p-is.js?b=460594","v2/p-pl.js?b=460594","v2/p-q.js?b=460594","v2/p-t.js?b=460594","v2/perf.js?b=460594"];
+var V2 = ["v2/boot.js?b=aa488f","v2/c-chunk-2UE2YFCU.js","v2/c-chunk-3ASRYIGZ.js","v2/c-chunk-3NZ7TDZF.js","v2/c-chunk-7WEPETJT.js","v2/c-chunk-JB7JGOEJ.js","v2/c-chunk-KAZNIBR6.js","v2/c-chunk-QFJW5HVO.js","v2/c-chunk-W5XAR6QB.js","v2/p-is.js?b=aa488f","v2/p-ld.js?b=aa488f","v2/p-pl.js?b=aa488f","v2/p-q.js?b=aa488f","v2/p-t.js?b=aa488f","v2/perf.js?b=aa488f"];
 FILES = FILES.concat(V2);
 self.addEventListener('install', function (e) {
   e.waitUntil(caches.open(CACHE).then(function (c) { return c.addAll(FILES).then(function () { return Promise.all([LIB].concat(FONTS).map(function (u) { return c.add(u).catch(function () { }); })); }); }).then(function () { return self.skipWaiting(); }));

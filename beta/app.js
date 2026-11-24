@@ -3,7 +3,7 @@
  * 原则：只采集原始资料，不做任何核对。先存手机（离线队列），再上传云端。 */
 (function () {
   'use strict';
-  var VERSION = '1.9.53-t9';
+  var VERSION = '1.9.53-t10';
   var $ = function (s, el) { return (el || document).querySelector(s); };
   var app = $('#app');
 
@@ -6964,6 +6964,9 @@
     setRefreshRecent: function (fn) { refreshRecentNow = fn || null; }, plLook: plLook, plAfter: plAfter, plConfAt: plConfAt,
     takePM: function () { var x = PM; PM = null; return x; }, operator: function () { return operator; },
     plLocal: plLocal, plSnapSet: plSnapSet, plEnterMove: plEnterMove,
+    // P-014 拣货 / 装车新页面（AWMS 测试版）：同一个拣货 / 装车队列（LDQ）、同一份手机里的任务（ld:<id>），旧的上传照常
+    ld: { get: ldGet, put: ldPut, fromServer: ldFromServer, push: function (o) { return ldLoadQ().then(function () { LDQ.push(o); return ldSaveQ(); }); },
+      flush: ldFlush, pending: ldPending, purge: ldPurge, setRedraw: function (fn) { ldRedraw = fn || null; } },
     // docs/31 新首页：这台手机上还没上传的记录（入库 outbox + 移库队列 + 装车 / 拣货队列）：几条、最早一条的时间、谁的
     pendInfo: function () {
       return IDB.all().then(function (l) { return l || []; }, function () { return []; }).then(function (tq) {
