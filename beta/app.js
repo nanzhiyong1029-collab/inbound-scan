@@ -3,7 +3,7 @@
  * 原则：只采集原始资料，不做任何核对。先存手机（离线队列），再上传云端。 */
 (function () {
   'use strict';
-  var VERSION = '1.9.53-t8';
+  var VERSION = '1.9.53-t9';
   var $ = function (s, el) { return (el || document).querySelector(s); };
   var app = $('#app');
 
@@ -798,9 +798,9 @@
   }
 
   /** P-009 A5（新首页 =「新」时）：上面一块 人 / 设备 / 版本 / 待上传；两个大按钮「立即上传」「退出 / 切换员工」；
-   *  扫描头模式、自动跳 SAVE、扫描头测试、服务器设置、清缓存收进「设备设置」，只给仓管（有库位分配权限、不是作业员）。 */
+   *  扫描头模式、自动跳 SAVE、扫描头测试、服务器设置、清缓存收进「设备设置」，只给员工设置里勾了「设备设置」的人（P-015，不按库位分配猜）。 */
   function openMenuV2() {
-    var n = outbox.length + tqCount + ldPendN, mm = myMods(), admin = mm.indexOf('lm') >= 0 && mm.indexOf('wk') < 0;
+    var n = outbox.length + tqCount + ldPendN, admin = myMods().indexOf('dv') >= 0;
     modal('<div class="menu v2menu">' +
       '<div class="v2m-who"><div><span>人</span><b>' + esc(operator || '未登录') + '</b></div><div><span>设备</span><b>' + esc((sess && sess.dev) || device) + '</b></div>' +
       '<div><span>版本</span><b>' + esc(VERSION) + '</b></div><div class="' + (n ? 'pend' : '') + '"><span>待上传</span><b>' + n + ' 笔</b></div></div>' +
