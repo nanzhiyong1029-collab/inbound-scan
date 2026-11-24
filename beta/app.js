@@ -3,7 +3,7 @@
  * 原则：只采集原始资料，不做任何核对。先存手机（离线队列），再上传云端。 */
 (function () {
   'use strict';
-  var VERSION = '1.9.53-t5';
+  var VERSION = '1.9.53-t6';
   var $ = function (s, el) { return (el || document).querySelector(s); };
   var app = $('#app');
 
@@ -1788,7 +1788,7 @@
       (plSrcTxt(v) ? '<div class="hint">' + esc(plSrcTxt(v)) + ((v.items || []).some(function (x) { return x.st && (x.st + '|' + x.sc) !== (v.st + '|' + v.sc); }) ? '（最初组托的任务）' : '') + '</div>' : '') +
       (v.items || []).map(function (x) { return plLineHtml(x, opts.lineBtn ? opts.lineBtn(x) : '', v); }).join('') + (opts.extra || '') + '</div>';
   }
-  var PL_KIND = { PRINT: '登记标签', BIND: '组托', PUTAWAY: '上架', MOVE: '移库', SPLIT: '拆托', MERGE: '并托', ITEM_OUT: '单品出完', EMPTY: '整托出完', RESTORE: '恢复', EDIT: '补批次' };
+  var PL_KIND = { PRINT: '登记标签', BIND: '组托', PUTAWAY: '上架', MOVE: '移库', SPLIT: '拆托', MERGE: '并托', ITEM_OUT: '单品出完', EMPTY: '整托出完', RESTORE: '恢复', EDIT: '补批次', UNDO: '撤销' };
   var PL_EDIT = { add: '添加商品', remove: '移除商品', task: '更改收货任务', batch: '更改批次', unpair: '取消批次', relabel: '更换标签', identify: '识别商品' };      // v1.9.45 规格书 6.4 按钮改名（只改显示）
   function plKindTxt(e) { var d = e.d || {}; if (e.kind !== 'EDIT') return PL_KIND[e.kind] || e.kind; return d.op && PL_EDIT[d.op] ? PL_EDIT[d.op] : d.grn ? 'GRN 配批次' : d.source_code ? '改来源' : PL_KIND.EDIT; }
   function plHistHtml(v) {
