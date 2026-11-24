@@ -3,7 +3,7 @@
  * 原则：只采集原始资料，不做任何核对。先存手机（离线队列），再上传云端。 */
 (function () {
   'use strict';
-  var VERSION = '1.9.53-t7';
+  var VERSION = '1.9.53-t8';
   var $ = function (s, el) { return (el || document).querySelector(s); };
   var app = $('#app');
 
@@ -182,7 +182,10 @@
       return d;
     }, function (err) {
       clearTimeout(timer);
-      setOnline(false);
+      // P-009 B1：只有真的连不上（手机没网 / fetch 本身失败）才显示「离线」。后台慢（我们 30 / 45 秒放弃，例如免费服务在叫醒）、
+      // 回 503、回的不是 JSON（服务器在重启）= 连得上，不改成「离线」（以前这样会一直显示「● 离线」，直到下一个请求成功）
+      var slow = err && (err.name === 'AbortError' || err.s503 || err.name === 'SyntaxError');
+      if (!slow || navigator.onLine === false) setOnline(false);
       var e = new Error('网络不可用'); e.network = true; if (err && err.s503) e.s503 = true; throw e;      // s503 = 连上了服务器，但服务器存不进去
     });
   }
@@ -794,7 +797,30 @@
     });
   }
 
+  /** P-009 A5（新首页 =「新」时）：上面一块 人 / 设备 / 版本 / 待上传；两个大按钮「立即上传」「退出 / 切换员工」；
+   *  扫描头模式、自动跳 SAVE、扫描头测试、服务器设置、清缓存收进「设备设置」，只给仓管（有库位分配权限、不是作业员）。 */
+  function openMenuV2() {
+    var n = outbox.length + tqCount + ldPendN, mm = myMods(), admin = mm.indexOf('lm') >= 0 && mm.indexOf('wk') < 0;
+    modal('<div class="menu v2menu">' +
+      '<div class="v2m-who"><div><span>人</span><b>' + esc(operator || '未登录') + '</b></div><div><span>设备</span><b>' + esc((sess && sess.dev) || device) + '</b></div>' +
+      '<div><span>版本</span><b>' + esc(VERSION) + '</b></div><div class="' + (n ? 'pend' : '') + '"><span>待上传</span><b>' + n + ' 笔</b></div></div>' +
+      '<button id="mSync" class="v2m-big pri">⇪ 立即上传</button>' +
+      othersNote() +
+      '<button id="mOp" class="v2m-big">退出 / 切换员工</button>' +
+      (lastSyncError ? '<div class="err hint">上次上传失败：' + esc(lastSyncError) + '</div>' : '') +
+      failedNote() +
+      (admin ? '<details class="v2m-dev" id="mDev"><summary>⚙ 设备设置</summary>' +
+        '<button id="mPda">PDA 扫描头模式：' + (prefs.pda ? '开（不弹出键盘）' : '关（手机键盘输入）') + '</button>' +
+        '<button id="mNext">扫完箱码后自动跳到 SAVE：' + (prefs.autoNext ? '开' : '关') + '</button>' +
+        '<button id="mTest">扫描头测试</button>' +
+        '<button id="mCfg">服务器设置</button>' +
+        '<button id="mClear">清除商品缓存（不会删除待同步资料）</button>' +
+        '<div class="hint">本机长期保存：' + (persisted === true ? '已批准' : persisted === false ? '未批准（建议把 APP 添加到主屏幕）' : '不支持') + (window.AWMS_NEW && window.AWMS_NEW.build ? ' · v2-' + esc(window.AWMS_NEW.build) : '') + '</div>' +
+        '</details>' : '') +
+      '</div>', menuWire);
+  }
   function openMenu() {
+    if (v2Home()) return openMenuV2();
     modal('<div class="menu">' +
       '<div class="hint">员工：<b>' + esc(operator || '未登录') + '</b> · 设备 ' + esc((sess && sess.dev) || device) + ' · v' + VERSION + (window.AWMS_NEW && window.AWMS_NEW.build ? ' · v2-' + esc(window.AWMS_NEW.build) : '') + '</div>' +
       '<div class="hint">本机长期保存：' + (persisted === true ? '<b style="color:#1a7f37">已批准</b>（清理缓存不会掉线）' : persisted === false ? '<b style="color:#b45309">未批准</b>（建议把 APP 添加到主屏幕）' : '不支持') + '</div>' +
@@ -808,18 +834,20 @@
       '<button id="mClear">清除商品缓存（不会删除待同步资料）</button>' +
       (lastSyncError ? '<div class="err hint">上次上传失败：' + esc(lastSyncError) + '</div>' : '') +
       failedNote() +
-      '</div>', function (m) {
-        $('#mSync', m).onclick = function () { closeModal(); toast('上传中…'); flushTransfers(); ldFlush(); flush().then(function () { toast(outbox.length ? '还有 ' + outbox.length + ' 条未上传（网络不可用）' : '全部已上传 ✓'); }); };
-        $('#mOp', m).onclick = function () { closeModal(); guardLeave(function () { if (sess && cfg) api({ action: 'logout' }).catch(function () { }); setSession(null); route(); }); };
-        $('#mPda', m).onclick = function () { prefs.pda = !prefs.pda; LS.set('prefs', prefs); closeModal(); route(); };
-        $('#mNext', m).onclick = function () { prefs.autoNext = !prefs.autoNext; LS.set('prefs', prefs); closeModal(); };
-        $('#mTest', m).onclick = function () { closeModal(); scannerTest(); };
-        $('#mCfg', m).onclick = function () { closeModal(); viewSetup(true); };
-        $('#mClear', m).onclick = function () {
-          Object.keys(localStorage).forEach(function (k) { if (k.indexOf('p_') === 0) LS.del(k); });
-          memCache = {}; closeModal(); toast('已清除'); route();
-        };
-      });
+      '</div>', menuWire);
+  }
+  function menuWire(m) {
+    var on = function (id, f) { var b = $(id, m); if (b) b.onclick = f; };
+    on('#mSync', function () { closeModal(); toast('上传中…'); flushTransfers(); ldFlush(); flush().then(function () { toast(outbox.length ? '还有 ' + outbox.length + ' 条未上传（网络不可用）' : '全部已上传 ✓'); }); });
+    on('#mOp', function () { closeModal(); guardLeave(function () { if (sess && cfg) api({ action: 'logout' }).catch(function () { }); setSession(null); route(); }); });
+    on('#mPda', function () { prefs.pda = !prefs.pda; LS.set('prefs', prefs); closeModal(); route(); });
+    on('#mNext', function () { prefs.autoNext = !prefs.autoNext; LS.set('prefs', prefs); closeModal(); });
+    on('#mTest', function () { closeModal(); scannerTest(); });
+    on('#mCfg', function () { closeModal(); viewSetup(true); });
+    on('#mClear', function () {
+      Object.keys(localStorage).forEach(function (k) { if (k.indexOf('p_') === 0) LS.del(k); });
+      memCache = {}; closeModal(); toast('已清除'); route();
+    });
   }
 
   function othersNote() {
@@ -1407,14 +1435,17 @@
     (m.barcodes || []).forEach(function (x) { byB[x[0]] = x; var z = String(x[0]).replace(/^0+/, ''); if (!byB[z]) byB[z] = x; if (!byI[x[1]]) byI[x[1]] = x; });
     (m.items || []).forEach(function (x) { if (!byI[x[0]]) byI[x[0]] = [x[0], x[0], x[1]]; });     // v1.9.2 商品名称表：扫 Item Code / 搜品名
     var re; try { re = new RegExp(m.locPattern || LOC_DEFAULT); } catch (e) { re = new RegExp(LOC_DEFAULT); }
-    return { version: m.version, byBarcode: byB, byItem: byI, locRe: re, count: (m.barcodes || []).length, batches: m.batches || {}, raw: m };
+    var c0 = m.cfg || {};      // P-009：没有 cfg（旧后台）= 问旧货开、上架不要箱数
+    return { version: m.version, byBarcode: byB, byItem: byI, locRe: re, count: (m.barcodes || []).length, batches: m.batches || {}, raw: m, cfg: { askOld: c0.askOld !== false, needCtn: c0.needCtn === true } };
   }
   function loadMasters() {
     var local = masters ? Promise.resolve(masters) : IDB.get('masters').then(function (m) { if (m) masters = buildMasters(m); return masters; }, function () { return null; });
     return local.then(function () {
       return api({ action: 'masters', version: masters ? masters.version : '' }, true).then(function (d) {
-        if (d.same) { if (masters && masters.raw.locPattern !== d.locPattern) { masters.raw.locPattern = d.locPattern; masters = buildMasters(masters.raw); IDB.set('masters', masters.raw).catch(function () { }); } return masters; }
-        var m = { version: d.version, barcodes: d.barcodes, batches: d.batches || {}, locPattern: d.locPattern, at: new Date().toISOString() };
+        // P-009 后台开关（问旧货 / 上架要箱数）跟着商品资料一起来：没变也带（same），存手机（离线用上次的）
+        var cfgChg = !!(masters && d.cfg && JSON.stringify(masters.raw.cfg || null) !== JSON.stringify(d.cfg));
+        if (d.same) { if (masters && (masters.raw.locPattern !== d.locPattern || cfgChg)) { masters.raw.locPattern = d.locPattern; if (d.cfg) masters.raw.cfg = d.cfg; masters = buildMasters(masters.raw); IDB.set('masters', masters.raw).catch(function () { }); } return masters; }
+        var m = { version: d.version, barcodes: d.barcodes, batches: d.batches || {}, locPattern: d.locPattern, cfg: d.cfg || null, at: new Date().toISOString() };
         masters = buildMasters(m);
         IDB.set('masters', m).catch(function () { });
         return masters;
@@ -1819,6 +1850,7 @@
       if (r.status === 'ask') return plAskIL(r.asks, params.answers, function () { plSubmit(params, on); }, on.cancel);
       if (r.status === 'occupied' && on.occupied) return on.occupied(r);
       if (r.status === 'rejected') { plSnapLoad(true); return on.fail(r.message || '做不了', r); }
+      if (r.status === 'needCtn') return on.fail((r.message || '上架前要填箱数') + '：请切到新页面（系统设置 → PDA 新页面设置 → 移库 = 新）填箱数', r);      // P-009：「上架要箱数」开着时，旧页面不填箱数（什么都没存）
       plAfter(r); on.ok(r);
     }, function (e) { on.fail(e.network ? PL_NONET : e.message, { network: !!e.network }); });
   }
@@ -3041,6 +3073,7 @@
         trSnap.locs.forEach(function (x) { if (x[1] !== it2 || (bs2 != null && x[3] !== bs2)) return; if (x[0] === st.src) here = true; else if (x[0] !== st.dst && ls2.indexOf(x[0]) < 0) ls2.push(x[0]); });
         if (!here && ls2.length) return askSrcDiff(ls2);
       }
+      if (masters && masters.cfg && masters.cfg.askOld === false) return save(null, []);      // P-009 后台开关「问旧货」关：不问、旧记录不动
       if (trSnap) {                                    // v1.9.3 用手机里的库位资料，马上问（不等后台）
         var base0 = st.bok ? st.batch : null, it0 = st.item;
         var o0 = trSnapAt(st.dst).filter(function (x) { return !(x[1] === it0 && (base0 == null || x[3] === base0)); }).map(function (x) {
