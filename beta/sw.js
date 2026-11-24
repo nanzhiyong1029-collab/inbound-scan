@@ -1,11 +1,11 @@
 // 离线缓存 APP 外壳（不缓存 API 请求）
-var CACHE = 'inbound-scan-v1.9.51-t1+v2-4f6705';
+var CACHE = 'inbound-scan-v1.9.53-t4+v2-62b4df';
 var LIB = 'https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js';
 // v1.6 缅甸文字体（拣货缅甸语用），离线也要能显示
 var FONTS = [400, 700].map(function (w) { return 'https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-myanmar@5.2.5/files/noto-sans-myanmar-myanmar-' + w + '-normal.woff2'; });
-var FILES = ['./', 'index.html', 'style.css?v=1.9.51-t1', 'app.js?v=1.9.51-t1', 'manifest.webmanifest', 'icon.svg', 'icon-192.png', 'icon-512.png'];
+var FILES = ['./', 'index.html', 'style.css?v=1.9.53-t4', 'app.js?v=1.9.53-t4', 'manifest.webmanifest', 'icon.svg', 'icon-192.png', 'icon-512.png'];
 // B5 新前端（docs/24 A5）：v2/ 的全部文件一起预缓存（没打开过的新页面断网也能开）。下一行由 AWMS 仓库 scripts/pda-publish.mjs 写入，缓存名也跟着带上新前端的构建号
-var V2 = ["v2/boot.js?b=4f6705","v2/c-chunk-NV4DFG7G.js","v2/c-chunk-WBC7NSCD.js","v2/c-chunk-WEARNE2C.js","v2/c-chunk-YDFPO5ZR.js","v2/p-pl.js?b=4f6705","v2/p-q.js?b=4f6705","v2/p-t.js?b=4f6705","v2/perf.js?b=4f6705"];
+var V2 = ["v2/boot.js?b=62b4df","v2/c-chunk-G75F7CDO.js","v2/c-chunk-GD66A3YT.js","v2/c-chunk-IQH526VR.js","v2/c-chunk-ZKOCHG5C.js","v2/p-pl.js?b=62b4df","v2/p-q.js?b=62b4df","v2/p-t.js?b=62b4df","v2/perf.js?b=62b4df"];
 FILES = FILES.concat(V2);
 self.addEventListener('install', function (e) {
   e.waitUntil(caches.open(CACHE).then(function (c) { return c.addAll(FILES).then(function () { return Promise.all([LIB].concat(FONTS).map(function (u) { return c.add(u).catch(function () { }); })); }); }).then(function () { return self.skipWaiting(); }));

@@ -827,3 +827,14 @@ mark.spec { background: #fde68a; color: #7a2e0e; padding: 0 3px; border-radius: 
 .plside .pls-no { font-size: 20px; letter-spacing: 1px; display: block; text-align: center; }
 .plside .pls-empty { color: var(--mute, #888); font-weight: 600; }
 @media print { .sic rect { stroke: #000; } .sic rect[fill="currentColor"] { fill: #000; } }
+/* v1.9.53 上传入库单：有问题的行放最上面；箱码变动清单 */
+.inb-prob{border:2px solid #d97706;border-radius:8px;padding:8px 10px;margin:8px 0;background:#fffbeb}
+.inb-prob tr.inbp-r td{background:#fee2e2}
+.inb-prob tr.inbp-y td{background:#fef9c3}
+.inb-prob tr.inbp-x td{background:#e5e7eb;color:#6b7280}
+.inb-prob .inbc{white-space:nowrap;font-weight:600}
+.bcchg .tbtn.on{background:#1f6feb;color:#fff}
+.bcchg { border: 1px dashed var(--line); border-radius: 10px; padding: 10px 12px; margin-bottom: 12px; background: #fbfcfe; }
+.bc-h { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; } .bc-h .hint { flex: 1; min-width: 200px; }
+.bcw { max-height: 360px; overflow: auto; }
+.bc-act { display: flex; gap: 10px; justify-content: flex-end; margin-top: 8px; }
