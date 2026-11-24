@@ -3,7 +3,7 @@
  * 原则：只采集原始资料，不做任何核对。先存手机（离线队列），再上传云端。 */
 (function () {
   'use strict';
-  var VERSION = '1.9.53-t10';
+  var VERSION = '1.9.53-t11';
   var $ = function (s, el) { return (el || document).querySelector(s); };
   var app = $('#app');
 
@@ -432,7 +432,7 @@
     "还没上传": "မတင်ရသေး",
     "网络不可用": "အင်တာနက် မရနိုင်ပါ",
     "库位 ": "စင်နေရာ ",
-    "没有网络：显示手机里的任务，可以继续拣货，记录联网后自动上传": "အင်တာနက်မရှိပါ — ဖုန်းထဲက လုပ်ငန်းများကို ပြထားသည်။ ဆက်ထုတ်နိုင်ပြီး မှတ်တမ်းများကို အင်တာနက်ရလျှင် အလိုအလျောက် တင်ပို့မည်",
+    "没有网络：显示手机里的任务，可以继续拣货，记录联网后自动同步": "အင်တာနက်မရှိပါ — ဖုန်းထဲက လုပ်ငန်းများကို ပြထားသည်။ ဆက်ထုတ်နိုင်ပြီး မှတ်တမ်းများကို အင်တာနက်ရလျှင် အလိုအလျောက် တင်ပို့မည်",
     "任务已完成，不能再修改。需要更正请找办公室重新打开。": "လုပ်ငန်း ပြီးဆုံးပြီ၊ ထပ်ပြင်၍ မရပါ။ ပြင်ရန်လိုလျှင် ရုံးခန်းကို ပြန်ဖွင့်ခိုင်းပါ။",
     "没有找到。可以输入品名、条码后几位、批次号或库位（如": "မတွေ့ပါ။ ပစ္စည်းအမည်၊ ဘားကုဒ် နောက်ဆုံးဂဏန်းများ၊ အသုတ်နံပါတ် သို့မဟုတ် စင်နေရာ ရိုက်ထည့်နိုင်သည် (ဥပမာ",
     "任务已完成，不能修改。需要更正请找办公室重新打开。": "လုပ်ငန်း ပြီးဆုံးပြီ၊ ပြင်၍ မရပါ။ ပြင်ရန်လိုလျှင် ရုံးခန်းကို ပြန်ဖွင့်ခိုင်းပါ။",
@@ -454,7 +454,7 @@
     "没有找到。可以输入品名的一部分、": "မတွေ့ပါ။ ပစ္စည်းအမည် တစ်စိတ်တစ်ပိုင်း၊ ",
     "用下面的数字键输入本次拣到的数量": "အောက်ပါ နံပါတ်ခလုတ်များဖြင့် ယခုထုတ်ရသော အရေအတွက် ထည့်ပါ",
     "已不能再拣货。请回到任务列表。": "ထပ်ထုတ်၍ မရတော့ပါ။ လုပ်ငန်းစာရင်းသို့ ပြန်သွားပါ။",
-    "已完成（没网，联网后自动上传）": "ပြီးဆုံးပြီ (အင်တာနက်မရှိ၊ ရလျှင် အလိုအလျောက် တင်ပို့မည်)",
+    "已完成（没网，联网后自动同步）": "ပြီးဆုံးပြီ (အင်တာနက်မရှိ၊ ရလျှင် အလိုအလျောက် တင်ပို့မည်)",
     "扫描条码，或点这里手输（后几位": "ဘားကုဒ် စကင်ဖတ်ပါ၊ သို့မဟုတ် ဤနေရာနှိပ်၍ ရိုက်ထည့်ပါ (နောက်ဂဏန်း",
     "扫货架库位码可记录（可不扫）": "စင်နေရာကုဒ် စကင်ဖတ်၍ မှတ်နိုင်သည် (မဖတ်လည်း ရသည်)",
     "）、批次号、品名或条码后几位": ")၊ အသုတ်နံပါတ်၊ ပစ္စည်းအမည် သို့မဟုတ် ဘားကုဒ်နောက်ဂဏန်း",
@@ -803,8 +803,8 @@
     var n = outbox.length + tqCount + ldPendN, admin = myMods().indexOf('dv') >= 0;
     modal('<div class="menu v2menu">' +
       '<div class="v2m-who"><div><span>人</span><b>' + esc(operator || '未登录') + '</b></div><div><span>设备</span><b>' + esc((sess && sess.dev) || device) + '</b></div>' +
-      '<div><span>版本</span><b>' + esc(VERSION) + '</b></div><div class="' + (n ? 'pend' : '') + '"><span>待上传</span><b>' + n + ' 笔</b></div></div>' +
-      '<button id="mSync" class="v2m-big pri">⇪ 立即上传</button>' +
+      '<div><span>版本</span><b>' + esc(VERSION) + '</b></div><div class="' + (n ? 'pend' : '') + '"><span>待同步</span><b>' + n + ' 笔</b></div></div>' +
+      '<button id="mSync" class="v2m-big pri">⇪ 立即同步</button>' +
       othersNote() +
       '<button id="mOp" class="v2m-big">退出 / 切换员工</button>' +
       (lastSyncError ? '<div class="err hint">上次上传失败：' + esc(lastSyncError) + '</div>' : '') +
@@ -1205,7 +1205,7 @@
     }
     function dockSaved(pending) {
       var nextId = idx >= 0 && idx < nav.length - 1 ? nav[idx + 1] : null;
-      $('#dock').innerHTML = '<div class="savedmsg' + (pending ? ' pending' : '') + '" id="smsg">' + (pending ? '✓ 已保存到手机，正在上传…' : '✓ 已保存并同步到云端') + '</div>' +
+      $('#dock').innerHTML = '<div class="savedmsg' + (pending ? ' pending' : '') + '" id="smsg">' + (pending ? '✓ 已保存到本机，正在上传…' : '✓ 已保存并同步到云端') + '</div>' +
         '<button class="btn ghost" id="bList" style="flex:0 0 35%">返回清单</button>' +
         (nextId ? '<button class="btn next" id="bNext">NEXT PRODUCT ▶</button>' : '<button class="btn next" id="bNext">已是最后一个 · 返回</button>');
       $('#bList').onclick = function () { location.hash = '#/job/' + encodeURIComponent(jobId); };
@@ -1258,7 +1258,7 @@
         var m = $('#smsg');
         if (m) {
           m.className = 'savedmsg' + (still ? ' pending' : '');
-          m.textContent = still ? '✓ 已保存到手机（离线），联网后自动上传' : '✓ 已保存并同步到云端';
+          m.textContent = still ? '✓ 已保存到本机（离线），联网后自动同步' : '✓ 已保存并同步到云端';
         }
       });
       saving = false;
@@ -1377,7 +1377,7 @@
   function OLDN(old) { return OLDN_ON ? '<small class="oldn" data-nt>原：' + old + '</small>' : ''; }
   function modTabs(active) {
     if (v2Home()) return '';                        // docs/31 新首页开着：模块从首页进，顶部模块标签不要；切回「旧」就回来
-    var my = myMods(), tabs = [['in', '📦 入库'], ['t', '🔁 移库' + OLDN('库位转移')], ['ld', '🚚 装车复核' + OLDN('装车点货')], ['pk', '📋 仓库拣货'], ['lm', '📍 库位分配'], ['pl', '🏷 托盘']].filter(function (x) { return my.indexOf(x[0] === 'pl' ? 'lm' : x[0]) >= 0; });
+    var my = myMods(), tabs = [['in', '📦 入库'], ['t', '🔁 移库' + OLDN('移库')], ['ld', '🚚 装车复核' + OLDN('装车复核')], ['pk', '📋 仓库拣货'], ['lm', '📍 库位分配'], ['pl', '🏷 托盘']].filter(function (x) { return my.indexOf(x[0] === 'pl' ? 'lm' : x[0]) >= 0; });
     if (tabs.length < 2) return '';                 // 只有一个模块就不显示切换标签
     if (tabs.length > 4) { var sh = tabs.length > 5 ? { in: '入库', t: '移库', ld: '装车', pk: '拣货', lm: '分配', pl: '托盘' } : { in: '📦 入库', t: '🔁 移库', ld: '🚚 装车', pk: '📋 拣货', lm: '📍 分配', pl: '🏷 托盘' }; tabs = tabs.map(function (x) { return [x[0], sh[x[0]]]; }); }   // 5 个模块：短名字；v1.9.32 6 个：不要图标
     return '<div class="mods' + (tabs.length > 5 ? ' m4 m5 m6' : tabs.length > 4 ? ' m4 m5' : tabs.length > 3 ? ' m4' : '') + '">' + tabs.map(function (x) { return '<button class="mod' + (active === x[0] ? ' on' : '') + '" data-mod="' + x[0] + '">' + x[1] + '</button>'; }).join('') + '</div>';
@@ -1661,7 +1661,7 @@
   /** AWMS 0.9 过渡版：切换到新数据库后，手机 / 中控台记住的旧数据库地址作废，下次重新问后台要（不会还连旧库） */
   function sbForget() { lqSb = null; LS.del('lqsb'); if (WC) WC.sb = null; }
   var lqSb = LS.get('lqsb', null), LQ = { q: '', res: null, err: '', busy: false, src: '' };
-  var LQ_ACT = { BIND: '绑定', MOVE: '移库', VERIFY: '核实', REMOVE: '移走', UNDO: '撤回', OVERWRITE: '覆盖移走', MERGE: '合并', IMPORT: '导入', INBOUND: '入库单' };
+  var LQ_ACT = { BIND: '登记库位', MOVE: '移库', VERIFY: '核实库位', REMOVE: '清出', UNDO: '撤销', OVERWRITE: '覆盖清出', MERGE: '合并', IMPORT: '导入', INBOUND: '入库单' };
   function lqCfg(push) {
     if (lqSb && lqSb.url && lqSb.api === cfg.u && !push) return Promise.resolve(lqSb);      // 只认同一个后台给的地址
     return api({ action: 'lqSbCfg', push: push ? 1 : 0 }, true).then(function (c) { if (!c || !c.url) throw new Error('NOSB'); lqSb = { url: c.url, anon: c.anon, api: cfg.u }; LS.set('lqsb', lqSb); return lqSb; });
@@ -1735,7 +1735,7 @@
       var args = isLoc ? { p_loc: loc, p_q: null } : { p_loc: null, p_q: bx && bx[0] ? String(bx[0]) : v };
       var useLocal = function (why) { return trSnapLoad(false).then(function () { LQ.res = localRes(isLoc ? loc : '', v); LQ.src = 'local'; LQ.err = why; }); };
       var p = navigator.onLine === false ? useLocal('没有网络') : lqRpc(args).then(function (d) { LQ.res = lqOverlay(d, isLoc ? loc : '', d && d.items); LQ.src = 'db'; }, function (e) {
-        var m = e && e.message; return useLocal(m === 'NOSB' || m === 'NOFN' ? '数据库还没开通查库位' : e && (e.network || e.name === 'AbortError' || e.name === 'TypeError') ? '数据库连不上' : m);
+        var m = e && e.message; return useLocal(m === 'NOSB' || m === 'NOFN' ? '数据库未开通库位查询' : e && (e.network || e.name === 'AbortError' || e.name === 'TypeError') ? '数据库连接失败' : m);
       });
       p.then(function () { LQ.busy = false; if (location.hash === '#/tq') { draw(); v2PerfEnd(pfMine, true); } }, function (e) { LQ.busy = false; LQ.err = e.message; if (location.hash === '#/tq') draw(); });
     }
@@ -1752,13 +1752,13 @@
         '<div class="lqh"><b>搜索「' + esc(LQ.q) + '」</b><span>' + LQ.hits.length + (LQ.hits.length >= 40 ? '+' : '') + ' 个商品，点一个看在哪些库位</span></div><ul class="lql">' +
         LQ.hits.map(function (h) { return '<li><button class="lqhit" data-lqi="' + esc(h[0]) + '"><b>' + specHtml(h[1] || h[0]) + '</b><span>' + esc(h[0]) + '</span></button></li>'; }).join('') + '</ul>';
       var r = LQ.res; if (!r) return LQ.err ? '<div class="tmsg bad">' + esc(LQ.err) + '</div>' : '<div class="hint lqhelp">扫货架上的库位码，看系统记着这里放了什么；扫箱码，看这个货系统记在哪里。<br>和实物对一下：<b>系统有、货架上没有</b>，或者<b>货架上有、系统没有</b> → 用「移库」重新扫一次。</div>';
-      var head = (LQ.src === 'local' ? '<div class="tmsg bad">' + esc(LQ.err || '') + '，下面是手机里的资料' + (trSnap && trSnap.at ? '（' + hhmm(new Date(trSnap.at).toISOString()) + '）' : '') + '，可能不是最新</div>' : '') +
+      var head = (LQ.src === 'local' ? '<div class="tmsg bad">' + esc(LQ.err || '') + '，以下为本机资料' + (trSnap && trSnap.at ? '（' + hhmm(new Date(trSnap.at).toISOString()) + '）' : '') + '，可能不是最新</div>' : '') +
         (tqCount ? '<div class="tmsg">手机里还有 ' + tqCount + ' 条移库没上传（下面已经算上了）</div>' : '') +
         (LQ.src === 'db' && r.mine ? '<div class="hint lqsync">已算上这台手机刚做的移库（数据库还没同步到）</div>' : '');
       var foot = LQ.src === 'db' && r.sync ? '<div class="hint lqsync">数据库 ' + esc(r.sync) + ' 更新（每分钟一次，刚移的库位 1–2 分钟后才看得到）</div>' : '';
       if (LQ.loc) {
         var L = r.locs || [];
-        return head + '<div class="lqh"><b class="mono">' + esc(r.loc || LQ.q) + '</b><span>' + (L.length ? '系统记着 ' + L.length + ' 种货' : '系统里这个库位是空的') + '</span></div>' +
+        return head + '<div class="lqh"><b class="mono">' + esc(r.loc || LQ.q) + '</b><span>' + (L.length ? '系统记着 ' + L.length + ' 种货' : '系统中该库位为空') + '</span></div>' +
           (L.length ? '<ul class="lql">' + L.map(function (x) { return recHtml(x, false); }).join('') + '</ul>' : '') +
           ((r.log || []).length ? '<h4 class="lqsub">最近进出这个库位</h4><ul class="lqlog">' + r.log.map(function (g) {
             var into = g[6] === r.loc; return '<li><span class="hint">' + esc(g[0]) + '</span> <b>' + esc(LQ_ACT[g[1]] || g[1]) + '</b> ' + esc(g[3] || g[2]) + (g[4] ? ' · ' + esc(g[4]) : '') +
@@ -1767,7 +1767,7 @@
       }
       var LL = r.locs || [];
       if (!(r.items || []).length && !LL.length) return head + '<div class="empty">箱码 / 编号 ' + esc(LQ.q) + ' 系统里找不到</div>';
-      return head + '<div class="lqh"><b>' + esc(LL[0] ? LL[0][2] : (lookupItem(LQ.q) || (masters && masters.byItem[LQ.q]) || [])[2] || LQ.q) + '</b><span>' + (LL.length ? '系统记在 ' + LL.length + ' 个库位（点库位看那里有什么）' : '系统里还无库位') + '</span></div>' +
+      return head + '<div class="lqh"><b>' + esc(LL[0] ? LL[0][2] : (lookupItem(LQ.q) || (masters && masters.byItem[LQ.q]) || [])[2] || LQ.q) + '</b><span>' + (LL.length ? '系统记在 ' + LL.length + ' 个库位（点库位看那里有什么）' : '系统中无库位') + '</span></div>' +
         (LL.length ? '<ul class="lql">' + LL.map(function (x) { return recHtml(x, true); }).join('') + '</ul>' : '') + foot;
     }
     function draw() {
@@ -1836,7 +1836,7 @@
     var a = asks.filter(function (x) { return !answers[x.rec]; })[0];
     if (!a) return cb(answers);
     modal('<div class="ldq"><div class="ldq-h">原库位 ' + esc(a.loc) + ' 还有没组托的这个货吗？</div><p data-nt><b>' + esc(a.desc || a.item) + '</b></p><p class="hint" data-nt>' + esc(a.item) + (a.base ? ' · 批次 ' + esc(a.base) : '') + '</p>' +
-      '<p class="hint">系统以前就记着 ' + esc(a.loc) + ' 有这个货（不是这次的托盘登记的）。</p>' +
+      '<p class="hint">系统原记录 ' + esc(a.loc) + ' 有这个货（不是这次的托盘登记的）。</p>' +
       '<div class="row"><button class="btn ghost" id="ilKeep">还有</button><button class="btn save" id="ilGone">没有了</button></div><div class="row"><button class="tbtn" id="ilX">取消</button></div></div>', function (m) {
         $('#ilKeep', m).onclick = function () { closeModal(); answers[a.rec] = 'keep'; plAskIL(asks, answers, cb, cancel); };
         $('#ilGone', m).onclick = function () { closeModal(); answers[a.rec] = 'gone'; plAskIL(asks, answers, cb, cancel); };
@@ -1850,14 +1850,14 @@
       if (r.status === 'ask') return plAskIL(r.asks, params.answers, function () { plSubmit(params, on); }, on.cancel);
       if (r.status === 'occupied' && on.occupied) return on.occupied(r);
       if (r.status === 'rejected') { plSnapLoad(true); return on.fail(r.message || '做不了', r); }
-      if (r.status === 'needCtn') return on.fail((r.message || '上架前要填箱数') + '：请切到新页面（系统设置 → PDA 新页面设置 → 移库 = 新）填箱数', r);      // P-009：「上架要箱数」开着时，旧页面不填箱数（什么都没存）
+      if (r.status === 'needCtn') return on.fail((r.message || '上架前需要填写箱数') + '：请切换到新页面（系统设置 → PDA 新页面设置 → 移库 = 新）填写箱数', r);      // P-009：「上架要箱数」开着时，旧页面不填箱数（什么都没存）
       plAfter(r); on.ok(r);
     }, function (e) { on.fail(e.network ? PL_NONET : e.message, { network: !!e.network }); });
   }
   /** 那一边已经有托：【还在 → 换另一边】/【已经空了】 */
   function plOccupiedAsk(r, onOther, onEmpty, onCancel) {
     errBeep();
-    modal('<div class="ldq"><div class="ldq-h">' + esc(r.loc) + ' ' + plSide(r.side) + ' 已经有一托</div>' + plCardHtml(r.other) +
+    modal('<div class="ldq"><div class="ldq-h">' + esc(r.loc) + ' ' + plSide(r.side) + ' 已有托盘</div>' + plCardHtml(r.other) +
       '<p>那一托还在吗？</p><div class="row"><button class="btn ghost" id="ocStay">还在 → 换另一边</button><button class="btn save" id="ocGone">已经空了</button></div><div class="row"><button class="tbtn" id="ocX">取消</button></div></div>', function (m) {
         $('#ocStay', m).onclick = function () { closeModal(); onOther(); };
         $('#ocGone', m).onclick = function () { closeModal(); onEmpty(r.other.lpn); };
@@ -1965,7 +1965,7 @@
         beep(); PM = { lpn: r.pallet.lpn, pal: r.pallet, step: 'dst', eid: uuid(), msg: r.pallet.status === 'OUT' ? { cls: 'bad', text: '这托记录是「出完登记」。这次移库提交成功就恢复' } : { cls: 'good', text: '✓ 托盘 ' + r.pallet.lpn } };
         return route();
       }
-      if (r.kind === 'blank') return fail('这是空白标签（还没组托）：请到「🏷 托盘」页组托');
+      if (r.kind === 'blank') return fail('这是空白标签（未组托）：请到「🏷 托盘」页组托');
       fail(r.message || '托盘码不对：' + lpn);
     }, function (e) { fail(e.network ? PL_NONET : e.message); });
   }
@@ -1973,8 +1973,8 @@
     setBar('移库 · 托盘', false);
     var S = PM, busy = false;
     function hintTxt() {
-      if (S.done) return '扫下一个托盘码；或点「回到按箱码移库」';
-      if (S.step === 'dst') return '扫目的地：库位 = 整托移 · 另一个托盘码 = 整托并托 · 箱码 = 只移这种商品 · 空白标签 = 整托更换标签';
+      if (S.done) return '扫下一个托盘码；或点「返回按箱码移库」';
+      if (S.step === 'dst') return '扫目的地：库位 = 整托移 · 另一个托盘码 = 整托并托 · 箱码 = 部分移库 · 空白标签 = 整托更换标签';
       if (S.step === 'item') return '「' + (S.line.desc || S.line.bc) + '」要去哪里：扫托盘码 = 并到那托 · 扫库位 = 选托位 · 扫空白标签 = 成新托';
       if (S.step === 'newloc') return '新托 ' + S.newLpn + '：扫库位，再选托位';
       if (S.step === 'newlbl') return S.loc + ' ' + plSide(S.side) + ' 是空的：扫一张空白标签，成新托';
@@ -1984,10 +1984,10 @@
       if (location.hash !== '#/t' || PM !== S) return;
       var im = prefs.pda ? 'none' : 'text', keepIn = $('#plIn'), keepVal = keepIn ? keepIn.value : '';      // 重画时保留正在扫的内容
       app.innerHTML = modTabs('t') +
-        '<div class="topline"><span>员工：' + esc(operator) + '</span><button class="tbtn" id="plBack">← 回到按箱码移库</button></div>' +
+        '<div class="topline"><span>员工：' + esc(operator) + '</span><button class="tbtn" id="plBack">← 返回按箱码移库</button></div>' +
         (S.done ? '<div class="card pldone"><b>✓ ' + esc(S.done.text || '已保存') + '</b></div>' + (S.done.tear ? '<div class="tmsg bad">请撕掉 ' + esc(S.done.tear) + ' 的旧标签（这张以后扫到会提示已作废）</div>' : '') + plCardHtml(S.done.pallet) + plCardHtml(S.done.target)
           : '<div class="plsteps"><span class="' + (S.step === 'dst' ? 'on' : 'ok') + '">1 托盘 ✓</span><span class="' + (S.step === 'dst' ? 'on' : 'ok') + '">2 目的地</span>' + (S.step !== 'dst' ? '<span class="on">3 去哪里</span>' : '') + '</div>' +
-            plCardHtml(S.pal, { lineBtn: S.step === 'dst' && S.pal.items.length > 1 ? function (x) { return '<button class="tbtn" data-one="' + x.id + '">只移这种商品</button>'; } : null }) +
+            plCardHtml(S.pal, { lineBtn: S.step === 'dst' && S.pal.items.length > 1 ? function (x) { return '<button class="tbtn" data-one="' + x.id + '">部分移库</button>'; } : null }) +
             (S.line ? '<div class="card plone">只移：<b data-nt>' + esc(S.line.desc || S.line.bc) + '</b>' + (S.line.conf ? ' · 批次 ' + esc(S.line.batch) : ' · 批次待确认') + ' <button class="tbtn" id="plOneX">改成整托</button></div>' : '')) +
         (S.msg && S.msg.text ? '<div class="tmsg ' + S.msg.cls + '">' + esc(S.msg.text) + '</div>' : '') +
         '<p class="hint plhint">👉 ' + esc(hintTxt()) + '</p>' +
@@ -2013,7 +2013,7 @@
       var pc = plCode(v), loc = normLoc(v);
       if (S.done) {
         if (pc) { PM = null; return plEnterMove(pc, function (m) { PM = S; say('bad', m); }, function (t) { PM = S; wait(t); PM = null; }); }
-        PM = null; route(); toast('已回到按箱码移库，请再扫一次', 2500); return;
+        PM = null; route(); toast('已返回按箱码移库，请再扫一次', 2500); return;
       }
       if (S.step === 'dst') {
         if (pc) {
@@ -2058,7 +2058,7 @@
       if (S.step === 'newlbl') {
         if (!pc) return say('bad', '请扫一张空白托盘标签');
         return plLook(pc, wait).then(function (r) {
-          if (r.kind !== 'blank') return say('bad', r.kind === 'pallet' ? '这张标签已经用过了（' + pc + '）' : (r.message || '标签不对'));
+          if (r.kind !== 'blank') return say('bad', r.kind === 'pallet' ? '该标签已使用（' + pc + '）' : (r.message || '标签不对'));
           askStill(function (still) { send({ mode: 'item', lineId: S.line.id, still: still, to: { type: 'new', lpn: pc, loc: S.loc, side: S.side } }); });
         }, netFail);
       }
@@ -2219,11 +2219,11 @@
     function queryHtml() {
       var Q = S.q, h = '';
       if (Q && S.qUpd) h += '<div class="plupd">更新中…（先显示手机里的资料）</div>';
-      if (Q && S.qOff) h += '<div class="tmsg bad">没网：下面是手机里的资料，可能不是最新' + (Q.kind === 'pallet' ? '；历史要联网才看得到' : '') + '</div>';
+      if (Q && S.qOff) h += '<div class="tmsg bad">没网：以下为本机资料，可能不是最新' + (Q.kind === 'pallet' ? '；历史要联网才看得到' : '') + '</div>';
       if (Q && Q.kind === 'pallet') {
         var v = Q.pallet;
         h += plCardHtml(v, { lineBtn: v.status === 'IN_STOCK' ? function (x) { return x.item && !x.conf ? '<span class="plpend">批次待确认（后台导 GRN 配）</span>' : ''; } : null,
-          extra: v.status === 'OUT' ? '<div class="row"><button class="btn save" id="plRes">托还在，恢复（位置待确认）</button></div>' : v.status === 'IN_STOCK' ? '<div class="row"><button class="btn ghost" id="plGoFix">更正托盘</button><button class="btn ghost" id="plGoMv">🔁 移库 / 更换标签</button></div>' : '' }) + plHistHtml(v);
+          extra: v.status === 'OUT' ? '<div class="row"><button class="btn save" id="plRes">托盘仍在库，恢复（位置待确认）</button></div>' : v.status === 'IN_STOCK' ? '<div class="row"><button class="btn ghost" id="plGoFix">更正托盘</button><button class="btn ghost" id="plGoMv">🔁 移库 / 更换标签</button></div>' : '' }) + plHistHtml(v);
       } else if (Q && Q.kind === 'loc') {
         h += '<div class="card"><b>' + esc(Q.loc) + '</b>' + ['L', 'R'].map(function (s) { return '<div class="plqs"><span class="pls-h">' + sideSvg(s, true) + '</span>' + (Q[s] ? plCardHtml(Q[s], { cls: 'plin' }) : '<span class="hint">没有托盘</span>') + '</div>'; }).join('') +
           '<div class="plqs"><span class="pls-h">没组托的货</span>' + (Q.loose.length ? Q.loose.map(function (x) { return '<div class="plln"><b data-nt>' + esc(x.desc || x.item) + '</b><div class="hint" data-nt>' + esc(x.item) + (x.base ? ' · 批次 ' + esc(x.base) : '') + ' · ' + esc(x.status) + (x.same ? ' · 和托上的货一样' : '') + '</div></div>'; }).join('') : '<span class="hint">没有记录</span>') + '</div></div>';
@@ -2237,7 +2237,7 @@
       if (location.hash !== '#/pl') return;
       var keepIn = $('#plIn'), keepVal = keepIn ? keepIn.value : '';      // 重画时保留正在扫的内容
       var im = prefs.pda ? 'none' : 'text', tb = function (k, t) { return '<button class="plt' + (S.tab === k ? ' on' : '') + '" data-tab="' + k + '">' + t + '</button>'; };
-      app.innerHTML = modTabs('pl') + '<div class="pltabs">' + tb('bind', '组托' + OLDN('贴码')) + tb('empty', '出完登记' + OLDN('拿空了')) + tb('query', '查询') + '</div>' +
+      app.innerHTML = modTabs('pl') + '<div class="pltabs">' + tb('bind', '组托' + OLDN('组托')) + tb('empty', '出完登记' + OLDN('已出完')) + tb('query', '查询') + '</div>' +
         '<div class="bcrow tscan"><input id="plIn" inputmode="' + im + '" maxlength="64" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="' + esc(hint()) + '"><button class="btn cam" id="plCam">📷 扫描</button></div>' +
         (S.msg && S.msg.text ? '<div class="tmsg ' + S.msg.cls + '">' + esc(S.msg.text) + (S.msg.reopen ? ' <button class="btn save plreo" id="plReo">重新打开，保存这一托</button>' : '') + '</div>' : '') +
         (S.busy ? '<p class="plbusy">提交中…</p>' : '') +
@@ -2302,7 +2302,7 @@
             say('bad', r.message || '标签不对');
           }, net);
         }
-        if (pc) return say('bad', '这一托已经扫了标签 ' + S.b.lpn + '，现在扫箱码');
+        if (pc) return say('bad', '该托盘已扫描标签 ' + S.b.lpn + '，现在扫箱码');
         var loc = normLoc(v); if (loc && locRe().test(loc)) return say('bad', '组托不记库位：贴好后到「移库」扫托盘码再扫库位');
         if (S.b.lines.length >= 2) return say('bad', '一个托盘最多 2 种商品');
         var code = bcClean(v), q = /[^\x00-\x7f]|\s/.test(v) || /^[A-Za-z]{2,12}$/.test(v) ? v : code;
@@ -2333,7 +2333,7 @@
     function query(code, quiet) {
       var seq = S.qseq = (S.qseq || 0) + 1, r = plLocal(code);
       S.qOff = false;
-      if (r && r.kind === 'blank') { S.q = null; return say('bad', '空白标签（还没组托）：' + r.lpn); }
+      if (r && r.kind === 'blank') { S.q = null; return say('bad', '空白标签（未组托）：' + r.lpn); }
       if (r && r.kind === 'bad') { S.q = null; return say('bad', r.message); }
       if (r) { S.q = r; S.qUpd = true; S.msg = null; if (!quiet) beep(); draw(); }
       else { S.q = null; S.qUpd = false; wait('正在查 ' + (plCode(code) || normLoc(code)) + '…'); }
@@ -2341,7 +2341,7 @@
         if (seq !== S.qseq) return;
         S.qUpd = false;
         if (r2.kind === 'pallet' || r2.kind === 'loc') { S.q = r2; if (!r) { S.msg = null; beep(); } return draw(); }
-        S.q = null; say('bad', r2.kind === 'blank' ? '空白标签（还没组托）：' + r2.lpn : r2.message || '托盘码不对');
+        S.q = null; say('bad', r2.kind === 'blank' ? '空白标签（未组托）：' + r2.lpn : r2.message || '托盘码不对');
       }, function (e) {
         if (seq !== S.qseq) return;
         S.qUpd = false;
@@ -2354,7 +2354,7 @@
       if (B.lines.some(function (x) { return (item && x.item === item) || (!item && !x.item && x.bc === bc); })) return say('bad', '这个商品已经加了（一托上同一个商品只能有一个批次）');
       var x = { bc: bc, item: item, desc: r ? r.desc : '', uom: r ? r.uom || '' : '', exp: '', ctn: '' };      // v1.9.34 新货贴码不选批次（一律批次待定，后台导 GRN 配）
       B.lines.push(x);
-      say('good', item ? '✓ ' + (x.desc || item) + '（批次待确认）；到期年月、箱数选填' : '⚠ 系统不认识箱码 ' + bc + '：照样记成未识别商品');
+      say('good', item ? '✓ ' + (x.desc || item) + '（批次待确认）；到期年月、箱数选填' : '⚠ 未识别箱码 ' + bc + '：照样记成未识别商品');
     }
     function pickSearch(r, cb) {
       if (!r.items.length) return say('bad', '找不到「' + r.q + '」');
@@ -2379,7 +2379,7 @@
     // ---- v1.9.35 规格书 6.4：改正（贴码页扫已贴过的托）——补一样 / 删掉 / 改任务；PDA 不能改批次
     function openFix(v) {
       if (plVoidMsg(v)) return say('bad', plVoidMsg(v));
-      if (v.status === 'OUT') return say('bad', '这托已出完（' + v.lpn + '）：到「查询」扫这托，点「托还在，恢复」再改');
+      if (v.status === 'OUT') return say('bad', '这托已出完（' + v.lpn + '）：到「查询」扫这托，点「托盘仍在库，恢复」再改');
       S.fix = { pal: v, add: null }; say('good', '打开 ' + v.lpn + '：可以「＋ 添加商品」（扫箱码）/「✕ 移除商品」/ 更改收货任务');
     }
     function fixTaskName(id) { var t = plSnap && plSnap.tasks ? plSnap.tasks.filter(function (x) { return x.id === id; })[0] : null; return t ? t.sc : id; }
@@ -2390,7 +2390,7 @@
         v.items.map(function (x) { return plLineHtml(x, v.items.length > 1 ? '<button class="tbtn red" data-fxrm="' + x.id + '">✕ 移除商品</button>' : ''); }).join('') +
         (A ? '<div class="plbl plfixadd"><div class="plln-t"><b data-nt>＋ ' + esc(A.desc || '未识别商品') + '</b><button class="tbtn" id="fxAX">✕</button></div><div class="hint" data-nt>' + (A.item ? esc(A.item) + ' · ' : '') + '箱码 ' + esc(A.bc) + ' · <span class="plpend">批次待确认</span></div>' +
           '<div class="plf2"><label class="plf"><span>到期年月（选填）</span><input id="fxExp" inputmode="numeric" maxlength="4" placeholder="例 2709" value="' + esc(A.exp || '') + '"></label><label class="plf"><span>箱数（选填）</span><input id="fxCtn" inputmode="numeric" maxlength="5" placeholder="不填" value="' + esc(A.ctn || '') + '"></label></div>' +
-          '<div class="row"><button class="btn save" id="fxAOk"' + (S.busy ? ' disabled' : '') + '>添加这种商品</button></div></div>'
+          '<div class="row"><button class="btn save" id="fxAOk"' + (S.busy ? ' disabled' : '') + '>添加商品</button></div></div>'
           : (v.items.length < 2 ? '<p class="hint">👉 漏组了一种商品：直接扫该商品的箱码 = 添加商品（批次待确认）</p>' : '<p class="hint">这个托盘已有 2 种商品；贴错了先「✕ 移除商品」再添加</p>')) +
         '<div class="row">' + (pend.length ? '<button class="btn ghost" id="fxTask">更改收货任务</button>' + (conf ? '<span class="hint">只更改批次待确认的商品；批次已确认的商品不变</span>' : '') : '<span class="hint">批次都已配上：更改收货任务要先在后台「取消批次」（回到批次待确认）</span>') + '<button class="btn save" id="fxDone">完成</button></div>' +
         '<p class="hint">PDA 不能更改批次；批次配错了在后台「更改批次」。</p></div>';
@@ -2402,7 +2402,7 @@
         if (r.kind === 'blank') { S.fix = null; S.b.lpn = r.lpn; return say('good', '✓ 空白标签 ' + r.lpn + '：扫箱码'); }
         say('bad', r.message || '标签不对');
       }, net);
-      var loc = normLoc(v); if (loc && locRe().test(loc)) return say('bad', '更正托盘不动库位：要移到别的库位请到「移库」');
+      var loc = normLoc(v); if (loc && locRe().test(loc)) return say('bad', '更正托盘不改库位：要移到别的库位请到「移库」');
       var code = bcClean(v), nz = function (b) { return String(b || '').replace(/^0+/, ''); };
       if (F.pal.items.some(function (x) { return x.bc && nz(x.bc) === nz(code) || x.item && x.item === code; })) return say('bad', '该商品已在这个托盘上');      // v1.9.37
       var full = F.pal.items.length >= 2, q = /[^\x00-\x7f]|\s/.test(v) || /^[A-Za-z]{2,12}$/.test(v) ? v : code;
@@ -2412,7 +2412,7 @@
         if (F.pal.items.some(function (x) { return (item && x.item === item) || nz(x.bc) === nz(bc); })) return say('bad', '该商品已在这个托盘上');
         if (full) return say('bad', '这个托盘已有 2 种商品；贴错了先「✕ 移除商品」再添加');
         F.add = { bc: bc, item: item, desc: r ? r.desc : '', uom: r ? r.uom || '' : '', exp: '', ctn: '' };
-        say('good', item ? '＋ ' + (F.add.desc || item) + '：到期年月、箱数选填，点「添加这种商品」' : '⚠ 系统不认识箱码 ' + bc + '：照样补成未识别商品');
+        say('good', item ? '＋ ' + (F.add.desc || item) + '：到期年月、箱数选填，点「添加商品」' : '⚠ 未识别箱码 ' + bc + '：照样补成未识别商品');
       };
       wait('正在查 ' + q + '…');
       return plScanApi(q).then(function (r) {
@@ -2495,7 +2495,7 @@
     }
     function restore() {
       var v = S.q.pallet;
-      confirmBox(v.lpn + ' 其实还在？恢复后位置待确认，到「移库」扫托盘码再扫库位', '恢复', function () {
+      confirmBox(v.lpn + ' 仍在库？恢复后位置待确认，到「移库」扫托盘码再扫库位', '恢复', function () {
         S.busy = true; draw();
         plSubmit({ action: 'plRestore', eventId: uuid(), lpn: v.lpn }, {
           ok: function (r) { S.busy = false; S.list = null; query(v.lpn, true); toast(r.text || '已恢复', 3000); },
@@ -2545,14 +2545,14 @@
     function needBatch() { return st.bst === 'need'; }
     function mkSteps() {
       var a = [['src', '移出位置', '扫描原来的库位条码'], ['bc', '商品箱码', '扫描箱子上的条码']];
-      if (needBatch()) a.push(['batch', '选批次', '看箱子上的到期日，在下面点对应的批次']);
+      if (needBatch()) a.push(['batch', '选批次', '按箱上到期日，在下面点对应的批次']);
       a.push(['dst', '移入位置', '扫描新的库位条码'], ['photo', '拍照（选填）', '想留证据可以拍一张，不拍也能提交']);
       STEPS = a.map(function (x, i) { return [x[0], (i + 1) + '. ' + x[1], x[2]]; });
       return STEPS;
     }
     mkSteps();
     // 提交前检查（v1.3.9）：必须有 商品箱码、目的库位、照片；来源库位选填
-    var NEED = { bc: ['商品箱码', '还没扫', '扫描箱子上的条码'], batch: ['批次', '还没选', '看箱子上的到期日，选对应的批次'], dst: ['移入位置', '还没扫', '扫描新库位（放货的货架）上的库位条码'], photo: ['拍照确认', '还没拍', '拍一张货物放在新库位的照片'] };
+    var NEED = { bc: ['商品箱码', '未扫描', '扫描箱子上的条码'], batch: ['批次', '未选择', '按箱上到期日，选对应的批次'], dst: ['移入位置', '未扫描', '扫描新库位（放货的货架）上的库位条码'], photo: ['拍照确认', '还没拍', '拍一张货物放在新库位的照片'] };
     var photoBusy = false, showNeed = false;
     function has(k) { return k === 'batch' ? st.bok : k === 'bc' ? !!st.bc && !!(st.item || st.newName) : !!st[k]; }
     function unknownBc() { return !!st.bc && !st.item && !st.newName && st.bst !== 'load'; }
@@ -2629,7 +2629,7 @@
         return '<button class="tbatb' + (st.bok && st.batch === b.base ? ' on' : '') + '" data-bi="' + i + '"><span class="tbx">到期 <b>' + esc(b.exp || '—') + '</b></span>' +
           '<span class="tbm">生产 ' + esc(b.mfg || '—') + withTag(b, ' · ') + '</span>' +
           '<span class="tbm">批次 ' + esc(b.base || '（不分批次）') + ' · 系统库位 <b>' + esc((b.locs || []).join(' ') || '没有') + '</b>' + (st.src && (b.locs || []).indexOf(st.src) >= 0 ? ' <i class="tbsrc">= 移出位置</i>' : '') + '</span></button>';
-      }).join('') + '<button class="tbatb tbnew' + (st.bok && st.bnew ? ' on' : '') + '" data-bnew="1"><span class="tbx">🆕 <b>新批次</b>（系统里还没有）</span><span class="tbm">箱子上的到期日上面都没有：新到的货、入库单还没上传。记成「不分批次」，旧批次的库位不动</span></button></div>';
+      }).join('') + '<button class="tbatb tbnew' + (st.bok && st.bnew ? ' on' : '') + '" data-bnew="1"><span class="tbx">🆕 <b>新批次</b>（系统里还没有）</span><span class="tbm">箱子上的到期日以上均不符：新到的货、入库单还没上传。记成「不分批次」，旧批次的库位不动</span></button></div>';
     }
     function goFix(k) {
       closeModal();
@@ -2648,13 +2648,13 @@
         li(st.photo ? 'ok' : 'opt', st.photo ? '✓' : '–', '拍照', st.photo ? '已拍好' : '不拍（选填）') +
         (needBatch() ? ['bc', 'batch', 'dst'] : ['bc', 'dst']).map(function (k) {
           if (has(k)) return li('ok', '✓', NEED[k][0], k === 'photo' ? '已拍好' : k === 'batch' ? '到期 ' + esc(st.bexp || '—') + ' · ' + esc(st.batch || '不分批次') : esc(k === 'bc' ? (st.item ? st.item + ' · ' + st.bc : st.bc) : st[k]));
-          if (k === 'bc' && st.bc) return li('bad', '✗', '商品箱码 · 系统不认识', '箱码 ' + esc(st.bc) + '：先选是哪个商品', 'unk');
+          if (k === 'bc' && st.bc) return li('bad', '✗', '商品箱码 · 未识别', '箱码 ' + esc(st.bc) + '：先识别商品', 'unk');
           return li('bad', '✗', NEED[k][0] + ' · ' + NEED[k][1], NEED[k][2], k);
         }).join('');
-      modal('<div class="tmiss"><div class="tmiss-h"><span class="tmiss-ic">!</span><div><h3>还不能提交</h3>' +
+      modal('<div class="tmiss"><div class="tmiss-h"><span class="tmiss-ic">!</span><div><h3>暂不能提交</h3>' +
         '<div class="hint">还差 <b>' + miss.length + '</b> 项，补齐后再点“提交”</div></div></div>' +
         '<ul class="tmiss-list">' + items + '</ul>' +
-        '<div class="row"><button class="btn ghost" id="mxOk">知道了</button><button class="btn save" id="mxGo">' + (miss[0] === 'bc' && st.bc ? '选是哪个商品' : '去补：' + NEED[miss[0]][0]) + '</button></div></div>', function (m) {
+        '<div class="row"><button class="btn ghost" id="mxOk">知道了</button><button class="btn save" id="mxGo">' + (miss[0] === 'bc' && st.bc ? '识别商品' : '去补：' + NEED[miss[0]][0]) + '</button></div></div>', function (m) {
           $('#mxOk', m).onclick = function () { closeModal(); showNeed = true; draw(); };
           $('#mxGo', m).onclick = function () { goFix(miss[0] === 'bc' && st.bc ? 'unk' : miss[0]); };
           Array.prototype.forEach.call(m.querySelectorAll('[data-go]'), function (x) { x.onclick = function () { goFix(x.getAttribute('data-go')); }; });
@@ -2676,19 +2676,19 @@
     }
     function recentHtml() {
       var c = RL.counts || {};
-      var chips = [['', '全部', c.all], ['待处理', '待办', c['待处理']], ['有问题', '有问题', c['有问题']], ['已完成', '已完成', c['已完成']]].map(function (f) {
+      var chips = [['', '全部', c.all], ['待处理', '待办', c['待处理']], ['有问题', '异常', c['有问题']], ['已完成', '已完成', c['已完成']]].map(function (f) {
         return '<button class="tchip' + (RL.status === f[0] ? ' on' : '') + '" data-rf="' + f[0] + '">' + f[1] + (f[2] != null ? ' ' + f[2] : '') + '</button>';
       }).join('');
       var rows = recent.map(function (r) {
         var can = r.status !== '已完成', bc = r.bc || (r.item && !r.desc ? r.item : '');
         return '<div class="trec' + (can ? ' tedit' : '') + '" data-rid="' + esc(r.id || '') + '">' +
-          '<div class="trec-h"><span class="tst ' + (TST[r.status] || '') + '">' + esc(r.status || '') + '</span><span class="hint">' + esc(r.date || r.t || '') + '</span>' +
+          '<div class="trec-h"><span class="tst ' + (TST[r.status] || '') + '">' + esc(r.status === '有问题' ? '异常' : r.status || '') + '</span><span class="hint">' + esc(r.date || r.t || '') + '</span>' +
             (can ? '<span class="tedit-l">✎ 修改</span>' : '<span class="hint">🔒 已处理</span>') + '</div>' +
           '<div class="trec-loc"><span>' + esc(r.src || '—') + '</span><i>→</i><span>' + esc(r.dst || '') + '</span>' + (r.qty !== '' && r.qty != null ? '<b class="trec-q">数量 ' + esc(r.qty) + '</b>' : '') + '</div>' +
-          '<div class="trec-it">' + (r.item && r.item !== bc ? '<b>' + esc(r.item) + '</b> ' + esc(r.desc || '') + ' · ' : '') + '箱码 ' + esc(bc || '—') + (r.match === '未识别' ? ' <span class="hint">（主档没有）</span>' : '') + '</div>' +
+          '<div class="trec-it">' + (r.item && r.item !== bc ? '<b>' + esc(r.item) + '</b> ' + esc(r.desc || '') + ' · ' : '') + '箱码 ' + esc(bc || '—') + (r.match === '未识别' ? ' <span class="hint">（商品主档无此商品）</span>' : '') + '</div>' +
           (r.batch ? '<div class="trec-b">批次 <b>' + esc(r.batch) + '</b>' + (r.bexp ? ' · 到期 <b>' + esc(r.bexp) + '</b>' : '') + '</div>' : '') +
           (r.locResult ? '<div class="trec-l' + (/^已更新/.test(r.locResult) ? '' : ' bad') + '">' + (/^已更新/.test(r.locResult) ? '✓ 系统库位' : '⚠ ') + esc(r.locResult.replace(/^已更新：/, '已更新 ')) + '</div>' : '') +
-          ((r.note || r.by) ? '<div class="trec-n' + (r.status === '有问题' ? ' bad' : '') + '">' + (r.status === '有问题' ? '办公室：' : '备注：') + esc(r.note || '') + (r.by ? ' <span class="hint">（' + esc(r.by) + ' ' + esc(r.at || '') + '）</span>' : '') + '</div>' : '') +
+          ((r.note || r.by) ? '<div class="trec-n' + (r.status === '有问题' ? ' bad' : '') + '">' + (r.status === '有问题' ? '后台备注：' : '备注：') + esc(r.note || '') + (r.by ? ' <span class="hint">（' + esc(r.by) + ' ' + esc(r.at || '') + '）</span>' : '') + '</div>' : '') +
           (r.edits ? '<div class="hint">已修改 ' + r.edits + ' 次' + (r.editedAt ? '（最后 ' + esc(r.editedAt) + '）' : '') + '</div>' : '') + '</div>';
       }).join('');
       var more = RL.total != null && RL.total > recent.filter(function (r) { return r.status !== '待同步'; }).length;
@@ -2707,15 +2707,15 @@
       var cur = step(), im = prefs.pda ? 'none' : 'text';
       var rows = STEPS.map(function (s) {
         var k = s[0], v = k === 'batch' ? st.bok : st[k], val;
-        if (k === 'batch') val = st.bok ? (st.bnew ? '<b class="tv">🆕 新批次</b><div class="hint">系统里还没有，记成不分批次</div>' : '<b class="tv">到期 ' + esc(st.bexp || '—') + '</b><div class="hint">批次 ' + esc(st.batch || '不分批次') + '</div>') : '';
-        else if (k === 'bc') val = !v ? '' : st.item ? '<b class="tv">' + esc(st.item) + '</b><div class="td">' + esc(st.desc || '') + '</div><div class="hint">箱码 ' + esc(v) + (st.match === 'Item Code' ? '（按 Item Code 识别）' : '') + (st.learn ? '（刚认出，提交时系统记住这个箱码）' : '') + '</div>'
+        if (k === 'batch') val = st.bok ? (st.bnew ? '<b class="tv">🆕 新批次</b><div class="hint">系统里还没有，按「不分批次」记录</div>' : '<b class="tv">到期 ' + esc(st.bexp || '—') + '</b><div class="hint">批次 ' + esc(st.batch || '不分批次') + '</div>') : '';
+        else if (k === 'bc') val = !v ? '' : st.item ? '<b class="tv">' + esc(st.item) + '</b><div class="td">' + esc(st.desc || '') + '</div><div class="hint">箱码 ' + esc(v) + (st.match === 'Item Code' ? '（按 Item Code 识别）' : '') + (st.learn ? '（已识别，提交时系统记住这个箱码）' : '') + '</div>'
           : st.newName ? '<b class="tv">新商品</b><div class="td">' + esc(st.newName) + '</div><div class="hint">箱码 ' + esc(v) + '（提交时系统建新商品并记住箱码）</div>'
-          : '<b class="tv loc">' + esc(v) + '</b>' + (st.bst === 'load' ? '<div class="hint">查找商品…</div>' : '<div class="tunk">⚠ 系统不认识这个箱码</div>');
+          : '<b class="tv loc">' + esc(v) + '</b>' + (st.bst === 'load' ? '<div class="hint">查找商品…</div>' : '<div class="tunk">⚠ 箱码未识别</div>');
         else if (k === 'photo') val = v ? '<img class="tphoto" src="' + v + '" alt="照片">' : '';
         else if (k === 'src' && !v && srcOptional() && cur !== 'src') val = '<span class="tp" style="color:var(--mute)">不填（选填）</span>';
         else val = v ? '<b class="tv loc">' + esc(v) + '</b>' : '';
-        if (k === 'bc' && v) val += st.bst === 'load' ? '<div class="hint">读取批次…</div>' : st.bst === 'one' ? (st.bnew ? '<div class="tb1 tb1new">🆕 新批次（系统里还没有，记成不分批次） <span class="tbnl" data-bold1="1">改回 到期 ' + esc((st.bopts[0] || {}).exp || '—') + '</span></div>'
-          : '<div class="tb1">只有 1 个批次：到期 <b>' + esc(st.bexp || '—') + '</b>' + (st.batch ? ' · ' + esc(st.batch) : '') + '（自动选好）</div><div class="tbnl" data-bnew1="1">到期日不一样？点这里选「新批次」</div>') : '';     // v1.9.16
+        if (k === 'bc' && v) val += st.bst === 'load' ? '<div class="hint">读取批次…</div>' : st.bst === 'one' ? (st.bnew ? '<div class="tb1 tb1new">🆕 新批次（系统里还没有，按「不分批次」记录） <span class="tbnl" data-bold1="1">恢复为到期 ' + esc((st.bopts[0] || {}).exp || '—') + '</span></div>'
+          : '<div class="tb1">仅 1 个批次：到期 <b>' + esc(st.bexp || '—') + '</b>' + (st.batch ? ' · ' + esc(st.batch) : '') + '（已自动选择）</div><div class="tbnl" data-bnew1="1">到期日不符？点这里选「新批次」</div>') : '';     // v1.9.16
         return '<button class="tstep' + (cur === k ? ' cur' : '') + (showNeed && k !== 'src' && k !== 'photo' && !v ? ' need' : '') + (v ? ' ok' : '') + '" data-edit="' + k + '"><span class="tl">' + s[1] + '</span>' +
           (val || '<span class="tp">' + (cur === k ? '👉 ' + s[2] : '—') + '</span>') + '</button>' +
           (k === 'batch' && cur === 'batch' ? '<div class="tbatc">' + batchHtml() + (st.edit ? '<div class="row tsub"><button class="tbtn" id="tCancelEdit">取消修改</button></div>' : '') + '</div>' : '');
@@ -2729,7 +2729,7 @@
         '<input id="tQty" class="tqtyin" inputmode="decimal" autocomplete="off" maxlength="64" enterkeyhint="done" placeholder="不填" value="' + esc(st.qty || '') + '"></div></div>' +
         (msg.text ? '<div class="tmsg ' + msg.cls + '">' + esc(msg.text) + '</div>' : '') + batchPick +
         shelfHtml() +
-        (unknownBc() ? '<div class="tunkc"><b>箱码 ' + esc(st.bc) + ' 系统不认识</b><span>选出是哪个商品才能提交（系统会记住这个箱码）</span><button class="btn save" id="tUnk">选是哪个商品</button></div>' : '') +
+        (unknownBc() ? '<div class="tunkc"><b>箱码 ' + esc(st.bc) + ' 未识别</b><span>选出是哪个商品才能提交（系统会记住这个箱码）</span><button class="btn save" id="tUnk">识别商品</button></div>' : '') +
         (scanning ? '<div class="bcrow tscan"><input id="tIn" data-step="' + cur + '" inputmode="' + im + '" maxlength="64" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="' +
           esc(STEPS.filter(function (s) { return s[0] === cur; })[0][2]) + '，或点这里手输"><button class="btn cam" id="tCam">📷 扫描</button></div>' +
           ((cur === 'src' && !st.src) || st.edit ? '<div class="row tsub">' + (cur === 'src' && !st.src ? '<button class="tbtn" id="tSkipSrc">跳过移出位置 →</button>' : '') +
@@ -2738,7 +2738,7 @@
         (cur === 'photo' ? '<div class="tphotos"><button class="btn save tphotobtn" id="tPhotoBtn">📸 拍照</button><button class="btn ghost tphotoalt" id="tPhotoAltBtn">🖼 从相册选</button></div>' +
           '<input id="tPhoto" class="vh" type="file" accept="image/*" capture="environment" tabindex="-1" aria-hidden="true">' +
           '<input id="tPhotoAlt" class="vh" type="file" accept="image/*" tabindex="-1" aria-hidden="true">' : '') +
-        (tqCount ? '<p class="hint">待同步 ' + tqCount + ' 笔（联网后自动上传）</p>' : '') +
+        (tqCount ? '<p class="hint">待同步 ' + tqCount + ' 笔（联网后自动同步）</p>' : '') +
         (tqRejected.length ? '<div class="card"><b class="err">被退回 ' + tqRejected.length + ' 笔（请检查后删除）</b>' + tqRejected.map(function (r) {
           return '<div class="trow"><div>' + esc(r.source || '—') + ' → ' + esc(r.dest) + ' · ' + esc(r.itemCode || r.barcode) + (r.itemCode ? ' · 箱码 ' + esc(JSON.stringify(String(r.barcode || '')).slice(1, -1)) : '') + '<div class="err hint">' + esc(r.rejected) + '</div></div><button class="tbtn" data-tdel="' + esc(r.transferId) + '">删除</button></div>';
         }).join('') + '</div>' : '') +
@@ -2782,7 +2782,7 @@
       // v1.9.16 新批次（系统里还没有）：记成不分批次，旧批次的库位不动
       var setNew = function (on, e) { if (e) { e.preventDefault(); e.stopPropagation(); } var x = st.bopts[0] || {};
         if (on) { st.batch = ''; st.bexp = ''; st.bnew = true; } else { st.batch = x.base || ''; st.bexp = x.exp || ''; st.bnew = false; }
-        st.bok = true; if (st.edit === 'batch') st.edit = ''; beep(); msg = { cls: 'good', text: on ? '✓ 新批次：记成不分批次（旧批次的库位不动）' : '✓ 批次：到期 ' + (x.exp || '—') }; saveDraft(); draw(); };
+        st.bok = true; if (st.edit === 'batch') st.edit = ''; beep(); msg = { cls: 'good', text: on ? '✓ 新批次：按「不分批次」记录（旧批次的库位不动）' : '✓ 批次：到期 ' + (x.exp || '—') }; saveDraft(); draw(); };
       Array.prototype.forEach.call(app.querySelectorAll('[data-bnew]'), function (b) { b.onclick = function (e) { setNew(true, e); }; });
       Array.prototype.forEach.call(app.querySelectorAll('[data-bnew1]'), function (b) { b.onclick = function (e) { setNew(true, e); }; });
       Array.prototype.forEach.call(app.querySelectorAll('[data-bold1]'), function (b) { b.onclick = function (e) { setNew(false, e); }; });
@@ -2850,7 +2850,7 @@
       if (k === 'src' || k === 'dst') {
         var loc = normLoc(raw);
         if (!loc) return;
-        if (!locRe().test(loc)) return fail(lookupItem(normCode(raw)) ? '这是商品条码，请扫描库位条码' : '库位条码格式不对：' + loc);
+        if (!locRe().test(loc)) return fail(lookupItem(normCode(raw)) ? '这是商品条码，请扫描库位条码' : '库位码格式错误：' + loc);
         if (k === 'dst' && loc === st.src) return fail('移入位置和移出位置相同：' + loc);
         if (k === 'src' && st.dst && loc === st.dst) return fail('移出位置和移入位置相同：' + loc);
         st[k] = loc;
@@ -2933,7 +2933,7 @@
               loadB();
               var bsel = $('#teB', m), batch;
               if (BL && blFor === bc) {
-                if (BL.length > 1) { batch = bsel.value || undefined; if (!batch && (src !== cur.src || bc !== normCode(cur.bc) || dst !== cur.dst)) e.push('请选批次（看箱子上的到期日）'); }
+                if (BL.length > 1) { batch = bsel.value || undefined; if (!batch && (src !== cur.src || bc !== normCode(cur.bc) || dst !== cur.dst)) e.push('请选批次（按箱上到期日）'); }
                 else batch = BL.length ? BL[0].base : '';
               } else if (bc !== normCode(cur.bc)) e.push('批次还在读取，请等一下再保存');
               if (e.length) { out.textContent = e.join('；'); errBeep(); return; }
@@ -2995,7 +2995,7 @@
         Array.prototype.forEach.call(box.querySelectorAll('[data-uk]'), function (b) { b.onclick = function () { var x = arr[+b.dataset.uk]; if (x) choose(x.item, x.desc); }; });
       };
       errBeep();
-      modal('<div class="ldq tunkm"><div class="ldq-h">箱码 <span data-nt>' + esc(code) + '</span> 系统不认识</div><p class="hint">选出是哪个商品才能提交。选了以后系统记住这个箱码，以后扫就认得。</p>' +
+      modal('<div class="ldq tunkm"><div class="ldq-h">箱码 <span data-nt>' + esc(code) + '</span> 未识别</div><p class="hint">选出是哪个商品才能提交。选了以后系统记住这个箱码，以后扫就认得。</p>' +
         '<div id="ukList" class="lmpick"></div>' +
         '<div class="lmrow"><input id="ukQ" class="pkq" autocomplete="off" placeholder="扫箱子上的另一个码，或输入品名 / Item Code"><button class="btn save" id="ukGo" style="flex:0 0 70px">查找</button></div><div id="ukM" class="ldq-m"></div>' +
         '<button class="tbtn lmnewb" id="ukNew">都不是：新商品（写品名）</button>' +
@@ -3101,8 +3101,8 @@
       busy = false; errBeep();
       modal('<div class="tmiss tsrcask"><div class="tmiss-h"><span class="tmiss-ic">?</span><div><h3>系统里这个货记在别的库位</h3><div class="hint"><b data-nt>' + esc(st.desc || st.item) + '</b>' +
         (st.bok ? (st.batch ? '（批次 <span data-nt>' + esc(st.batch) + '</span>）' : '（不分批次）') : '') + ' 系统记在 <b data-nt>' + esc(ls.join('、')) + '</b>。你没有扫移出位置：货是从那里移到 <b data-nt>' + esc(st.dst) + '</b> 的吗？选「是」系统就把那个库位改成 <b data-nt>' + esc(st.dst) + '</b>。</div></div></div>' +
-        '<div class="tovb">' + ls.map(function (l, i) { return '<button class="btn save" data-srcy="' + i + '">是，从 ' + esc(l) + ' 移过来的</button>'; }).join('') +
-        '<button class="btn ghost" id="srcN">不是，' + esc(ls.join('、')) + ' 那边还有货（都记着）</button><button class="btn ghost" id="srcC">取消</button></div></div>', function (m) {
+        '<div class="tovb">' + ls.map(function (l, i) { return '<button class="btn save" data-srcy="' + i + '">是，从 ' + esc(l) + ' 移来</button>'; }).join('') +
+        '<button class="btn ghost" id="srcN">不是，' + esc(ls.join('、')) + ' 仍有该商品（保留记录）</button><button class="btn ghost" id="srcC">取消</button></div></div>', function (m) {
           Array.prototype.forEach.call(m.querySelectorAll('[data-srcy]'), function (b) { b.onclick = function () { closeModal(); st.src = ls[+b.dataset.srcy]; mkSteps(); submit(true); }; });
           $('#srcN', m).onclick = function () { closeModal(); submit(true); };
           $('#srcC', m).onclick = function () { closeModal(); draw(); };
@@ -3110,11 +3110,11 @@
     }
     function askSrcDiff(ls) {
       busy = false; errBeep();
-      modal('<div class="tmiss tsrcdiff"><div class="tmiss-h"><span class="tmiss-ic">?</span><div><h3>移出位置和系统不一样</h3><div class="hint"><b data-nt>' + esc(st.desc || st.item) + '</b>' +
+      modal('<div class="tmiss tsrcdiff"><div class="tmiss-h"><span class="tmiss-ic">?</span><div><h3>移出位置与系统记录不符</h3><div class="hint"><b data-nt>' + esc(st.desc || st.item) + '</b>' +
         (st.bok ? (st.batch ? '（批次 <span data-nt>' + esc(st.batch) + '</span>）' : '（不分批次）') : '') + ' 系统记在 <b data-nt>' + esc(ls.join('、')) + '</b>，不在你扫的来源 <b data-nt>' + esc(st.src) + '</b>。' +
         (ls.length > 1 ? '这几个库位' : ' <b data-nt>' + esc(ls[0]) + '</b> ') + '还有这个货吗？</div></div></div>' +
-        '<div class="tovb">' + ls.map(function (l, i) { return '<button class="btn save" data-alty="' + i + '">' + esc(l) + ' 没有了（系统把 ' + esc(l) + ' 改成 ' + esc(st.dst) + '）</button>'; }).join('') +
-        '<button class="btn ghost" id="altN">' + esc(ls.join('、')) + ' 还有（都记着）</button><button class="btn ghost" id="altC">取消</button></div></div>', function (m) {
+        '<div class="tovb">' + ls.map(function (l, i) { return '<button class="btn save" data-alty="' + i + '">' + esc(l) + ' 已不在（系统将 ' + esc(l) + ' 改成 ' + esc(st.dst) + '）</button>'; }).join('') +
+        '<button class="btn ghost" id="altN">' + esc(ls.join('、')) + ' 还有（保留记录）</button><button class="btn ghost" id="altC">取消</button></div></div>', function (m) {
           Array.prototype.forEach.call(m.querySelectorAll('[data-alty]'), function (b) { b.onclick = function () { closeModal(); st.alt = ls[+b.dataset.alty]; submit(true); }; });
           $('#altN', m).onclick = function () { closeModal(); st.alt = ''; submit(true); };
           $('#altC', m).onclick = function () { closeModal(); st.alt = ''; draw(); };
@@ -3132,21 +3132,21 @@
         var ago = function (x) { return x.mins < 1 ? '刚刚' : x.mins + ' 分钟前'; };
         // v1.9.13 一条一条勾：勾了 = 已经不在（移走），没勾 = 还在（一起放）
         // v1.9.25 防看错规格：规格标黄；刚放进来的（2 小时内）要点两次才算不在；同款不同规格特别提醒
-        modal('<div class="tmiss"><div class="tmiss-h"><span class="tmiss-ic">!</span><div><h3>库位 ' + esc(st.dst) + ' 系统里还有未组托货</h3><div class="hint">新托盘放进去之前，请看一下：<b>已经不在的打勾</b>，没勾的当作还在</div></div></div>' +
-          '<div class="tovnew">你放进去的：<b>' + specHtml(st.desc || st.item) + '</b></div>' +
+        modal('<div class="tmiss"><div class="tmiss-h"><span class="tmiss-ic">!</span><div><h3>库位 ' + esc(st.dst) + ' 系统中仍有未组托货</h3><div class="hint">新托盘放进去之前，请看一下：<b>已经不在的打勾</b>，没勾的当作还在</div></div></div>' +
+          '<div class="tovnew">本次放入：<b>' + specHtml(st.desc || st.item) + '</b></div>' +
           '<ul class="tover">' + o.map(function (x, i) {
             return '<li' + (x.recent ? ' class="recent"' : '') + '><label class="tovl"><input type="checkbox" data-ov="' + i + '"><span class="tovt"><b>' + specHtml(x.desc || x.item) + '</b><span>' + esc(x.item) + (x.base ? ' · 批次 ' + esc(x.base) : '') + (x.exp ? ' · 到期 <b>' + esc(x.exp) + '</b>' : '') + '</span>' +
-              (x.recent ? '<span class="tovr">🆕 ' + esc(String(x.at).slice(-5)) + (x.by ? ' ' + esc(x.by) : '') + ' 刚放（' + ago(x) + '）</span>' : '') +
-              (x.twin ? '<span class="tovtw">⚠ ' + x.twin + '，看清楚</span>' : '') +
+              (x.recent ? '<span class="tovr">🆕 ' + esc(String(x.at).slice(-5)) + (x.by ? ' ' + esc(x.by) : '') + ' 刚放入（' + ago(x) + '）</span>' : '') +
+              (x.twin ? '<span class="tovtw">⚠ ' + x.twin + '，请核对</span>' : '') +
               '<span class="tovw" hidden></span></span><em class="tovs">还在</em></label></li>';
           }).join('') + '</ul>' +
-          '<div class="tovb"><div class="tovm" id="ovM"></div><button class="btn save" id="ovP">先勾选已经不在的货</button><button class="btn ghost" id="ovY">全部都不在了（全部移走）</button><button class="btn ghost" id="ovN">全部还在，一起放</button><button class="tbtn" id="ovC">取消，先不提交</button></div></div>', function (m) {
+          '<div class="tovb"><div class="tovm" id="ovM"></div><button class="btn save" id="ovP">先勾选已经不在的货</button><button class="btn ghost" id="ovY">全部都不在了（全部移走）</button><button class="btn ghost" id="ovN">全部仍在，一起放入</button><button class="tbtn" id="ovC">取消，先不提交</button></div></div>', function (m) {
             var cbs = m.querySelectorAll('[data-ov]'), bp = $('#ovP', m), allOk = false;
             var ids = function (on) { var r = []; Array.prototype.forEach.call(cbs, function (c) { if (c.checked === on) r.push(ovKey(o[+c.dataset.ov])); }); return r; };
             var upd = function () {
               var n = 0; Array.prototype.forEach.call(cbs, function (c) { if (c.checked) n++; var li = c.closest('li'); li.classList.toggle('gone', c.checked); li.querySelector('.tovs').textContent = c.checked ? '不在了' : '还在'; });
               bp.classList.toggle('off', !n); if (n) $('#ovM', m).textContent = '';
-              bp.textContent = !n ? '先勾选已经不在的货' : n === cbs.length ? '✓ 移走全部 ' + n + ' 条' : '✓ 移走勾选的 ' + n + ' 条，其余 ' + (cbs.length - n) + ' 条还在';
+              bp.textContent = !n ? '先勾选已经不在的货' : n === cbs.length ? '✓ 清出全部 ' + n + ' 条' : '✓ 清出已勾选的 ' + n + ' 条，其余 ' + (cbs.length - n) + ' 条仍在';
             };
             Array.prototype.forEach.call(cbs, function (c) {
               c.onchange = function () {
@@ -3159,7 +3159,7 @@
               };
             });
             bp.onclick = function () {         // v1.9.15 没勾就点：说清楚要做什么（以前按钮是灰的，点了没反应）
-              if (!Array.prototype.some.call(cbs, function (c) { return c.checked; })) { errBeep(); $('#ovM', m).textContent = '还没有勾选。请在上面勾选已经不在的货；如果全部都还在，点「全部还在，一起放」。'; return; }
+              if (!Array.prototype.some.call(cbs, function (c) { return c.checked; })) { errBeep(); $('#ovM', m).textContent = '还没有勾选。请在上面勾选已经不在的货；如果全部都还在，点「全部仍在，一起放入」。'; return; }
               closeModal(); save(true, ids(true), ids(false));
             };
             $('#ovY', m).onclick = function () {
@@ -3187,7 +3187,7 @@
       IDB.put(r).then(function () {
         recent.unshift({ id: r.transferId, src: r.source, dst: r.dest, bc: r.barcode, item: r.itemCode || (r.newName ? '新商品' : r.barcode), desc: r.itemCode || r.newName ? r.desc : '', qty: r.qty, batch: r.batch || '', bexp: r.bexp || '', t: hhmm(r.clientTime), status: '待同步' });
         LS.set('trecent', recent.slice(0, 20));
-        beep(); toast(navigator.onLine === false ? '✓ 已保存到手机，联网后自动上传' : '✓ 已提交');
+        beep(); toast(navigator.onLine === false ? '✓ 已保存到本机，联网后自动同步' : '✓ 已提交');
         busy = false;
         var done = '✓ 已提交：' + (r.itemCode || (r.newName ? '新商品 ' + r.newName : r.barcode)) + (r.batch ? '（到期 ' + (r.bexp || '—') + '）' : st.bnew ? '（新批次，不分批次）' : '') + '  ' + (r.source || '（无来源）') + ' → ' + r.dest + (r.qty ? ' · 数量 ' + r.qty : '');
         reset(false);
@@ -3978,7 +3978,7 @@
       '按库位顺序': 'စင်နေရာ အစီအစဉ်အတိုင်း', 'DO 号': 'DO နံပါတ်', '日期': 'ရက်စွဲ', '客户': 'ဖောက်သည်', '行数': 'အကြောင်းရေ', '行': 'ကြောင်း', '合计': 'စုစုပေါင်း', '打印': 'ပုံနှိပ်ချိန်',
       '库位': 'စင်နေရာ', '原序号': 'မူလ အမှတ်', '批次号': 'အသုတ်နံပါတ်', '条码': 'ဘားကုဒ်', '商品名称': 'ပစ္စည်းအမည်', '数量': 'အရေအတွက်', '规格': 'ထုပ်ပိုးပုံ', '单位': 'ယူနစ်',
       '无库位': 'စင်နေရာ မရှိ',
-      '贴了托盘标签的货，拣货单上写了这个托盘号才能拿；没写就不能碰。找不到或号码对不上，叫仓管。': 'ပယ်လက်တံဆိပ် ကပ်ထားသော ပစ္စည်းကို ဤစာရင်းတွင် ထိုပယ်လက်နံပါတ် ရေးထားမှသာ ယူပါ။ မရေးထားလျှင် မထိရ။ ရှာမတွေ့လျှင် သို့မဟုတ် နံပါတ်မကိုက်လျှင် ဂိုဒေါင်မှူးကို ခေါ်ပါ။', '拣货人': 'ထုတ်သူ', '复核人': 'ပြန်စစ်သူ', '第': 'စာမျက်နှာ', '张': '' };
+      '贴了托盘标签的货，拣货单上写了这个托盘号才能拿；没写就不能碰。找不到或号码对不上，请异常上报。': 'ပယ်လက်တံဆိပ် ကပ်ထားသော ပစ္စည်းကို ဤစာရင်းတွင် ထိုပယ်လက်နံပါတ် ရေးထားမှသာ ယူပါ။ မရေးထားလျှင် မထိရ။ ရှာမတွေ့လျှင် သို့မဟုတ် နံပါတ်မကိုက်လျှင် ဂိုဒေါင်မှူးကို ခေါ်ပါ။', '拣货人': 'ထုတ်သူ', '复核人': 'ပြန်စစ်သူ', '第': 'စာမျက်နှာ', '张': '' };
     /** 规格 / 单位 → 缅甸语：1箱=12瓶 → 1 သေတ္တာ = 12 ပုလင်း（“提”另外翻；只换单位字，数字和 KG/ML 不动） */
     var PP_UNIT = { '提': 'တွဲ', '单': 'တစ်ခုချင်း' };
     function ppUnitMy(v) {
@@ -4015,7 +4015,7 @@
               '<td class="c2">' + esc(x.row || '') + '</td><td>' + esc(x.batch || '') + '</td><td>' + esc(x.barcode || '') + '</td><td>' + esc(x.desc || '') + '</td><td class="n"><b>' + esc(x.qty) + '</b></td><td class="ppspec">' + esc(U(x.spec)) + '</td><td class="ppuom">' + esc(U(x.uom)) + '</td></tr>';
           }).join('') + '</tbody></table>' +
           '<div class="pplg">' + L('拿货的库位请圈起来；本批次找不到货才拿「备用」，拿了要把批次和库位都圈起来。虚线框 = 系统还没核实的库位') + '</div>' +
-          '<div class="pplg pprule">' + L('贴了托盘标签的货，拣货单上写了这个托盘号才能拿；没写就不能碰。找不到或号码对不上，叫仓管。') + '</div>' +
+          '<div class="pplg pprule">' + L('贴了托盘标签的货，拣货单上写了这个托盘号才能拿；没写就不能碰。找不到或号码对不上，请异常上报。') + '</div>' +
           '<div class="ppf"><span>' + L('拣货人') + '：________________</span><span>' + L('复核人') + '：________________</span><span>DO ' + esc(D.doNo) + ' · ' + L('第') + ' ' + (di + 1) + ' / ' + docs.length + ' ' + L('张') + '</span></div></section>';
       }).join('');
       var box = $('#printArea'); if (!box) { box = document.createElement('div'); box.id = 'printArea'; document.body.appendChild(box); }
@@ -4208,7 +4208,7 @@
   function myDay(v, end) { var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(v || ''); if (!m) return null; return Date.UTC(+m[1], m[2] - 1, +m[3]) - 8 * 3600e3 + (end ? 864e5 - 1 : 0); }
   function myToday(dd) { var d = new Date(Date.now() + 8 * 3600e3 + (dd || 0) * 864e5); return d.toISOString().slice(0, 10); }
   function viewRecords() {
-    setBar('库位管理后台 · Warehouse Location Records' + (OLDN_ON ? '（原：库位记录后台）' : ''), false);
+    setBar('库位管理后台 · Warehouse Location Records' + (OLDN_ON ? '（原：库位管理后台）' : ''), false);
     document.body.classList.add('wide');
     var R = { tab: LS.get('rcTab', 'tr'), tr: null, pk: null, err: '', busy: false,
       trF: { status: '待处理', q: '', src: '', dst: '', from: myToday(-30), to: myToday(0), hist: '' },
@@ -4217,6 +4217,7 @@
       R.err = '';
       if (which === 'of') return ofLoad();
       if (which === 'is') return isLoad(false);
+      if (which === 'kl') return klLoad(false);
       if (which === 'grn') { R.grn = R.grn || { list: [] }; return api({ action: 'rcPlTasks' }, true).then(function (d) { R.grn.tasks = d.tasks; draw(); acLoad(); }, function (e) { R.err = e.network ? '网络不可用，请检查网络后再试' : e.message; draw(); }); }
       var a = which === 'pk' ? 'rcPickLocs' : which === 'lm' ? 'rcLmList' : 'rcTransfers';
       return api({ action: a }, true).then(function (d) { R[which] = d; draw(); }, function (e) { R.err = e.network ? '网络不可用，请检查网络后点“刷新”' : e.message; draw(); });
@@ -4393,7 +4394,7 @@
     function trHtml() {
       var f = R.trF, d = R.tr, c = d ? d.counts : {}, rows = d ? trRows() : [];
       var h = '<div class="rbar">' + (f.hist ? '<b>箱码 ' + esc(f.hist) + ' 的移库历史（' + rows.length + ' 笔，按时间）</b> <button class="tbtn" id="trHx">‹ 返回全部记录</button>' :
-        [['待处理', '待办'], ['有问题', '有问题'], ['已完成', '已完成'], ['all', '全部']].map(function (t) { return '<button class="rtab' + (f.status === t[0] ? ' on' : '') + '" data-st="' + t[0] + '">' + t[1] + ' ' + (t[0] === 'all' ? (c.all || 0) : (c[t[0]] || 0)) + '</button>'; }).join('')) + '</div>';
+        [['待处理', '待办'], ['有问题', '异常'], ['已完成', '已完成'], ['all', '全部']].map(function (t) { return '<button class="rtab' + (f.status === t[0] ? ' on' : '') + '" data-st="' + t[0] + '">' + t[1] + ' ' + (t[0] === 'all' ? (c.all || 0) : (c[t[0]] || 0)) + '</button>'; }).join('')) + '</div>';
       if (!f.hist) h += '<div class="rfil"><label>SKU / 箱码 <input id="trQ" value="' + esc(f.q) + '"></label><label>From Location <input id="trS" value="' + esc(f.src) + '"></label><label>To Location <input id="trD" value="' + esc(f.dst) + '"></label>' +
         '<label>日期 <input type="date" id="trF" value="' + esc(f.from) + '"></label><label>到 <input type="date" id="trT" value="' + esc(f.to) + '"></label>' +
         '<label class="hint"><input type="checkbox" id="trPw"' + (f.plw ? ' checked' : '') + '> 只看未组托货放进托盘库位（override）</label><button class="tbtn" id="trR">刷新</button><button class="btn save rexp" id="trX"' + (rows.length ? '' : ' disabled') + '>⬇ 导出 Excel（' + rows.length + '）</button></div>' +
@@ -4411,7 +4412,7 @@
             '<td>' + (x.plWarn ? '<div class="rlbad">⚠ 托盘库位：' + esc(x.plWarn) + '</div>' : '') + (!x.locResult ? '<span class="hint">—（旧记录）</span>' : /^已更新/.test(x.locResult) ? '<span class="rlok">✓ ' + esc(x.locResult) + '</span>' : '<span class="rlbad">⚠ ' + esc(x.locResult) + '</span>') + '</td>' +
             '<td><button class="tbtn" data-ph="' + esc(x.id) + '">📷 查看</button></td>' +
             '<td class="rmeta">' + esc(x.time) + '<br>' + esc(x.op) + (x.edits ? '<br><span class="red">已修改 ' + x.edits + ' 次（' + esc(x.editedAt) + '）</span>' : '') + '</td>' +
-            '<td><span class="rst ' + (ST[x.status] || '') + '">' + esc(x.status === '待处理' ? '待办' : x.status) + '</span>' + (x.note || x.processedBy ? '<div class="rmeta">' + esc(x.note) + (x.processedBy ? '<br>' + esc(x.processedBy) + ' ' + esc(x.processedAt) : '') + '</div>' : '') + '</td>' +
+            '<td><span class="rst ' + (ST[x.status] || '') + '">' + esc(x.status === '待处理' ? '待办' : x.status === '有问题' ? '异常' : x.status) + '</span>' + (x.note || x.processedBy ? '<div class="rmeta">' + esc(x.note) + (x.processedBy ? '<br>' + esc(x.processedBy) + ' ' + esc(x.processedAt) : '') + '</div>' : '') + '</td>' +
             '<td class="rops">' + (p || i ? '<button class="btn save" data-done="' + esc(x.id) + '">✓ 已完成</button>' : '') + (p ? '<button class="tbtn red" data-issue="' + esc(x.id) + '">有问题</button>' : '') +
             (i ? '<button class="tbtn" data-re="' + esc(x.id) + '">重新打开</button>' : '') + '<button class="tbtn rdel" data-del="' + esc(x.id) + '">🗑 删除</button></td></tr>';
         }).join('') + '</tbody></table></div>';
@@ -4927,10 +4928,138 @@
         };
       });
     }
+    // 拣货 + 装车复核 测试版（docs/36 v2，AWMS）：开关「拣货测试版」开着才有这一页（打开后台时先问一次；关着 = 和原来一样）
+    var KL_REASONS = ['缺货未装', '客户变更订单', '已复核确认'];
+    function klLoad(probe) {
+      var K = R.kl = R.kl || { pkSel: {}, ldSel: {}, vehicle: '', driver: '' };
+      return Promise.all([api({ action: 'rcPkTasks' }, true), api({ action: 'rcLdTasks' }, true), api({ action: 'rcPkDos' }, true), api({ action: 'rcLdAcDos', mod: 'ld' }, true)]).then(function (a) {
+        K.pk = a[0].tasks || []; K.ld = a[1].tasks || []; K.pkDos = a[2].dos || []; K.ldDos = a[3].dos || []; R.klOn = true; draw();
+      }, function (e) {
+        if (probe) return;
+        if (!R.klOn || /未知操作/.test(e.message || '')) { R.klOn = false; R.tab = 'tr'; LS.set('rcTab', 'tr'); draw(); return load('tr'); }
+        R.err = e.network ? '网络不可用，请检查网络后再试' : e.message; draw();
+      });
+    }
+    function klDos(list, sel, attr) {
+      return '<div class="rtw"><table class="rtab-t"><thead><tr><th></th><th>送货单号</th><th>日期</th><th>客户</th><th>行数</th><th>已建任务</th></tr></thead><tbody>' +
+        (list.length ? list.map(function (d) {
+          return '<tr><td>' + (d.inTask ? '' : '<input type="checkbox" data-' + attr + '="' + esc(d.doNo) + '"' + (sel[d.doNo] ? ' checked' : '') + '>') + '</td><td><b>' + esc(d.doNo) + '</b></td><td>' + esc(d.date) + '</td><td>' + esc(d.customer) + '</td><td>' + d.lines + '</td><td>' + (d.inTask ? esc(d.inTask) : '<span class="hint">—</span>') + '</td></tr>';
+        }).join('') : '<tr><td colspan="6" class="hint">没有已同步、未关闭的送货单。</td></tr>') + '</tbody></table></div>';
+    }
+    function klHtml() {
+      var K = R.kl || {}, pk = K.pk || [], ld = K.ld || [];
+      var h = '<div class="rbar"><button class="tbtn" id="klRe">刷新</button><span class="hint">测试版：送货单来自 AutoCount 同步（每 5 分钟）。拣货、装车复核在 PDA 上做；待仓管放行的装车复核任务也可以在这里审核放行。</span></div>';
+      h += '<div class="inb"><div class="inb-h"><b>从已同步送货单建拣货任务</b><span class="hint">每张送货单建一个拣货任务。</span></div>' + klDos(K.pkDos || [], K.pkSel, 'klpk') +
+        '<div class="inb-act"><button class="btn save" id="klPkGo">建拣货任务</button></div></div>';
+      h += '<div class="inb"><div class="inb-h"><b>从已同步送货单建装车复核任务</b><span class="hint">同一车的几张送货单合成一个装车复核任务（同一商品 + 单位数量相加）。车牌、司机至少填一项。</span></div>' + klDos(K.ldDos || [], K.ldSel, 'klld') +
+        '<div class="inb-act"><label>车牌 <input id="klVeh" maxlength="30" value="' + esc(K.vehicle || '') + '"></label><label>司机 <input id="klDrv" maxlength="40" value="' + esc(K.driver || '') + '"></label><button class="btn save" id="klLdGo">建装车复核任务</button></div></div>';
+      if (K.msg) h += '<p class="' + (K.bad ? 'err' : 'rlok') + '"><b>' + esc(K.msg) + '</b></p>';
+      h += '<div class="inb"><div class="inb-h"><b>拣货任务</b></div><div class="rtw"><table class="rtab-t"><thead><tr><th>任务号</th><th>送货单号</th><th>客户</th><th>进度</th><th>状态</th></tr></thead><tbody>' +
+        (pk.length ? pk.map(function (t) { return '<tr><td><b>' + esc(t.id) + '</b></td><td>' + esc(t.dos) + '</td><td>' + esc(t.customer) + '</td><td>' + t.itemsDone + ' / ' + t.itemCount + ' 项</td><td>' + esc(t.statusText) + '</td></tr>'; }).join('') : '<tr><td colspan="5" class="hint">没有拣货任务。</td></tr>') + '</tbody></table></div></div>';
+      h += '<div class="inb"><div class="inb-h"><b>装车复核任务</b></div><div class="rtw"><table class="rtab-t"><thead><tr><th>任务号</th><th>车牌 / 司机</th><th>送货单号</th><th>客户</th><th>进度</th><th>状态</th><th></th></tr></thead><tbody>' +
+        (ld.length ? ld.map(function (t) {
+          return '<tr><td><b>' + esc(t.id) + '</b></td><td>' + esc([t.vehicle, t.driver].filter(Boolean).join(' / ')) + '</td><td>' + esc(t.dos) + '</td><td>' + esc(t.customer) + '</td><td>已复核 ' + t.itemsDone + ' / ' + t.itemCount + ' 项</td><td>' +
+            (t.needsRelease ? '<span class="rlbad">' + esc(t.statusText) + '</span>' : esc(t.statusText) + (t.releaseReason ? '<div class="hint">放行原因：' + esc(t.releaseReason) + '</div>' : '')) + '</td><td>' + (t.needsRelease ? '<button class="btn save" data-klrel="' + esc(t.id) + '">装车差异审核</button>' : '') + '</td></tr>';
+        }).join('') : '<tr><td colspan="7" class="hint">没有装车复核任务。</td></tr>') + '</tbody></table></div></div>';
+      return h + rcnHtml();
+    }
+    // ---- 库存对账（测试版，P-022）：AutoCount 有库存而 AWMS 无库位 / AWMS 有记录而 AutoCount 该批次为 0 / AutoCount 负库存。只读，不比数量
+    var RCN_KINDS = ['AC_ONLY', 'AWMS_ONLY', 'AC_NEGATIVE'];
+    function rcnHtml() {
+      var C = R.rcn || {}, h = '<div class="inb"><div class="inb-h"><b>库存对账</b><span class="hint">AutoCount 库存与 AWMS 库位记录、在库托盘逐批次对照（只读，不比数量）。</span></div><div class="inb-act"><button class="btn save" id="rcnGo"' + (C.busy ? ' disabled' : '') + '>' + (C.busy ? '正在加载…' : '生成对账报告') + '</button>' + (C.rows ? '<button class="tbtn" id="rcnCsv">导出 CSV</button>' : '') + '</div>';
+      if (C.err) h += '<p class="err"><b>' + esc(C.err) + '</b></p>';
+      if (!C.rows) return h + '</div>';
+      if (C.acError) h += '<p class="err"><b>' + esc(C.acError) + '</b></p>';
+      h += '<p class="hint">生成时间 ' + esc(C.atText) + ' · AutoCount 有库存批次 ' + C.summary.acItems + ' · AWMS 有记录批次 ' + C.summary.awmsItems + '</p>';
+      RCN_KINDS.forEach(function (k) {
+        var list = C.rows.filter(function (r) { return r.kind === k; });
+        h += '<div class="inb-h"><b>' + esc(C.kinds[k]) + ' · ' + list.length + ' 项</b></div><div class="rtw"><table class="rtab-t"><thead><tr><th>Item Code</th><th>品名</th><th>批次号</th><th>AutoCount 库存</th><th>AutoCount 库位</th><th>AWMS 库位</th><th>托盘</th></tr></thead><tbody>' +
+          (list.length ? list.slice(0, 500).map(function (r) { return '<tr><td>' + esc(r.item) + '</td><td>' + esc(r.desc) + '</td><td>' + esc(r.batch) + '</td><td>' + (r.acQty == null ? '' : esc(r.acQty + ' ' + r.acUom)) + '</td><td>' + esc(r.acLocs) + '</td><td>' + esc(r.awmsLocs) + '</td><td>' + esc(r.pallets) + '</td></tr>'; }).join('') : '<tr><td colspan="7" class="hint">无</td></tr>') +
+          (list.length > 500 ? '<tr><td colspan="7" class="hint">只显示前 500 项，完整内容请导出 CSV</td></tr>' : '') + '</tbody></table></div>';
+      });
+      return h + '</div>';
+    }
+    function rcnCsv() {
+      var C = R.rcn || {}, q = function (v) { v = v == null ? '' : String(v); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
+      var lines = [['类别', 'Item Code', '品名', '批次号', 'AutoCount 库存', '单位', 'AutoCount 库位', 'AWMS 库位', '托盘'].join(',')].concat((C.rows || []).map(function (r) { return [C.kinds[r.kind], r.item, r.desc, r.batch, r.acQty == null ? '' : r.acQty, r.acUom, r.acLocs, r.awmsLocs, r.pallets].map(q).join(','); }));
+      download(new Blob(['\ufeff' + lines.join('\r\n')], { type: 'text/csv' }), '库存对账 ' + myToday(0) + '.csv');
+    }
+    function rcnBind() {
+      var C = R.rcn = R.rcn || {}, go = $('#rcnGo'), csv = $('#rcnCsv');
+      if (go) go.onclick = function () {
+        C.busy = true; C.err = ''; draw();
+        api({ action: 'rcRecon' }, true).then(function (d) { C.busy = false; C.rows = d.rows || []; C.kinds = d.kinds || {}; C.summary = d.summary || {}; C.acError = d.acError || ''; C.atText = new Date(d.at).toLocaleString('en-GB', { timeZone: 'Asia/Kuala_Lumpur' }); draw(); },
+          function (e) { C.busy = false; C.err = '对账报告生成未成功：' + (e.network ? '网络未连接' : e.message); draw(); });
+      };
+      if (csv) csv.onclick = rcnCsv;
+    }
+    function klCreate(list, make, done) {
+      var i = 0, made = [];
+      var next = function () {
+        if (i >= list.length) return done(made, '');
+        return api(make(list[i++]), true).then(function (d) {
+          if (d.status !== 'created') return done(made, d.errors ? d.errors.join('；') : d.status === 'dupDO' ? '送货单已有任务：' + (d.dos || []).map(function (x) { return x.doNo + ' → ' + x.task; }).join('、') : (d.message || '没有建成'));
+          made.push(d.taskId); next();
+        }, function (e) { done(made, e.network ? '网络不可用' : e.message); });
+      };
+      next();
+    }
+    function klBind() {
+      var K = R.kl || {};
+      var re = $('#klRe'); if (re) re.onclick = function () { K.msg = ''; klLoad(false); };
+      rcnBind();
+      Array.prototype.forEach.call(app.querySelectorAll('[data-klpk]'), function (b) { b.onchange = function () { K.pkSel[b.dataset.klpk] = b.checked; }; });
+      Array.prototype.forEach.call(app.querySelectorAll('[data-klld]'), function (b) { b.onchange = function () { K.ldSel[b.dataset.klld] = b.checked; }; });
+      var v = $('#klVeh'), dv = $('#klDrv'); if (v) v.oninput = function () { K.vehicle = v.value; }; if (dv) dv.oninput = function () { K.driver = dv.value; };
+      var sel = function (o) { return Object.keys(o).filter(function (k) { return o[k]; }); };
+      var pg = $('#klPkGo'); if (pg) pg.onclick = function () {
+        var dos = sel(K.pkSel); if (!dos.length) { K.msg = '请选择送货单（DO）'; K.bad = true; return draw(); }
+        pg.disabled = true;
+        klCreate(dos, function (d) { return { action: 'rcPkNew', importId: 'PKN-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6), doNo: d }; }, function (made, err) {
+          K.pkSel = {}; K.msg = (made.length ? '已建拣货任务：' + made.join('、') : '') + (err ? (made.length ? '；' : '') + err : ''); K.bad = !!err; klLoad(false);
+        });
+      };
+      var lg = $('#klLdGo'); if (lg) lg.onclick = function () {
+        var dos = sel(K.ldSel); if (!dos.length) { K.msg = '请选择送货单（DO）'; K.bad = true; return draw(); }
+        if (!String(K.vehicle || '').trim() && !String(K.driver || '').trim()) { K.msg = '请填写车牌或司机'; K.bad = true; return draw(); }
+        lg.disabled = true;
+        klCreate([dos], function (d) { return { action: 'rcLdFromAc', mod: 'ld', importId: 'LDN-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6), doNos: d, vehicle: K.vehicle, driver: K.driver }; }, function (made, err) {
+          if (made.length) { K.ldSel = {}; K.vehicle = ''; K.driver = ''; }
+          K.msg = (made.length ? '已建装车复核任务：' + made.join('、') : '') + (err ? (made.length ? '；' : '') + err : ''); K.bad = !!err; klLoad(false);
+        });
+      };
+      Array.prototype.forEach.call(app.querySelectorAll('[data-klrel]'), function (b) {
+        b.onclick = function () {
+          var id = b.dataset.klrel; b.disabled = true;
+          api({ action: 'rcLdTask', taskId: id }, true).then(function (d) {
+            b.disabled = false;
+            var c = function (n) { return d.itemCols.indexOf(n); };
+            var cnt = function (key) { return (d.txns || []).filter(function (t) { return t[1] === key; }).reduce(function (a, t) { return a + (Number(t[2]) || 0); }, 0); };
+            var rows = (d.items || []).filter(function (x) { return x[c('st')] !== 'ok'; });
+            modal('<h3 style="margin-top:0">装车差异审核 · ' + esc(id) + '</h3><p class="hint">' + esc([d.task.vehicle, d.task.driver].filter(Boolean).join(' / ') + ' · ' + d.task.dos) + '</p>' +
+              '<div class="rtw"><table class="rtab-t"><thead><tr><th>商品</th><th>单位</th><th>应装</th><th>已复核</th><th></th></tr></thead><tbody>' + rows.map(function (x) {
+                var tag = []; if (x[c('noScan')]) tag.push('未扫码拣货'); if (x[c('pkShort')]) tag.push('拣货已确认短拣');
+                return '<tr><td>' + esc(x[c('desc')]) + '<div class="hint">' + esc(x[c('code')]) + '</div></td><td>' + esc(x[c('uom')]) + '</td><td>' + esc(x[c('req')]) + '</td><td><b>' + esc(Math.round(cnt(x[c('key')]) * 1000) / 1000) + '</b></td><td>' + esc(tag.join('；')) + '</td></tr>';
+              }).join('') + '</tbody></table></div><p><b>请选择放行原因</b></p><div class="row">' + KL_REASONS.map(function (r) { return '<button class="btn save" data-klr="' + esc(r) + '">' + esc(r) + '</button>'; }).join('') + '</div><p class="err" id="klErr" hidden></p><div class="row"><button class="btn ghost" id="klX">返回</button></div>', function (m) {
+              $('#klX', m).onclick = closeModal;
+              Array.prototype.forEach.call(m.querySelectorAll('[data-klr]'), function (rb) {
+                rb.onclick = function () {
+                  rb.disabled = true;
+                  api({ action: 'rcLdRelease', taskId: id, reason: rb.dataset.klr }, true).then(function (r) {
+                    if (r.status !== 'ok' && r.status !== 'already') { rb.disabled = false; var er = $('#klErr', m); er.textContent = r.message || '没有放行'; er.hidden = false; return; }
+                    closeModal(); toast('已放行 · ' + id, 2000); klLoad(false);
+                  }, function (e) { rb.disabled = false; var er = $('#klErr', m); er.textContent = e.network ? '网络不可用' : e.message; er.hidden = false; });
+                };
+              });
+            });
+          }, function (e) { b.disabled = false; toast(e.network ? '网络不可用' : e.message, 3000); });
+        };
+      });
+    }
     function draw() {
       var y = window.scrollY;
-      app.innerHTML = '<div class="mods rcmods">' + [['tr', 'Shelf Transfer · 移库记录'], ['pk', 'Picking Location Discrepancy · 拣货库位差异'], ['lm', 'Item Locations · 库位主档'], ['grn', '托盘 · 收货任务 / GRN']].concat(R.isOn ? [['is', '异常上报 · 待处理' + (R.isOpen ? ' ' + R.isOpen : '')]] : []).concat(OF_ON ? [['of', '系统设置' + OLDN('办公室 · Office')]] : []).map(function (t) { return '<button class="mod' + (R.tab === t[0] ? ' on' : '') + '" data-tab="' + t[0] + '">' + t[1] + '</button>'; }).join('') + '<a class="mod wcgo" href="#/wc">📊 库位中控台（平板）</a><button class="mod wcgo" id="plExp">🏷 导出托盘（AWMS）</button></div>' +
-        (R.err ? '<p class="err">' + esc(R.err) + '</p>' : '') + '<div class="card rcard">' + (R.tab === 'tr' ? trHtml() : R.tab === 'lm' ? lmHtml() : R.tab === 'grn' ? grnHtml() : R.tab === 'of' ? ofHtml() : R.tab === 'is' ? isHtml() : pkHtml()) + '</div>';
+      app.innerHTML = '<div class="mods rcmods">' + [['tr', 'Shelf Transfer · 移库记录'], ['pk', 'Picking Location Discrepancy · 拣货库位差异'], ['lm', 'Item Locations · 库位主档'], ['grn', '托盘 · 收货任务 / GRN']].concat(R.isOn ? [['is', '异常上报 · 待处理' + (R.isOpen ? ' ' + R.isOpen : '')]] : []).concat(R.klOn ? [['kl', '拣货 / 装车复核（测试版）']] : []).concat(OF_ON ? [['of', '系统设置' + OLDN('办公室 · Office')]] : []).map(function (t) { return '<button class="mod' + (R.tab === t[0] ? ' on' : '') + '" data-tab="' + t[0] + '">' + t[1] + '</button>'; }).join('') + '<a class="mod wcgo" href="#/wc">📊 库位中控台（平板）</a><button class="mod wcgo" id="plExp">🏷 导出托盘（AWMS）</button></div>' +
+        (R.err ? '<p class="err">' + esc(R.err) + '</p>' : '') + '<div class="card rcard">' + (R.tab === 'tr' ? trHtml() : R.tab === 'lm' ? lmHtml() : R.tab === 'grn' ? grnHtml() : R.tab === 'of' ? ofHtml() : R.tab === 'is' ? isHtml() : R.tab === 'kl' ? klHtml() : pkHtml()) + '</div>';
       window.scrollTo(0, y); bind();
     }
     function bind() {
@@ -4944,6 +5073,7 @@
       };
       if (R.tab === 'of') return ofBind();
       if (R.tab === 'is') return isBind();
+      if (R.tab === 'kl') return klBind();
       var inp = function (id, obj, k) { var e = $('#' + id); if (!e) return; e.oninput = e.onchange = function () { obj[k] = e.value; var pos = e.selectionStart; draw(); var n = $('#' + id); if (n) { n.focus(); try { n.setSelectionRange(pos, pos); } catch (x) { } } }; };
       if (R.tab === 'grn') {
         var pfg = $('#pfGo'); if (pfg) { var pfl = $('#pfL'), goPf = function () { var l = pfl.value.toUpperCase().replace(/\s+/g, ''); if (!/^PLT-\d{4}-\d{5}$/.test(l)) { R.grn.pf = { lpn: l, msg: '托盘码要写成 PLT-2611-00001', bad: true }; return draw(); } pfLoad(l); }; pfg.onclick = goPf; pfl.onkeydown = function (e) { if (e.key === 'Enter') goPf(); }; }
@@ -5071,6 +5201,7 @@
     };
     draw(); load(R.tab);
     if (R.tab !== 'is') isLoad(true);        // 异常上报开着才出现那一页
+    if (R.tab !== 'kl') klLoad(true);        // 拣货测试版开着才出现那一页
   }
   // =====================================================================
   // v1.9 平板中控台（库位记录后台电脑 / 平板，#/wc）：数据从 Supabase 读（快），处理还是写回表格（正本）。样式按 AWMS 1.0（没有托盘码：库位上记“商品 + 批次”）
@@ -5262,7 +5393,7 @@
           return '<tr><td><b class="' + (r.dl < 30 ? 'red' : '') + '">' + esc(r.b.exp) + '</b> <span class="hint">' + (r.dl < 0 ? '已过期' : r.dl + ' 天') + '</span></td><td>' + esc(r.b.desc) + '<div class="mono hint">' + esc(r.b.item) + '</div></td><td class="mono">' + esc(r.b.base) + withTag(r.b, ' ') + '</td><td>' +
             (l.length ? l.map(function (x) { return '<button class="lnk mono" data-goloc="' + x + '">' + x + '</button>'; }).join(' ') : '<span class="hint">无库位</span>') + '</td></tr>'; }).join('') + '</tbody></table>';
     }
-    var ACT = { BIND: '绑定库位', MOVE: '移库 / 改库位', VERIFY: '核实', REMOVE: '移走', UNDO: '撤回', OVERWRITE: '新托盘覆盖', LEARN: '记住箱码', MERGE: '合并新商品', IMPORT: '导入', INBOUND: '入库单', 'NEW ITEM': '新商品', NOTE: '库位备注' };
+    var ACT = { BIND: '登记库位', MOVE: '移库 / 改库位', VERIFY: '核实库位', REMOVE: '清出', UNDO: '撤销', OVERWRITE: '新托盘覆盖', LEARN: '记住箱码', MERGE: '合并新商品', IMPORT: '导入', INBOUND: '入库单', 'NEW ITEM': '新商品', NOTE: '库位备注' };
     function vLog() {
       var q = W.lf.toUpperCase().replace(/[-\s]/g, ''), L = W.snap.log.filter(function (r) { return !q || r.join(' ').toUpperCase().replace(/[-\s]/g, '').indexOf(q) >= 0 || pyHit(r[3], q); });     // v1.9.24 不用写 -；品名首字母
       return '<div class="wcbar"><input id="wcLf" placeholder="筛选：商品 / 库位 / 人 / 箱码" value="' + esc(W.lf) + '"><span class="hint">最近 ' + W.snap.log.length + ' 条（每次核实、移库、更正都有一条）</span></div>' +
@@ -5516,7 +5647,7 @@
       api({ action: 'ldTasks', mod: mod }, true).then(function (d) { LS.set(CK, d.tasks); note = ''; offline = false; if (location.hash === base) draw(merge(d.tasks, true)); },
         function (e) {
           offline = !!e.network;
-          note = e.network ? (mod === 'pk' ? '没有网络：显示手机里的任务，可以继续拣货，记录联网后自动上传' : '离线：显示上次的任务列表') : e.message;
+          note = e.network ? (mod === 'pk' ? '没有网络：显示手机里的任务，可以继续拣货，记录联网后自动同步' : '离线：显示上次的任务列表') : e.message;
           if (location.hash === base) draw(mod === 'pk' ? merge(LS.get(CK, null), false) : (cached || []));
         });
     }
@@ -5897,7 +6028,7 @@
               s.localDone = true; s.task.status = '已完成'; s.task.submittedBy = operator;
               LDQ.push({ op: 'submit', taskId: id, at: new Date().toISOString() });
               Promise.all([ldPut(s), ldSaveQ()]).then(function () {
-                beep(); toast(ldW(navigator.onLine === false ? '✓ 已完成（没网，联网后自动上传）' : '✓ 已完成'));
+                beep(); toast(ldW(navigator.onLine === false ? '✓ 已完成（没网，联网后自动同步）' : '✓ 已完成'));
                 ldFlush(); location.hash = ldHash(id);
               });
             };
@@ -6608,7 +6739,7 @@
     function peekLoc(loc) {
       api({ action: 'lmFind', code: loc }, true).then(function (d) {
         modal('<div class="ldq"><div class="ldq-h"><span data-nt>' + esc(d.loc) + '</span> · ' + d.rows.length + ' 个商品</div>' +
-          (d.rows.length ? d.rows.map(function (x) { return '<div class="lmpeek"><b data-nt>' + esc(x.desc) + '</b> ' + stChip(x.status) + '<small>批次 <span data-nt>' + esc(x.base || '—') + '</span> · 库存 ' + x.stock + (x.stock && x.uom ? ' ' + esc(x.uom) : '') + (x.status === '已核实' ? ' · ' + esc(x.by) + ' ' + esc(x.at) : ' · ' + esc(x.source)) + '</small></div>'; }).join('') : '<p class="hint">系统里这个库位是空的</p>') +
+          (d.rows.length ? d.rows.map(function (x) { return '<div class="lmpeek"><b data-nt>' + esc(x.desc) + '</b> ' + stChip(x.status) + '<small>批次 <span data-nt>' + esc(x.base || '—') + '</span> · 库存 ' + x.stock + (x.stock && x.uom ? ' ' + esc(x.uom) : '') + (x.status === '已核实' ? ' · ' + esc(x.by) + ' ' + esc(x.at) : ' · ' + esc(x.source)) + '</small></div>'; }).join('') : '<p class="hint">系统中该库位为空</p>') +
           '<div class="row"><button class="btn ghost" id="pkX">关闭</button><button class="btn save" id="pkO">打开这个库位（核实 / 改）</button></div></div>', function (m) {
             $('#pkX', m).onclick = closeModal; $('#pkO', m).onclick = function () { closeModal(); location.hash = '#/lmx/l/' + encodeURIComponent(d.loc); };
           });
@@ -6710,7 +6841,7 @@
           h = L.map(function (x) { return '<button class="card lmgrp" data-i="' + esc(x.item) + '"><b data-nt>' + esc(x.desc) + '</b><span>库存 ' + x.qty + ' ' + esc(x.uom) + '</span><small><span data-nt>' + esc(x.item) + ' · ' + esc(x.base) + '</span> · 到期 ' + esc(x.exp || '—') + '</small></button>'; }).join('');
         } else {
           h = L.map(function (t, i) {
-            if (t.type === '移库：库位覆盖待确认') return '<div class="card lmtask"><div class="lmrec-h"><b>库位里还有旧货？</b><span class="hint">' + esc(t.at) + '</span></div>' +      // v1.8.6
+            if (t.type === '移库：库位覆盖待确认') return '<div class="card lmtask"><div class="lmrec-h"><b>库位里还有未组托货？</b><span class="hint">' + esc(t.at) + '</span></div>' +      // v1.8.6
               '<div class="lmmv">新托盘放到 <b class="pkloc" data-nt>' + esc(t.to) + '</b></div><div class="hint"><span data-nt>' + esc(t.desc || '') + '</span> · ' + esc(t.note) + '</div>' +
               '<p class="hint lmchk">请到 <b data-nt>' + esc(t.to) + '</b> 看一下：未组托货不在了就在库位页里点“不在这里了”</p>' +
               '<div class="lmacts"><button class="btn save" data-go="' + esc(t.to) + '">打开库位 ' + esc(t.to) + '</button><button class="tbtn" data-sk="' + i + '">处理好了</button></div></div>';
@@ -6863,7 +6994,7 @@
       }
     }
     st.tipT = setTimeout(function () {
-      var t = $('#camTip'); if (t && camState === st) t.textContent = '还没扫到？光线暗→开手电筒；条码小→点放大或靠近一点；反光→手机稍微斜一点';
+      var t = $('#camTip'); if (t && camState === st) t.textContent = '未扫描到？光线暗→开手电筒；条码小→点放大或靠近一点；反光→手机稍微斜一点';
     }, 8000);
     var video = $('#camVideo');
     var hi = { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } };
