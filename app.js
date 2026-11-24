@@ -3,7 +3,7 @@
  * 原则：只采集原始资料，不做任何核对。先存手机（离线队列），再上传云端。 */
 (function () {
   'use strict';
-  var VERSION = '1.9.51';
+  var VERSION = '1.9.52';
   var $ = function (s, el) { return (el || document).querySelector(s); };
   var app = $('#app');
 
@@ -1443,6 +1443,14 @@
     var m = /^01(\d{14})/.exec(s);
     return gs1 && m ? m[1] : s;
   }
+  /** v1.9.52 12–14 位纯数字的箱码：EAN-13 / UPC-A / ITF-14 校验位不对 = 没扫清楚（不记住） */
+  function gtinBad(v) {
+    var s = bcClean(v); if (!/^\d{12,14}$/.test(s)) return false;
+    var sum = 0, n = s.length - 1;
+    for (var i = n - 1, w = 3; i >= 0; i--, w = 4 - w) sum += (+s.charAt(i)) * w;
+    return (10 - sum % 10) % 10 !== +s.charAt(n);
+  }
+  var BC_BAD_TXT = '没扫清楚，请再扫一次';
   function lookupItem(code) {
     if (!masters) return null;
     var x = masters.byBarcode[code] || masters.byBarcode[String(code).replace(/^0+/, '')];
@@ -2282,6 +2290,7 @@
     }
     function addLine(bc, r) {
       var B = S.b, item = r ? r.item : '';
+      if (!item && gtinBad(bc)) return say('bad', BC_BAD_TXT + '（' + bc + '）');      // v1.9.52 认不出、校验位不对：多半是没扫清楚
       if (B.lines.some(function (x) { return (item && x.item === item) || (!item && !x.item && x.bc === bc); })) return say('bad', '这个商品已经加了（一托上同一个商品只能有一个批次）');
       var x = { bc: bc, item: item, desc: r ? r.desc : '', uom: r ? r.uom || '' : '', exp: '', ctn: '' };      // v1.9.34 新货贴码不选批次（一律批次待定，后台导 GRN 配）
       B.lines.push(x);
@@ -2339,6 +2348,7 @@
       var full = F.pal.items.length >= 2, q = /[^\x00-\x7f]|\s/.test(v) || /^[A-Za-z]{2,12}$/.test(v) ? v : code;
       var take = function (bc, r) {
         var item = r ? r.item : '';
+        if (!item && gtinBad(bc)) return say('bad', BC_BAD_TXT + '（' + bc + '）');      // v1.9.52
         if (F.pal.items.some(function (x) { return (item && x.item === item) || nz(x.bc) === nz(bc); })) return say('bad', '该商品已在这个托盘上');
         if (full) return say('bad', '这个托盘已有 2 种商品；贴错了先「✕ 移除商品」再添加');
         F.add = { bc: bc, item: item, desc: r ? r.desc : '', uom: r ? r.uom || '' : '', exp: '', ctn: '' };
@@ -2789,6 +2799,7 @@
         if (masters && masters.byItem[code] && !lookupItem(code)) return pickItem(code, itemName(code));
         if (/[^\x00-\x7f]/.test(rq) || /\s/.test(rq) || (/^[A-Za-z]{2,12}$/.test(rq) && !lookupItem(code))) return searchItem(rq);
         var it = lookupItem(code) || { itemCode: '', desc: '', match: '未识别' };   // 主档没有也照样记录
+        if (!it.itemCode && gtinBad(code)) return fail(BC_BAD_TXT + '（' + code + '）');      // v1.9.52 不认识、校验位不对：多半没扫清楚，不记、不问是哪个商品
         var same = code === st.bc;
         st.bc = code; st.item = it.itemCode; st.desc = it.desc; st.match = it.match; if (!same) { st.learn = false; st.newName = ''; }
         if (!same || !st.bst) loadBatches();
@@ -2883,6 +2894,7 @@
     /** v1.9.2 箱码不认识：当场选是哪个商品（来源库位上的货 / 扫另一个码 / 搜品名 / 新商品）。选了才能提交，提交时后台记住箱码 */
     function askUnknown() {
       var code = st.bc; if (!code || st.item || st.newName) return;
+      if (gtinBad(code)) { st.bc = ''; st.bst = ''; errBeep(); msg = { cls: 'bad', text: BC_BAD_TXT + '（' + code + '）' }; mkSteps(); draw(); return; }      // v1.9.52 不认识、校验位不对：不让选商品记住
       var srcItems = [], found = null, finding = false;
       var nameOf = function (it) { var x = masters && masters.byItem[it]; return x ? x[2] : ''; };
       (trSnapAt(st.src) || []).forEach(function (x) { if (!srcItems.some(function (y) { return y.item === x[1]; })) srcItems.push({ item: x[1], desc: x[2] || nameOf(x[1]), exp: '' }); });
@@ -6209,6 +6221,7 @@
       loading('查找中…');
       api({ action: 'lmFind', code: v }, true).then(function (d) {
         if (d.kind === 'item') { lmLast = d; location.hash = '#/lmx/i/' + encodeURIComponent(d.item) + (/^\d{6,}$/.test(v) ? '?bc=' + encodeURIComponent(v) : ''); return; }
+        if (d.kind === 'unknown' && gtinBad(v)) { lmLastMsg = BC_BAD_TXT + '（' + v + '）'; draw(); errBeep(); return; }      // v1.9.52
         if (d.kind === 'unknown') return pickItem('', '这个码系统还不认识：' + v + '（可能是新商品，也可能是老商品的另一个箱码）。先搜品名：找到就选它，系统会记住这个码；都不是再点“新商品”。', function (it) {
           if (!it.isNewName) { api({ action: 'lmSave', act: 'learn', item: it.item, barcode: v }, true).then(function (r) { if (r.status === 'ok') toast('已记住：' + v + ' 是 ' + (it.desc || it.item), 2500); else toast('记不住：' + r.message, 4000); }, function () { }); location.hash = '#/lmx/i/' + encodeURIComponent(it.item) + '?bc=' + encodeURIComponent(v); return; }
           askLoc('新商品放在哪个库位？', '', function (c) { save({ act: 'bind', newName: it.desc, barcode: v, loc: c }, '已记住新商品，库位 ' + c, function (r) { location.hash = '#/lmx/i/' + encodeURIComponent(r.item) + '?bc=' + encodeURIComponent(v); }); });
@@ -6411,6 +6424,7 @@
                   if (it.isNewName) return save({ act: 'bind', newName: it.desc, barcode: code, loc: d.loc }, '已记住新商品，库位 ' + d.loc);
                   api({ action: 'lmFind', code: it.item, item: it.item }, true).then(function (r2) { bindFlow(r2, d.loc, code); }, fail);
                 };
+                if (r.kind === 'unknown' && gtinBad(v)) { toast(BC_BAD_TXT + '（' + v + '）', 3500); errBeep(); return; }      // v1.9.52
                 if (r.kind === 'unknown') return pickItem('', '这个码系统还不认识：' + v + '（可能是新商品，也可能是老商品的另一个箱码）。先搜品名：找到就选它，系统会记住这个码；都不是再点“新商品”。', then, null, v);
                 pickItem(v, '', then, r.items || [], '');
               }, fail);
