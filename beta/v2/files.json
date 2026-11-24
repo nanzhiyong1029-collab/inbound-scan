@@ -1,13 +1,13 @@
 {
- "build": "e7e1ca",
+ "build": "3142a4",
  "target": "chrome61",
  "files": [
   "v2/boot.js",
-  "v2/c-chunk-5YRI5S7Z.js",
   "v2/c-chunk-7YK23OH4.js",
-  "v2/c-chunk-HUN65PR3.js",
-  "v2/c-chunk-N4TAQG5D.js",
-  "v2/c-chunk-SQOTXSK4.js",
+  "v2/c-chunk-JHIH6C2S.js",
+  "v2/c-chunk-P2GVM45G.js",
+  "v2/c-chunk-R6UH2JQ6.js",
+  "v2/c-chunk-UWVQEVO3.js",
   "v2/c-chunk-ZXRQT2NM.js",
   "v2/p-is.js",
   "v2/p-pl.js",

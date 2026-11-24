@@ -3,7 +3,7 @@
  * 原则：只采集原始资料，不做任何核对。先存手机（离线队列），再上传云端。 */
 (function () {
   'use strict';
-  var VERSION = '1.9.53-t6';
+  var VERSION = '1.9.53-t7';
   var $ = function (s, el) { return (el || document).querySelector(s); };
   var app = $('#app');
 
@@ -4623,11 +4623,16 @@
     }
     function grnPlanHtml(g, gi) {
       var pl = g.plan, h = '<div class="grnp">';
-      if (pl.committed) return h + '<p class="rlok"><b>✓ 已配上 ' + pl.assigned + ' 托' + (pl.batchesAdded ? ' · 新批次 ' + pl.batchesAdded + ' 个写进 Inbound Batches' : '') + '</b></p>' + grnIssues(pl) + '<div class="inb-act"><button class="tbtn" data-grx="' + gi + '">关掉这张</button></div></div>';
+      if (pl.committed) return h + '<p class="rlok"><b>✓ 已配上 ' + pl.assigned + ' 托' + (pl.itemsAdded ? ' · 新建商品 ' + pl.itemsAdded + ' 个' : '') + (pl.batchesAdded ? ' · 新批次 ' + pl.batchesAdded + ' 个写进 Inbound Batches' : '') + '</b></p>' + grnIssues(pl) + '<div class="inb-act"><button class="tbtn" data-grx="' + gi + '">关掉这张</button></div></div>';
       if (pl.already) h += '<p class="err"><b>这张 GRN ' + esc(pl.already.at) + ' 已经配过批次了（' + esc(pl.already.by) + '，配了 ' + pl.already.assigned + ' 托），不重复配。</b></p>';
       if (pl.tasks && pl.tasks.length) h += '<div class="grnb"><b>按收货任务</b><ul>' + pl.tasks.map(function (t) {
         return '<li>' + (t.id ? '任务 <b>' + esc(t.name) + '</b>' + (t.status !== 'OPEN' ? '（已完成）' : '') : '<span class="rlbad">来源 ' + esc(t.src) + ' 没有收货任务</span>') + '：配上 <b>' + t.assign + '</b> 托 · 要手动 <b>' + t.issues + '</b> 托</li>';
       }).join('') + '</ul></div>';
+      // v1.9.52.1 新品靠 GRN 进系统：商品主档没有的照 GRN 新建；托上未识别商品按 GRN 箱码认出（点确认才写）
+      if (pl.newItems && pl.newItems.length) h += '<div class="grnb"><b>新品 ' + pl.newItems.length + ' 个：商品主档没有，确认后照这张 GRN 新建</b><span class="hint">（编号 NEW-G + 箱码；AutoCount 条码表以后有了这个箱码，会自动合并到正式 Item Code）</span><ul>' +
+        pl.newItems.map(function (o) { return '<li><b>' + esc(o.desc) + '</b> · 箱码 ' + esc(o.bc) + (o.uom ? ' · ' + esc(o.uom) : '') + ' · <span class="hint">' + esc(o.item) + '</span></li>'; }).join('') + '</ul></div>';
+      var ids = pl.assign.filter(function (a) { return a.newItem; });
+      if (ids.length) h += '<div class="grnb"><b>新品：自动认出 ' + ids.length + ' 行</b><ul>' + ids.map(function (a) { return '<li>新品：自动认出 <b>' + esc(a.lpn) + '</b> ' + esc(a.desc || a.item) + '（箱码 ' + esc(a.bc) + '）</li>'; }).join('') + '</ul></div>';
       var bad = pl.lines.filter(function (o) { return o.flag; });
       if (bad.length) h += '<div class="grnb"><b>这些行不配（请核对）</b><ul>' + bad.map(function (o) { return '<li>第 ' + (o.i + 1) + ' 行 ' + esc(o.desc || o.bc) + '（' + esc(o.batch || '—') + '）：' + esc(o.flag) + '</li>'; }).join('') + '</ul></div>';
       h += '<div class="grnb"><b>会配上 ' + pl.assign.length + ' 托</b>' + (pl.assign.length ? '<table class="rtab-t"><thead><tr><th>任务</th><th>托盘</th><th>在哪</th><th>商品</th><th>批次</th><th>为什么</th></tr></thead><tbody>' +
