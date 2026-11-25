@@ -3,7 +3,8 @@
  * 原则：只采集原始资料，不做任何核对。先存手机（离线队列），再上传云端。 */
 (function () {
   'use strict';
-  var VERSION = '1.9.53-t12';
+  var VERSION = '1.9.54-t13';
+  var PL_MIX_MAX = 10;      // v1.9.52.2 P-052：一托最多 10 种商品，超过 2 种要确认「混托 N 样」
   var $ = function (s, el) { return (el || document).querySelector(s); };
   var app = $('#app');
 
@@ -1815,7 +1816,7 @@
   function plCardHtml(v, opts) {
     opts = opts || {};
     if (!v) return '';
-    return '<div class="card plcard' + (v.status !== 'IN_STOCK' ? ' plout' : '') + (opts.cls ? ' ' + opts.cls : '') + '"><div class="plc-h"><b class="pllpn">' + esc(v.lpn) + '</b><span class="plwhere">' + esc(plWhere(v)) + '</span></div>' +
+    return '<div class="card plcard' + (v.status !== 'IN_STOCK' ? ' plout' : '') + (opts.cls ? ' ' + opts.cls : '') + '"><div class="plc-h"><b class="pllpn">' + esc(v.lpn) + '</b>' + ((v.items || []).length > 2 ? '<span class="plmix">混托 ' + v.items.length + ' 样</span>' : '') + '<span class="plwhere">' + esc(plWhere(v)) + '</span></div>' +
       (plSrcTxt(v) ? '<div class="hint">' + esc(plSrcTxt(v)) + ((v.items || []).some(function (x) { return x.st && (x.st + '|' + x.sc) !== (v.st + '|' + v.sc); }) ? '（最初组托的任务）' : '') + '</div>' : '') +
       (v.items || []).map(function (x) { return plLineHtml(x, opts.lineBtn ? opts.lineBtn(x) : '', v); }).join('') + (opts.extra || '') + '</div>';
   }
@@ -2193,7 +2194,7 @@
     function hint() {
       if (S.tab === 'bind' && S.fix && !S.b.lpn) return S.fix.pal.items.length < 2 ? '更正托盘 ' + S.fix.pal.lpn + '：扫箱码 = 添加商品' : '更正托盘 ' + S.fix.pal.lpn;
       if (S.tab === 'bind' && !curTask()) return '请先选择收货任务';
-      if (S.tab === 'bind') return !S.b.lpn ? '扫一张空白托盘标签（扫已贴过的托 = 更正托盘）' : S.b.lines.length >= 2 ? '已有 2 种商品，检查后点「保存」' : '扫箱码（或打字搜品名 / 首字母）' + (S.b.lines.length ? '；或点「保存」' : '');
+      if (S.tab === 'bind') return !S.b.lpn ? '扫一张空白托盘标签（扫已贴过的托 = 更正托盘）' : S.b.lines.length >= PL_MIX_MAX ? '已有 ' + PL_MIX_MAX + ' 种商品，检查后点「保存」' : '扫箱码（或打字搜品名 / 首字母）' + (S.b.lines.length ? '；或点「保存」' : '');
       if (S.tab === 'empty') return '扫库位（选托位）或扫托盘码';
       return '扫托盘码看托上的货和历史；扫库位看两边的托';
     }
@@ -2304,7 +2305,7 @@
         }
         if (pc) return say('bad', '该托盘已扫描标签 ' + S.b.lpn + '，现在扫箱码');
         var loc = normLoc(v); if (loc && locRe().test(loc)) return say('bad', '组托不记库位：贴好后到「移库」扫托盘码再扫库位');
-        if (S.b.lines.length >= 2) return say('bad', '一个托盘最多 2 种商品');
+        if (S.b.lines.length >= PL_MIX_MAX) return say('bad', '一个托盘最多 ' + PL_MIX_MAX + ' 种商品');
         var code = bcClean(v), q = /[^\x00-\x7f]|\s/.test(v) || /^[A-Za-z]{2,12}$/.test(v) ? v : code;
         wait('正在查 ' + q + '…');
         return plScanApi(q).then(function (r) {
@@ -2405,7 +2406,7 @@
       var loc = normLoc(v); if (loc && locRe().test(loc)) return say('bad', '更正托盘不改库位：要移到别的库位请到「移库」');
       var code = bcClean(v), nz = function (b) { return String(b || '').replace(/^0+/, ''); };
       if (F.pal.items.some(function (x) { return x.bc && nz(x.bc) === nz(code) || x.item && x.item === code; })) return say('bad', '该商品已在这个托盘上');      // v1.9.37
-      var full = F.pal.items.length >= 2, q = /[^\x00-\x7f]|\s/.test(v) || /^[A-Za-z]{2,12}$/.test(v) ? v : code;
+      var full = F.pal.items.length >= PL_MIX_MAX, q = /[^\x00-\x7f]|\s/.test(v) || /^[A-Za-z]{2,12}$/.test(v) ? v : code;
       var take = function (bc, r) {
         var item = r ? r.item : '';
         if (!item && gtinBad(bc)) return say('bad', BC_BAD_TXT + '（' + bc + '）');      // v1.9.52
@@ -2442,7 +2443,7 @@
       var ax = $('#fxAX'); if (ax) ax.onclick = function () { F.add = null; draw(); };
       var ao = $('#fxAOk'); if (ao) ao.onclick = function () {
         var A = F.add; if (A.exp && !/^\d{2}(0[1-9]|1[0-2])$/.test(A.exp)) return say('bad', '到期年月写 4 位：年年月月，例如 2709');
-        fixSend({ op: 'add', curTask: curTask() ? curTask().id : '', reason: '漏贴', line: { bc: A.bc, item: A.item, exp: A.exp, ctn: A.ctn, uom: A.uom } }, '已补上');
+        fixSend({ op: 'add', mixMany: F.pal.items.length >= 2, curTask: curTask() ? curTask().id : '', reason: '漏贴', line: { bc: A.bc, item: A.item, exp: A.exp, ctn: A.ctn, uom: A.uom } }, '已补上');
       };
       Array.prototype.forEach.call(app.querySelectorAll('[data-fxrm]'), function (b) { b.onclick = function () {
         var x = F.pal.items.filter(function (y) { return String(y.id) === b.dataset.fxrm; })[0]; if (!x) return;
@@ -4218,7 +4219,7 @@
       if (which === 'of') return ofLoad();
       if (which === 'is') return isLoad(false);
       if (which === 'kl') return klLoad(false);
-      if (which === 'grn') { R.grn = R.grn || { list: [] }; return api({ action: 'rcPlTasks' }, true).then(function (d) { R.grn.tasks = d.tasks; draw(); acLoad(); }, function (e) { R.err = e.network ? '网络不可用，请检查网络后再试' : e.message; draw(); }); }
+      if (which === 'grn') { R.grn = R.grn || { list: [] }; return api({ action: 'rcPlTasks' }, true).then(function (d) { R.grn.tasks = d.tasks; R.grn.moved = d.moved || ''; draw(); acLoad(); }, function (e) { R.err = e.network ? '网络不可用，请检查网络后再试' : e.message; draw(); }); }
       var a = which === 'pk' ? 'rcPickLocs' : which === 'lm' ? 'rcLmList' : 'rcTransfers';
       return api({ action: a }, true).then(function (d) { R[which] = d; draw(); }, function (e) { R.err = e.network ? '网络不可用，请检查网络后点“刷新”' : e.message; draw(); });
     }
@@ -4561,7 +4562,7 @@
       if (F.msg) h += '<p class="' + (F.bad ? 'err' : 'tmsg good') + '">' + esc(F.msg) + '</p>';
       if (!v) return h + '</div>';
       var tasks = F.tasks || [], tn = function (id) { var t = tasks.filter(function (x) { return x.id === id; })[0]; return t ? t.sc : id; };
-      h += '<div class="card"><div class="plc-h"><b class="pllpn">' + esc(v.lpn) + '</b><span class="plwhere">' + esc(plWhere(v)) + '</span></div>' +
+      h += '<div class="card"><div class="plc-h"><b class="pllpn">' + esc(v.lpn) + '</b>' + ((v.items || []).length > 2 ? '<span class="plmix">混托 ' + v.items.length + ' 样</span>' : '') + '<span class="plwhere">' + esc(plWhere(v)) + '</span></div>' +
         '<div class="hint">' + esc(plSrcTxt(v)) + ' · 收货任务 <b>' + esc(v.task ? tn(v.task) : '（没有）') + '</b>' + (v.oldLabels ? ' · 旧标签 ' + esc(v.oldLabels.join('、')) : '') + '</div>' +
         '<label class="plf"><span>原因（更改批次 / 取消批次必须写）</span><input id="pfR" class="pkq" maxlength="200" value="' + esc(F.reason || '') + '" placeholder="例如：GRN 配错了 / GRN 开错，已重开"></label>' +
         '<table class="rtab-t"><thead><tr><th>商品</th><th>箱码</th><th>批次</th><th>到期</th><th>更改批次</th><th></th></tr></thead><tbody>' +
@@ -5061,6 +5062,12 @@
       app.innerHTML = '<div class="mods rcmods">' + [['tr', 'Shelf Transfer · 移库记录'], ['pk', 'Picking Location Discrepancy · 拣货库位差异'], ['lm', 'Item Locations · 库位主档'], ['grn', '托盘 · 收货任务 / GRN']].concat(R.isOn ? [['is', '异常上报 · 待处理' + (R.isOpen ? ' ' + R.isOpen : '')]] : []).concat(R.klOn ? [['kl', '拣货 / 装车复核（测试版）']] : []).concat(OF_ON ? [['of', '系统设置' + OLDN('办公室 · Office')]] : []).map(function (t) { return '<button class="mod' + (R.tab === t[0] ? ' on' : '') + '" data-tab="' + t[0] + '">' + t[1] + '</button>'; }).join('') + '<a class="mod wcgo" href="#/wc">📊 库位中控台（平板）</a><button class="mod wcgo" id="plExp">🏷 导出托盘（AWMS）</button></div>' +
         (R.err ? '<p class="err">' + esc(R.err) + '</p>' : '') + '<div class="card rcard">' + (R.tab === 'tr' ? trHtml() : R.tab === 'lm' ? lmHtml() : R.tab === 'grn' ? grnHtml() : R.tab === 'of' ? ofHtml() : R.tab === 'is' ? isHtml() : R.tab === 'kl' ? klHtml() : pkHtml()) + '</div>';
       window.scrollTo(0, y); bind();
+      if (R.tab === 'grn' && R.grn && R.grn.moved) grnMoved(R.grn.moved);
+    }
+    // P-040 第二步：主档由 AWMS 写 → 导 GRN 确认配批次、新建 / 完成收货任务、更正托盘已移交 1.0 后台：按钮变灰（服务器也拒绝）；预览照常
+    function grnMoved(msg) {
+      Array.prototype.forEach.call(app.querySelectorAll('#ptAdd, [data-ptr], [data-ptd], [data-pto], [data-grg], [data-grf], [data-pfb], [data-pfu], #pfT, #pfTo'), function (b) { b.disabled = true; b.title = msg; });
+      var c = app.querySelector('.rcard'); if (c && !c.querySelector('.moved')) { var n = document.createElement('p'); n.className = 'hint moved'; n.textContent = msg + '：导 GRN 确认配批次、新建 / 完成收货任务、更正托盘请在 1.0 后台操作（这里只能查看、预览）'; c.insertBefore(n, c.firstChild); }
     }
     function bind() {
       Array.prototype.forEach.call(app.querySelectorAll('[data-tab]'), function (b) { b.onclick = function () { R.tab = b.dataset.tab; LS.set('rcTab', R.tab); draw(); if (!R[R.tab] || R.tab === 'of') load(R.tab); }; });

@@ -838,3 +838,4 @@ mark.spec { background: #fde68a; color: #7a2e0e; padding: 0 3px; border-radius: 
 .bc-h { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; } .bc-h .hint { flex: 1; min-width: 200px; }
 .bcw { max-height: 360px; overflow: auto; }
 .bc-act { display: flex; gap: 10px; justify-content: flex-end; margin-top: 8px; }
+.plmix { margin-left: 8px; padding: 1px 8px; border-radius: 10px; background: #fef3c7; color: #92400e; font-size: 13px; font-weight: 700; }
