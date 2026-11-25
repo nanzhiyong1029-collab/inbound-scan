@@ -827,3 +827,4 @@ mark.spec { background: #fde68a; color: #7a2e0e; padding: 0 3px; border-radius: 
 .plside .pls-no { font-size: 20px; letter-spacing: 1px; display: block; text-align: center; }
 .plside .pls-empty { color: var(--mute, #888); font-weight: 600; }
 @media print { .sic rect { stroke: #000; } .sic rect[fill="currentColor"] { fill: #000; } }
+.plmix { margin-left: 8px; padding: 1px 8px; border-radius: 10px; background: #fef3c7; color: #92400e; font-size: 13px; font-weight: 700; }

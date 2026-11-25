@@ -3,7 +3,8 @@
  * 原则：只采集原始资料，不做任何核对。先存手机（离线队列），再上传云端。 */
 (function () {
   'use strict';
-  var VERSION = '1.9.52.1';
+  var VERSION = '1.9.52.2';
+  var PL_MIX_MAX = 10;      // v1.9.52.2 P-052：一托最多 10 种商品，超过 2 种要确认「混托 N 样」
   var $ = function (s, el) { return (el || document).querySelector(s); };
   var app = $('#app');
 
@@ -1756,7 +1757,7 @@
   function plCardHtml(v, opts) {
     opts = opts || {};
     if (!v) return '';
-    return '<div class="card plcard' + (v.status !== 'IN_STOCK' ? ' plout' : '') + (opts.cls ? ' ' + opts.cls : '') + '"><div class="plc-h"><b class="pllpn">' + esc(v.lpn) + '</b><span class="plwhere">' + esc(plWhere(v)) + '</span></div>' +
+    return '<div class="card plcard' + (v.status !== 'IN_STOCK' ? ' plout' : '') + (opts.cls ? ' ' + opts.cls : '') + '"><div class="plc-h"><b class="pllpn">' + esc(v.lpn) + '</b>' + ((v.items || []).length > 2 ? '<span class="plmix">混托 ' + v.items.length + ' 样</span>' : '') + '<span class="plwhere">' + esc(plWhere(v)) + '</span></div>' +
       (plSrcTxt(v) ? '<div class="hint">' + esc(plSrcTxt(v)) + ((v.items || []).some(function (x) { return x.st && (x.st + '|' + x.sc) !== (v.st + '|' + v.sc); }) ? '（最初组托的任务）' : '') + '</div>' : '') +
       (v.items || []).map(function (x) { return plLineHtml(x, opts.lineBtn ? opts.lineBtn(x) : '', v); }).join('') + (opts.extra || '') + '</div>';
   }
@@ -2133,7 +2134,7 @@
     function hint() {
       if (S.tab === 'bind' && S.fix && !S.b.lpn) return S.fix.pal.items.length < 2 ? '更正托盘 ' + S.fix.pal.lpn + '：扫箱码 = 添加商品' : '更正托盘 ' + S.fix.pal.lpn;
       if (S.tab === 'bind' && !curTask()) return '请先选择收货任务';
-      if (S.tab === 'bind') return !S.b.lpn ? '扫一张空白托盘标签（扫已贴过的托 = 更正托盘）' : S.b.lines.length >= 2 ? '已有 2 种商品，检查后点「保存」' : '扫箱码（或打字搜品名 / 首字母）' + (S.b.lines.length ? '；或点「保存」' : '');
+      if (S.tab === 'bind') return !S.b.lpn ? '扫一张空白托盘标签（扫已贴过的托 = 更正托盘）' : S.b.lines.length >= PL_MIX_MAX ? '已有 ' + PL_MIX_MAX + ' 种商品，检查后点「保存」' : '扫箱码（或打字搜品名 / 首字母）' + (S.b.lines.length ? '；或点「保存」' : '');
       if (S.tab === 'empty') return '扫库位（选托位）或扫托盘码';
       return '扫托盘码看托上的货和历史；扫库位看两边的托';
     }
@@ -2244,7 +2245,7 @@
         }
         if (pc) return say('bad', '这一托已经扫了标签 ' + S.b.lpn + '，现在扫箱码');
         var loc = normLoc(v); if (loc && locRe().test(loc)) return say('bad', '组托不记库位：贴好后到「移库」扫托盘码再扫库位');
-        if (S.b.lines.length >= 2) return say('bad', '一个托盘最多 2 种商品');
+        if (S.b.lines.length >= PL_MIX_MAX) return say('bad', '一个托盘最多 ' + PL_MIX_MAX + ' 种商品');
         var code = bcClean(v), q = /[^\x00-\x7f]|\s/.test(v) || /^[A-Za-z]{2,12}$/.test(v) ? v : code;
         wait('正在查 ' + q + '…');
         return plScanApi(q).then(function (r) {
@@ -2293,8 +2294,9 @@
       if (!item && gtinBad(bc)) return say('bad', BC_BAD_TXT + '（' + bc + '）');      // v1.9.52 认不出、校验位不对：多半是没扫清楚
       if (B.lines.some(function (x) { return (item && x.item === item) || (!item && !x.item && x.bc === bc); })) return say('bad', '这个商品已经加了（一托上同一个商品只能有一个批次）');
       var x = { bc: bc, item: item, desc: r ? r.desc : '', uom: r ? r.uom || '' : '', exp: '', ctn: '' };      // v1.9.34 新货贴码不选批次（一律批次待定，后台导 GRN 配）
-      B.lines.push(x);
-      say('good', item ? '✓ ' + (x.desc || item) + '（批次待确认）；到期年月、箱数选填' : '⚠ 系统不认识箱码 ' + bc + '：照样记成未识别商品');
+      var push = function () { B.lines.push(x); say('good', item ? '✓ ' + (x.desc || item) + '（批次待确认）；到期年月、箱数选填' : '⚠ 系统不认识箱码 ' + bc + '：照样记成未识别商品'); };
+      if (B.lines.length >= 2) { draw(); errBeep(); return confirmBox('混托 ' + (B.lines.length + 1) + ' 样，确认？', '确认', push); }      // v1.9.52.2 P-052
+      push();
     }
     function pickSearch(r, cb) {
       if (!r.items.length) return say('bad', '找不到「' + r.q + '」');
@@ -2331,7 +2333,7 @@
         (A ? '<div class="plbl plfixadd"><div class="plln-t"><b data-nt>＋ ' + esc(A.desc || '未识别商品') + '</b><button class="tbtn" id="fxAX">✕</button></div><div class="hint" data-nt>' + (A.item ? esc(A.item) + ' · ' : '') + '箱码 ' + esc(A.bc) + ' · <span class="plpend">批次待确认</span></div>' +
           '<div class="plf2"><label class="plf"><span>到期年月（选填）</span><input id="fxExp" inputmode="numeric" maxlength="4" placeholder="例 2709" value="' + esc(A.exp || '') + '"></label><label class="plf"><span>箱数（选填）</span><input id="fxCtn" inputmode="numeric" maxlength="5" placeholder="不填" value="' + esc(A.ctn || '') + '"></label></div>' +
           '<div class="row"><button class="btn save" id="fxAOk"' + (S.busy ? ' disabled' : '') + '>添加这种商品</button></div></div>'
-          : (v.items.length < 2 ? '<p class="hint">👉 漏组了一种商品：直接扫该商品的箱码 = 添加商品（批次待确认）</p>' : '<p class="hint">这个托盘已有 2 种商品；贴错了先「✕ 移除商品」再添加</p>')) +
+          : (v.items.length < PL_MIX_MAX ? '<p class="hint">👉 漏组了一种商品：直接扫该商品的箱码 = 添加商品（批次待确认）</p>' : '<p class="hint">这个托盘已有 ' + PL_MIX_MAX + ' 种商品；贴错了先「✕ 移除商品」再添加</p>')) +
         '<div class="row">' + (pend.length ? '<button class="btn ghost" id="fxTask">更改收货任务</button>' + (conf ? '<span class="hint">只更改批次待确认的商品；批次已确认的商品不变</span>' : '') : '<span class="hint">批次都已配上：更改收货任务要先在后台「取消批次」（回到批次待确认）</span>') + '<button class="btn save" id="fxDone">完成</button></div>' +
         '<p class="hint">PDA 不能更改批次；批次配错了在后台「更改批次」。</p></div>';
     }
@@ -2345,14 +2347,16 @@
       var loc = normLoc(v); if (loc && locRe().test(loc)) return say('bad', '更正托盘不动库位：要移到别的库位请到「移库」');
       var code = bcClean(v), nz = function (b) { return String(b || '').replace(/^0+/, ''); };
       if (F.pal.items.some(function (x) { return x.bc && nz(x.bc) === nz(code) || x.item && x.item === code; })) return say('bad', '该商品已在这个托盘上');      // v1.9.37
-      var full = F.pal.items.length >= 2, q = /[^\x00-\x7f]|\s/.test(v) || /^[A-Za-z]{2,12}$/.test(v) ? v : code;
+      var full = F.pal.items.length >= PL_MIX_MAX, q = /[^\x00-\x7f]|\s/.test(v) || /^[A-Za-z]{2,12}$/.test(v) ? v : code;
       var take = function (bc, r) {
         var item = r ? r.item : '';
         if (!item && gtinBad(bc)) return say('bad', BC_BAD_TXT + '（' + bc + '）');      // v1.9.52
         if (F.pal.items.some(function (x) { return (item && x.item === item) || nz(x.bc) === nz(bc); })) return say('bad', '该商品已在这个托盘上');
-        if (full) return say('bad', '这个托盘已有 2 种商品；贴错了先「✕ 移除商品」再添加');
-        F.add = { bc: bc, item: item, desc: r ? r.desc : '', uom: r ? r.uom || '' : '', exp: '', ctn: '' };
-        say('good', item ? '＋ ' + (F.add.desc || item) + '：到期年月、箱数选填，点「添加这种商品」' : '⚠ 系统不认识箱码 ' + bc + '：照样补成未识别商品');
+        if (full) return say('bad', '这个托盘已有 ' + PL_MIX_MAX + ' 种商品；贴错了先「✕ 移除商品」再添加');
+        var put = function () { F.add = { bc: bc, item: item, desc: r ? r.desc : '', uom: r ? r.uom || '' : '', exp: '', ctn: '' };
+          say('good', item ? '＋ ' + (F.add.desc || item) + '：到期年月、箱数选填，点「添加这种商品」' : '⚠ 系统不认识箱码 ' + bc + '：照样补成未识别商品'); };
+        if (F.pal.items.length >= 2) { draw(); errBeep(); return confirmBox('混托 ' + (F.pal.items.length + 1) + ' 样，确认？', '确认', put); }      // v1.9.52.2 P-052
+        put();
       };
       wait('正在查 ' + q + '…');
       return plScanApi(q).then(function (r) {
@@ -2382,7 +2386,7 @@
       var ax = $('#fxAX'); if (ax) ax.onclick = function () { F.add = null; draw(); };
       var ao = $('#fxAOk'); if (ao) ao.onclick = function () {
         var A = F.add; if (A.exp && !/^\d{2}(0[1-9]|1[0-2])$/.test(A.exp)) return say('bad', '到期年月写 4 位：年年月月，例如 2709');
-        fixSend({ op: 'add', curTask: curTask() ? curTask().id : '', reason: '漏贴', line: { bc: A.bc, item: A.item, exp: A.exp, ctn: A.ctn, uom: A.uom } }, '已补上');
+        fixSend({ op: 'add', mixMany: F.pal.items.length >= 2, curTask: curTask() ? curTask().id : '', reason: '漏贴', line: { bc: A.bc, item: A.item, exp: A.exp, ctn: A.ctn, uom: A.uom } }, '已补上');
       };
       Array.prototype.forEach.call(app.querySelectorAll('[data-fxrm]'), function (b) { b.onclick = function () {
         var x = F.pal.items.filter(function (y) { return String(y.id) === b.dataset.fxrm; })[0]; if (!x) return;
@@ -2405,7 +2409,7 @@
       if (!B.task) return say('bad', '请先选择收货任务');
       for (var i = 0; i < B.lines.length; i++) { var x = B.lines[i]; if (x.exp && !/^\d{2}(0[1-9]|1[0-2])$/.test(x.exp)) return say('bad', '到期年月写 4 位：年年月月，例如 2709'); }
       S.busy = true; draw();
-      api({ action: 'plBind', eventId: B.eid, lpn: B.lpn, taskId: B.task, srcType: B.st, srcCode: B.sc, mixOk: mixOk === true, lines: B.lines.map(function (x) { return { bc: x.bc, item: x.item, exp: x.exp, ctn: x.ctn, uom: x.uom }; }) }, true).then(function (r) {
+      api({ action: 'plBind', eventId: B.eid, lpn: B.lpn, taskId: B.task, srcType: B.st, srcCode: B.sc, mixOk: mixOk === true, mixMany: B.lines.length > 2, lines: B.lines.map(function (x) { return { bc: x.bc, item: x.item, exp: x.exp, ctn: x.ctn, uom: x.uom }; }) }, true).then(function (r) {
         S.busy = false;
         if (r.status === 'confirm') { draw(); errBeep(); return confirmBox(r.message, '确定，保存', function () { saveBind(true); }); }      // v1.9.35 规格书 6.4 第 6 条：提醒，不拦
         if (r.status === 'rejected') {
@@ -4429,7 +4433,7 @@
       if (F.msg) h += '<p class="' + (F.bad ? 'err' : 'tmsg good') + '">' + esc(F.msg) + '</p>';
       if (!v) return h + '</div>';
       var tasks = F.tasks || [], tn = function (id) { var t = tasks.filter(function (x) { return x.id === id; })[0]; return t ? t.sc : id; };
-      h += '<div class="card"><div class="plc-h"><b class="pllpn">' + esc(v.lpn) + '</b><span class="plwhere">' + esc(plWhere(v)) + '</span></div>' +
+      h += '<div class="card"><div class="plc-h"><b class="pllpn">' + esc(v.lpn) + '</b>' + ((v.items || []).length > 2 ? '<span class="plmix">混托 ' + v.items.length + ' 样</span>' : '') + '<span class="plwhere">' + esc(plWhere(v)) + '</span></div>' +
         '<div class="hint">' + esc(plSrcTxt(v)) + ' · 收货任务 <b>' + esc(v.task ? tn(v.task) : '（没有）') + '</b>' + (v.oldLabels ? ' · 旧标签 ' + esc(v.oldLabels.join('、')) : '') + '</div>' +
         '<label class="plf"><span>原因（更改批次 / 取消批次必须写）</span><input id="pfR" class="pkq" maxlength="200" value="' + esc(F.reason || '') + '" placeholder="例如：GRN 配错了 / GRN 开错，已重开"></label>' +
         '<table class="rtab-t"><thead><tr><th>商品</th><th>箱码</th><th>批次</th><th>到期</th><th>更改批次</th><th></th></tr></thead><tbody>' +
