@@ -3,7 +3,7 @@
  * 原则：只采集原始资料，不做任何核对。先存手机（离线队列），再上传云端。 */
 (function () {
   'use strict';
-  var VERSION = '1.9.54-t13';
+  var VERSION = '1.9.54-t14';
   var PL_MIX_MAX = 10;      // v1.9.52.2 P-052：一托最多 10 种商品，超过 2 种要确认「混托 N 样」
   var $ = function (s, el) { return (el || document).querySelector(s); };
   var app = $('#app');
@@ -1665,10 +1665,15 @@
   var LQ_ACT = { BIND: '登记库位', MOVE: '移库', VERIFY: '核实库位', REMOVE: '清出', UNDO: '撤销', OVERWRITE: '覆盖清出', MERGE: '合并', IMPORT: '导入', INBOUND: '入库单' };
   function lqCfg(push) {
     if (lqSb && lqSb.url && lqSb.api === cfg.u && !push) return Promise.resolve(lqSb);      // 只认同一个后台给的地址
-    return api({ action: 'lqSbCfg', push: push ? 1 : 0 }, true).then(function (c) { if (!c || !c.url) throw new Error('NOSB'); lqSb = { url: c.url, anon: c.anon, api: cfg.u }; LS.set('lqsb', lqSb); return lqSb; });
+    if (lqSb && lqSb.via === 'exec' && lqSb.api === cfg.u && !push) return Promise.resolve(lqSb);
+    return api({ action: 'lqSbCfg', push: push ? 1 : 0 }, true).then(function (c) {
+      if (c && c.via === 'exec') { lqSb = { via: 'exec', api: cfg.u }; LS.set('lqsb', lqSb); return lqSb; }      // P-058：AWMS 前门 → 直接问后台（/exec pdaLoc），不读 Supabase
+      if (!c || !c.url) throw new Error('NOSB'); lqSb = { url: c.url, anon: c.anon, api: cfg.u }; LS.set('lqsb', lqSb); return lqSb;
+    });
   }
   function lqRpc(args, again) {
     return lqCfg(again).then(function (c) {
+      if (c.via === 'exec') return api(Object.assign({ action: 'pdaLoc' }, args), true);      // P-058：同一个格式（loc / locs / log / items / sync）
       var h = { 'Content-Type': 'application/json', apikey: c.anon }; if (!/^sb_publishable_/.test(c.anon)) h.Authorization = 'Bearer ' + c.anon;
       var ac = typeof AbortController === 'function' ? new AbortController() : null, tm = ac && setTimeout(function () { ac.abort(); }, 8000);
       return fetch(c.url + '/rest/v1/rpc/pda_loc', { method: 'POST', headers: h, body: JSON.stringify(Object.assign({ p_token: cfg.d, p_sess: sess ? sess.t : '' }, args)), signal: ac ? ac.signal : undefined })
