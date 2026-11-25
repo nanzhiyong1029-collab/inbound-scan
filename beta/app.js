@@ -3,7 +3,7 @@
  * 原则：只采集原始资料，不做任何核对。先存手机（离线队列），再上传云端。 */
 (function () {
   'use strict';
-  var VERSION = '1.9.54-t14';
+  var VERSION = '1.9.54-t15';
   var PL_MIX_MAX = 10;      // v1.9.52.2 P-052：一托最多 10 种商品，超过 2 种要确认「混托 N 样」
   var $ = function (s, el) { return (el || document).querySelector(s); };
   var app = $('#app');
@@ -169,6 +169,7 @@
       // AWMS 0.9 过渡版：旧后台（Apps Script）搬家后回 MOVED + 新后台网址 → 本机改连新后台，同一个请求再送一次
       if (d && d.error === 'MOVED' && typeof d.to === 'string' && /^https:\/\/([a-z0-9-]+\.onrender\.com|script\.google\.com\/macros\/s\/[\w-]{20,})\/exec$/.test(d.to) && !params.__moved) {      // v1.9.42 切回旧后台也一样
         if (cfg.u !== d.to) { cfg.u = d.to; LS.set('cfg', cfg); sbForget(); }      // 换了后台 = 换了数据库：手机记住的数据库地址作废；同时发出的几个请求，别的已经改过了也照样再送一次
+        if (typeof d.page === 'string' && PAGE_RE.test(d.page)) LS.set('movePage', d.page);      // 第四步：页面也搬（AWMS /p/ 或回 GitHub Pages），等手机里没东西待同步再搬（pageMoveCheck）
         return api(Object.assign({}, params, { __moved: true }), post);
       }
       if (!d.ok) {
@@ -308,6 +309,20 @@
   var online = navigator.onLine !== false;
   function setOnline(v) { online = v; renderNet(); }
   function v2Pending() { try { return window.AWMS_NEW ? +window.AWMS_NEW.pending() || 0 : 0; } catch (e) { return 0; } }
+  // 第四步（docs/51）：后台回 MOVED 时带 page = 新页面网址 → 等手机里没有待同步的（离线队列在旧网址的浏览器存储里，搬过去就看不到了），
+  // 带着本机的设备钥匙（#setup=，和办公室发的设置链接同一格式，只在本机浏览器里、不发给服务器）跳过去；员工重新登录一次。
+  var PAGE_RE = /^https:\/\/([a-z0-9-]+\.onrender\.com\/p\/|[a-z0-9-]+\.github\.io\/inbound-scan\/(beta\/)?)$/;
+  function pageMoveCheck() {
+    var to = LS.get('movePage', '');
+    if (!to || !PAGE_RE.test(to) || !cfg) return;
+    if (location.href.indexOf(to) === 0) { LS.set('movePage', ''); return; }
+    var pend = outbox.length + (typeof tqCount === 'number' ? tqCount : 0) + (typeof ldPendN === 'number' ? ldPendN : 0) + v2Pending();
+    if (pend || !online) return;
+    var js = JSON.stringify({ u: cfg.u, d: cfg.d, r: cfg.r || '' });
+    var b64 = btoa(unescape(encodeURIComponent(js))).replace(/\+/g, '-').replace(/\//g, '_');
+    LS.set('movePage', '');
+    location.href = to + '#setup=' + b64;
+  }
   function renderNet() {
     var n = $('#net'), t = $('#netText');
     var pend = outbox.length + (typeof tqCount === 'number' ? tqCount : 0) + (typeof ldPendN === 'number' ? ldPendN : 0) + v2Pending();
@@ -365,7 +380,7 @@
     });
     return flushing;
   }
-  setInterval(function () { if (outbox.length && sess) flush(); if (tqCount && sess) flushTransfers(); if (ldPendN && sess) ldFlush(); }, 15000);
+  setInterval(function () { if (outbox.length && sess) flush(); if (tqCount && sess) flushTransfers(); if (ldPendN && sess) ldFlush(); pageMoveCheck(); }, 15000);
   document.addEventListener('visibilitychange', function () { if (!document.hidden && outbox.length) flush(); });
 
   // ---------------- 商品缓存（每个任务一份） ----------------
@@ -2359,8 +2374,9 @@
       if (!item && gtinBad(bc)) return say('bad', BC_BAD_TXT + '（' + bc + '）');      // v1.9.52 认不出、校验位不对：多半是没扫清楚
       if (B.lines.some(function (x) { return (item && x.item === item) || (!item && !x.item && x.bc === bc); })) return say('bad', '这个商品已经加了（一托上同一个商品只能有一个批次）');
       var x = { bc: bc, item: item, desc: r ? r.desc : '', uom: r ? r.uom || '' : '', exp: '', ctn: '' };      // v1.9.34 新货贴码不选批次（一律批次待定，后台导 GRN 配）
-      B.lines.push(x);
-      say('good', item ? '✓ ' + (x.desc || item) + '（批次待确认）；到期年月、箱数选填' : '⚠ 未识别箱码 ' + bc + '：照样记成未识别商品');
+      var push = function () { B.lines.push(x); say('good', item ? '✓ ' + (x.desc || item) + '（批次待确认）；到期年月、箱数选填' : '⚠ 未识别箱码 ' + bc + '：照样记成未识别商品'); };
+      if (B.lines.length >= 2) { draw(); errBeep(); return confirmBox('混托 ' + (B.lines.length + 1) + ' 样，确认？', '确认', push); }      // v1.9.54.2 P-052
+      push();
     }
     function pickSearch(r, cb) {
       if (!r.items.length) return say('bad', '找不到「' + r.q + '」');
@@ -2397,7 +2413,7 @@
         (A ? '<div class="plbl plfixadd"><div class="plln-t"><b data-nt>＋ ' + esc(A.desc || '未识别商品') + '</b><button class="tbtn" id="fxAX">✕</button></div><div class="hint" data-nt>' + (A.item ? esc(A.item) + ' · ' : '') + '箱码 ' + esc(A.bc) + ' · <span class="plpend">批次待确认</span></div>' +
           '<div class="plf2"><label class="plf"><span>到期年月（选填）</span><input id="fxExp" inputmode="numeric" maxlength="4" placeholder="例 2709" value="' + esc(A.exp || '') + '"></label><label class="plf"><span>箱数（选填）</span><input id="fxCtn" inputmode="numeric" maxlength="5" placeholder="不填" value="' + esc(A.ctn || '') + '"></label></div>' +
           '<div class="row"><button class="btn save" id="fxAOk"' + (S.busy ? ' disabled' : '') + '>添加商品</button></div></div>'
-          : (v.items.length < 2 ? '<p class="hint">👉 漏组了一种商品：直接扫该商品的箱码 = 添加商品（批次待确认）</p>' : '<p class="hint">这个托盘已有 2 种商品；贴错了先「✕ 移除商品」再添加</p>')) +
+          : (v.items.length < PL_MIX_MAX ? '<p class="hint">👉 漏组了一种商品：直接扫该商品的箱码 = 添加商品（批次待确认）</p>' : '<p class="hint">这个托盘已有 ' + PL_MIX_MAX + ' 种商品；贴错了先「✕ 移除商品」再添加</p>')) +
         '<div class="row">' + (pend.length ? '<button class="btn ghost" id="fxTask">更改收货任务</button>' + (conf ? '<span class="hint">只更改批次待确认的商品；批次已确认的商品不变</span>' : '') : '<span class="hint">批次都已配上：更改收货任务要先在后台「取消批次」（回到批次待确认）</span>') + '<button class="btn save" id="fxDone">完成</button></div>' +
         '<p class="hint">PDA 不能更改批次；批次配错了在后台「更改批次」。</p></div>';
     }
@@ -2416,9 +2432,11 @@
         var item = r ? r.item : '';
         if (!item && gtinBad(bc)) return say('bad', BC_BAD_TXT + '（' + bc + '）');      // v1.9.52
         if (F.pal.items.some(function (x) { return (item && x.item === item) || nz(x.bc) === nz(bc); })) return say('bad', '该商品已在这个托盘上');
-        if (full) return say('bad', '这个托盘已有 2 种商品；贴错了先「✕ 移除商品」再添加');
-        F.add = { bc: bc, item: item, desc: r ? r.desc : '', uom: r ? r.uom || '' : '', exp: '', ctn: '' };
-        say('good', item ? '＋ ' + (F.add.desc || item) + '：到期年月、箱数选填，点「添加商品」' : '⚠ 未识别箱码 ' + bc + '：照样补成未识别商品');
+        if (full) return say('bad', '这个托盘已有 ' + PL_MIX_MAX + ' 种商品；贴错了先「✕ 移除商品」再添加');
+        var put = function () { F.add = { bc: bc, item: item, desc: r ? r.desc : '', uom: r ? r.uom || '' : '', exp: '', ctn: '' };
+          say('good', item ? '＋ ' + (F.add.desc || item) + '：到期年月、箱数选填，点「添加商品」' : '⚠ 未识别箱码 ' + bc + '：照样补成未识别商品'); };
+        if (F.pal.items.length >= 2) { draw(); errBeep(); return confirmBox('混托 ' + (F.pal.items.length + 1) + ' 样，确认？', '确认', put); }      // v1.9.54.2 P-052
+        put();
       };
       wait('正在查 ' + q + '…');
       return plScanApi(q).then(function (r) {
@@ -2471,7 +2489,7 @@
       if (!B.task) return say('bad', '请先选择收货任务');
       for (var i = 0; i < B.lines.length; i++) { var x = B.lines[i]; if (x.exp && !/^\d{2}(0[1-9]|1[0-2])$/.test(x.exp)) return say('bad', '到期年月写 4 位：年年月月，例如 2709'); }
       S.busy = true; draw(); var pfS = v2PerfS('pl');
-      api({ action: 'plBind', eventId: B.eid, lpn: B.lpn, taskId: B.task, srcType: B.st, srcCode: B.sc, mixOk: mixOk === true, lines: B.lines.map(function (x) { return { bc: x.bc, item: x.item, exp: x.exp, ctn: x.ctn, uom: x.uom }; }) }, true).then(function (r) {
+      api({ action: 'plBind', eventId: B.eid, lpn: B.lpn, taskId: B.task, srcType: B.st, srcCode: B.sc, mixOk: mixOk === true, mixMany: B.lines.length > 2, lines: B.lines.map(function (x) { return { bc: x.bc, item: x.item, exp: x.exp, ctn: x.ctn, uom: x.uom }; }) }, true).then(function (r) {
         S.busy = false;
         if (r.status === 'confirm') { draw(); errBeep(); return confirmBox(r.message, '确定，保存', function () { saveBind(true); }); }      // v1.9.35 规格书 6.4 第 6 条：提醒，不拦
         if (r.status === 'rejected') {
