@@ -3,7 +3,7 @@
  * 原则：只采集原始资料，不做任何核对。先存手机（离线队列），再上传云端。 */
 (function () {
   'use strict';
-  var VERSION = '1.9.54-t16';
+  var VERSION = '1.9.54-t17';
   var PL_MIX_MAX = 10;      // v1.9.52.2 P-052：一托最多 10 种商品，超过 2 种要确认「混托 N 样」
   var $ = function (s, el) { return (el || document).querySelector(s); };
   var app = $('#app');
@@ -1774,6 +1774,25 @@
         var m = e && e.message; return useLocal(m === 'NOSB' || m === 'NOFN' ? '数据库未开通库位查询' : e && (e.network || e.name === 'AbortError' || e.name === 'TypeError') ? '数据库连接失败' : m);
       });
       p.then(function () { LQ.busy = false; if (location.hash === '#/tq') { draw(); v2PerfEnd(pfMine, true); } }, function (e) { LQ.busy = false; LQ.err = e.message; if (location.hash === '#/tq') draw(); });
+      if (!isLoc) plSnapLoad(true).then(function () { if (location.hash === '#/tq' && !LQ.busy) draw(); });      // P-078：托盘上有（手机里的托盘资料，顺便更新）
+    }
+    /** P-078 这个商品在哪些托盘上（在库的托；未上架的也列）：托盘码末 5 位、库位 + 左 / 右、批次、箱数；混托带编号 ①② */
+    var LQ_NO = '①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳';
+    function lqPallets(codes) {
+      if (!plSnap || !codes.length) return [];
+      return plSnap.pal.filter(function (v) { return v.status === 'IN_STOCK' && v.items.some(function (x) { return codes.indexOf(x.item) >= 0; }); })
+        .sort(function (a, b) { return (a.pos ? 0 : 1) - (b.pos ? 0 : 1) || String(a.pos || '').localeCompare(String(b.pos || '')) || String(a.lpn).localeCompare(String(b.lpn)); });
+    }
+    function lqPalHtml(codes) {
+      var P = lqPallets(codes); if (!P.length) return '';
+      return '<h4 class="lqsub">托盘上有 ' + P.length + ' 托</h4><ul class="lql">' + P.map(function (v) {
+        var mix = v.items.length > 1;
+        return '<li class="lqr"><div class="lqt"><b><span class="mono">' + esc(String(v.lpn).slice(-5)) + '</span>' + (mix ? ' · 混托' : '') + ' · ' + (v.pos ? '<span class="mono">' + esc(v.pos) + '</span>' + (v.side ? ' ' + sideTxt(v.side) : '') : '未上架') + '</b>' +
+          v.items.map(function (x, i) {
+            if (codes.indexOf(x.item) < 0) return '';
+            return '<span>' + (mix ? (LQ_NO.charAt(i) || (i + 1) + '.') + ' ' : '') + (x.conf && x.batch ? '批次 ' + esc(x.batch) : '批次待确认') + (x.ctn ? ' · ' + esc(x.ctn) + ' 箱' : '') + '</span>';
+          }).join('') + '</div></li>';
+      }).join('') + '</ul>';
     }
     function recHtml(x, withLoc) {       // x = 库位记录
       var loc = withLoc ? x[0] : '', st = withLoc ? x[4] : x[4], at = withLoc ? x[5] : x[6], by = withLoc ? x[6] : x[7], exp = withLoc ? x[7] : x[8];
@@ -1802,9 +1821,10 @@
           }).join('') + '</ul>' : '') + foot;
       }
       var LL = r.locs || [];
-      if (!(r.items || []).length && !LL.length) return head + '<div class="empty">箱码 / 编号 ' + esc(LQ.q) + ' 系统里找不到</div>';
+      var qi = lookupItem(LQ.q), codes = (r.items || []).concat(LL.map(function (x) { return x[1]; }), qi ? [qi[1]] : [], masters && masters.byItem[LQ.q] ? [LQ.q] : []).filter(function (c, i, a) { return c && a.indexOf(c) === i; }), palH = lqPalHtml(codes);
+      if (!(r.items || []).length && !LL.length && !palH) return head + '<div class="empty">箱码 / 编号 ' + esc(LQ.q) + ' 系统里找不到</div>';
       return head + '<div class="lqh"><b>' + esc(LL[0] ? LL[0][2] : (lookupItem(LQ.q) || (masters && masters.byItem[LQ.q]) || [])[2] || LQ.q) + '</b><span>' + (LL.length ? '系统记在 ' + LL.length + ' 个库位（点库位看那里有什么）' : '系统中无库位') + '</span></div>' +
-        (LL.length ? '<ul class="lql">' + LL.map(function (x) { return recHtml(x, true); }).join('') + '</ul>' : '') + foot;
+        (LL.length ? '<ul class="lql">' + LL.map(function (x) { return recHtml(x, true); }).join('') + '</ul>' : '') + palH + foot;
     }
     function draw() {
       app.innerHTML = '<div class="bcrow tscan"><input id="lqIn" inputmode="text" maxlength="64" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="扫码 / 搜品名（首字母也行）"><button class="btn cam" id="lqCam">📷 扫描</button></div>' +
