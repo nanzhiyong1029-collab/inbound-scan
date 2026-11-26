@@ -3,7 +3,7 @@
  * 原则：只采集原始资料，不做任何核对。先存手机（离线队列），再上传云端。 */
 (function () {
   'use strict';
-  var VERSION = '1.9.54-t15';
+  var VERSION = '1.9.54-t16';
   var PL_MIX_MAX = 10;      // v1.9.52.2 P-052：一托最多 10 种商品，超过 2 种要确认「混托 N 样」
   var $ = function (s, el) { return (el || document).querySelector(s); };
   var app = $('#app');
@@ -835,7 +835,12 @@
         '</details>' : '') +
       '</div>', menuWire);
   }
+  function newSys(kind, fallback) { try { return !!(window.AWMS_NEW && window.AWMS_NEW.sys && window.AWMS_NEW.sys(kind, fallback)); } catch (e) { return false; } }      // P-069 ③ 开关 sys =「新」：新样式菜单 / 没有可用模块
   function openMenu() {
+    if (newSys('menu', openMenuClassic)) return;
+    openMenuClassic();
+  }
+  function openMenuClassic() {
     if (v2Home()) return openMenuV2();
     modal('<div class="menu">' +
       '<div class="hint">员工：<b>' + esc(operator || '未登录') + '</b> · 设备 ' + esc((sess && sess.dev) || device) + ' · v' + VERSION + (window.AWMS_NEW && window.AWMS_NEW.build ? ' · v2-' + esc(window.AWMS_NEW.build) : '') + '</div>' +
@@ -920,12 +925,12 @@
     currentRedraw = null;
     app.onclick = null;
     curHash = location.hash;
-    if (!cfg || cfgHold) return viewSetup(false);
+    if (!cfg || cfgHold) return newAuth('setup') || viewSetup(false);      // P-067 ② 新设置页（开关 login = 新）
     if (cfg.r === 'up') return viewUpload();          // 装车点货：办公室上传电脑，不用员工登录
     document.body.classList.remove('wcon');
     if (cfg.r === 'rc') return location.hash === '#/wc' ? viewConsole() : viewRecords();         // v1.6 库位记录后台电脑；v1.9 #/wc 平板中控台
     if (cfg.r === 'wc') {                             // v1.9.1 库位中控台平板：员工登录（和 PDA 一样），只有中控台
-      if (!sess) return viewLogin();
+      if (!sess) return newAuth('login') || viewLogin();
       if (myMods().indexOf('wc') < 0) {
         setBar('库位中控台', false);
         app.innerHTML = '<div class="empty">员工 ' + esc(operator) + ' 没有【库位中控台】的权限。<br>请找办公室在【员工 / PIN 管理】勾选“中控台（平板）”。<br><br><button class="btn ghost" id="wcNoOut">退出登录</button></div>';
@@ -935,7 +940,7 @@
       if (location.hash !== '#/wc') { history.replaceState(null, '', '#/wc'); }
       return viewConsole();
     }
-    if (!sess) return viewLogin();
+    if (!sess) return newAuth('login') || viewLogin();      // P-067 ② 新登录页：选人 → PIN → 首页
     var h = location.hash || '#/';
     var m;
     if ((h === '#/' || h === '#/h') && v2Home()) { if (h !== '#/h') history.replaceState(null, '', '#/h'); return window.AWMS_NEW.show('#/h'); }      // docs/31 新首页；入库列表改走 #/in
@@ -943,6 +948,7 @@
       var home = modHome();
       if (home) { location.hash = home; return; }
       else {
+        if (newSys('nomod', function () { route(); })) return;      // P-069 ③ 新样式「没有可用的模块」
         setBar('没有可用的模块', false);
         app.innerHTML = '<div class="empty">员工 ' + esc(operator) + ' 目前没有可用的模块。<br>请找办公室在【员工 / PIN 管理】里打勾开通。<br><br><button class="btn ghost" id="noModOut">退出登录</button></div>';
         $('#noModOut').onclick = function () { api({ action: 'logout' }).catch(function () { }); setSession(null); route(); };
@@ -960,6 +966,15 @@
     if (h === '#/ld' || h === '#/pk') return viewLdList(h.slice(2));
     if ((m = h.match(/^#\/(ld|pk)\/([^/]+?)(\/review|\/i\/(\d+))?$/))) return viewLdTask(decodeURIComponent(m[2]), m[3] === '/review', m[1] === 'pk' && m[4] != null ? Number(m[4]) : null);
     return viewJobs();
+  }
+
+  // P-067 ②：登录 / 设备设置用新页面（开关 login = 新、boot.js 在；新页面打不开 → 旧页面）
+  function newAuth(kind) {
+    var N = window.AWMS_NEW;
+    if (!N || !N.showAuth || N.flag('login') !== 'new') return false;
+    setBar('', false);
+    N.showAuth(kind, function () { if (kind === 'setup') viewSetup(false); else viewLogin(); });
+    return true;
   }
 
   // ---------------- 设置 & 登录 ----------------
@@ -2375,7 +2390,7 @@
       if (B.lines.some(function (x) { return (item && x.item === item) || (!item && !x.item && x.bc === bc); })) return say('bad', '这个商品已经加了（一托上同一个商品只能有一个批次）');
       var x = { bc: bc, item: item, desc: r ? r.desc : '', uom: r ? r.uom || '' : '', exp: '', ctn: '' };      // v1.9.34 新货贴码不选批次（一律批次待定，后台导 GRN 配）
       var push = function () { B.lines.push(x); say('good', item ? '✓ ' + (x.desc || item) + '（批次待确认）；到期年月、箱数选填' : '⚠ 未识别箱码 ' + bc + '：照样记成未识别商品'); };
-      if (B.lines.length >= 2) { draw(); errBeep(); return confirmBox('混托 ' + (B.lines.length + 1) + ' 样，确认？', '确认', push); }      // v1.9.54.2 P-052
+      if (B.lines.length >= 2) { draw(); errBeep(); return confirmBox('混托 ' + (B.lines.length + 1) + ' 样，确认？', '确认', push); }      // v1.9.52.2 P-052
       push();
     }
     function pickSearch(r, cb) {
@@ -2435,7 +2450,7 @@
         if (full) return say('bad', '这个托盘已有 ' + PL_MIX_MAX + ' 种商品；贴错了先「✕ 移除商品」再添加');
         var put = function () { F.add = { bc: bc, item: item, desc: r ? r.desc : '', uom: r ? r.uom || '' : '', exp: '', ctn: '' };
           say('good', item ? '＋ ' + (F.add.desc || item) + '：到期年月、箱数选填，点「添加商品」' : '⚠ 未识别箱码 ' + bc + '：照样补成未识别商品'); };
-        if (F.pal.items.length >= 2) { draw(); errBeep(); return confirmBox('混托 ' + (F.pal.items.length + 1) + ' 样，确认？', '确认', put); }      // v1.9.54.2 P-052
+        if (F.pal.items.length >= 2) { draw(); errBeep(); return confirmBox('混托 ' + (F.pal.items.length + 1) + ' 样，确认？', '确认', put); }      // v1.9.52.2 P-052
         put();
       };
       wait('正在查 ' + q + '…');
@@ -7128,6 +7143,39 @@
     // P-014 拣货 / 装车新页面（AWMS 测试版）：同一个拣货 / 装车队列（LDQ）、同一份手机里的任务（ld:<id>），旧的上传照常
     ld: { get: ldGet, put: ldPut, fromServer: ldFromServer, push: function (o) { return ldLoadQ().then(function () { LDQ.push(o); return ldSaveQ(); }); },
       flush: ldFlush, pending: ldPending, purge: ldPurge, setRedraw: function (fn) { ldRedraw = fn || null; } },
+    // P-069 ③ 新样式 ⋮ 菜单（开关 sys）：同 openMenuV2 / menuWire 的动作
+    sys: {
+      info: function () {
+        var f = LS.get('failed', []), last = f.length ? f[f.length - 1] : null;
+        return { who: operator || '', dev: (sess && sess.dev) || device, ver: VERSION, pend: outbox.length + tqCount + ldPendN, admin: myMods().indexOf('dv') >= 0,
+          pda: !!prefs.pda, autoNext: !!prefs.autoNext, persisted: persisted === true ? true : persisted === false ? false : null, lastErr: lastSyncError || '',
+          failed: f.length, failedMsg: (last && last.r && last.r.message) || '', others: othersNote().replace(/<[^>]+>/g, '') };
+      },
+      sync: function () { toast('上传中…'); flushTransfers(); ldFlush(); flush().then(function () { toast(outbox.length ? '还有 ' + outbox.length + ' 条未上传（网络不可用）' : '全部已上传 ✓'); }); },
+      logout: function () { guardLeave(function () { if (sess && cfg) api({ action: 'logout' }).catch(function () { }); setSession(null); route(); }); },
+      togglePda: function () { prefs.pda = !prefs.pda; LS.set('prefs', prefs); route(); },
+      toggleNext: function () { prefs.autoNext = !prefs.autoNext; LS.set('prefs', prefs); },
+      setup: function () { viewSetup(true); },
+      clearCache: function () { Object.keys(localStorage).forEach(function (k) { if (k.indexOf('p_') === 0) LS.del(k); }); memCache = {}; toast('已清除'); route(); }
+    },
+    // P-067 ② 新登录 / 设备设置页：登录完成、员工名单缓存、手动设置、重试（规则和 viewLogin / viewSetup 一样）
+    auth: {
+      loginDone: function (d) { authMsg = ''; setSession({ t: d.session, name: d.name, dev: d.device, mods: Array.isArray(d.mods) ? d.mods : null }); location.hash = '#/'; route(); flush(); },
+      msg: function () { return authMsg || ''; },
+      staffCache: function () { return LS.get('staff', []); },
+      saveStaff: function (l) { if (Array.isArray(l)) LS.set('staff', l); },
+      setupSave: function (u, k) {
+        if (!/^https:\/\//.test(u) || !TOKEN_RE.test(k)) return Promise.reject({ message: '网址必须以 https:// 开头，设备凭据格式不对' });
+        cfg = { u: u, d: k }; CFGK.save(cfg); setSession(null); authMsg = ''; cfgHold = false;
+        return api({ action: 'ping' }).then(function () { toast('连接成功'); location.hash = '#/'; route(); });
+      },
+      setupRetry: function () {
+        cfgHold = false;
+        return api({ action: 'ping' }).then(function () { authMsg = ''; toast('连接成功'); location.hash = '#/'; route(); },
+          function (e) { if (e.code !== 'DEVICE') cfgHold = true; throw e; });
+      },
+      hold: function () { return !!cfgHold; }, url: function () { return cfg ? cfg.u : ''; }, inApp: inAppBrowser
+    },
     // docs/31 新首页：这台手机上还没上传的记录（入库 outbox + 移库队列 + 装车 / 拣货队列）：几条、最早一条的时间、谁的
     pendInfo: function () {
       return IDB.all().then(function (l) { return l || []; }, function () { return []; }).then(function (tq) {
