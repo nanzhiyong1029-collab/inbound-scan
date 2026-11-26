@@ -1,0 +1,1 @@
+function n(e){let t=String(e!=null?e:"").trim(),r;return(r=/^(\d{2})(0[1-9]|1[0-2])$/.exec(t))?"20"+r[1]+"-"+r[2]:(r=/^(\d{4})-(\d{1,2})(?:-\d{1,2})?(?:[T ].*)?$/.exec(t))?r[1]+"-"+r[2].padStart(2,"0"):(r=/^\d{1,2}\/(\d{1,2})\/(\d{4})$/.exec(t))||(r=/^(\d{1,2})\/(\d{4})$/.exec(t))?r[2]+"-"+r[1].padStart(2,"0"):t}export{n as a};
