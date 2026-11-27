@@ -3,7 +3,7 @@
  * 原则：只采集原始资料，不做任何核对。先存手机（离线队列），再上传云端。 */
 (function () {
   'use strict';
-  var VERSION = '1.9.54-t29';
+  var VERSION = '1.9.54-t30';
   var PL_MIX_MAX = 10;      // v1.9.52.2 P-052：一托最多 10 种商品，超过 2 种要确认「混托 N 样」
   var $ = function (s, el) { return (el || document).querySelector(s); };
   var app = $('#app');
@@ -961,6 +961,8 @@
     if (h === '#/t') return viewTransfer();
     if (h === '#/tq') return viewLocQuery();
     if ((m = h.match(/^#\/lmx(?:\/(l|i|todo|noloc|tasks|a|empty|exp)(?:\/([^?]+))?)?(?:\?.*)?$/))) return viewLm(m[1] || '', m[2] ? decodeURIComponent(m[2]) : '');   // v1.8 旧的库位管理（v1.9.17 起不在菜单里，只留给办公室测试）
+    // V-242：AWMS 前门没有 laList（旧「库位分配」页）—— 新首页开着（/p/ 第四步）时 #/lm 回新首页，不画一个会报错的旧页面
+    if (/^#\/lm(\?|$)/.test(h) && window.AWMS_NEW && window.AWMS_NEW.flag && window.AWMS_NEW.flag('home') === 'new') { location.replace('#/h'); return; }
     if (/^#\/lm(\/|\?|$)/.test(h)) return viewLa();      // v1.9.17 库位分配
     if (h === '#/pl') return viewPallet();                // v1.9.32 托盘
     if (h === '#/ld' || h === '#/pk') return viewLdList(h.slice(2));
