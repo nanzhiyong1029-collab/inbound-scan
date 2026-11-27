@@ -1,11 +1,11 @@
 // 离线缓存 APP 外壳（不缓存 API 请求）
-var CACHE = 'inbound-scan-v1.9.54-t31+v2-793653';
+var CACHE = 'inbound-scan-v1.9.54-t33+v2-0184e3';
 var LIB = 'https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js';
 // v1.6 缅甸文字体（拣货缅甸语用），离线也要能显示
 var FONTS = [400, 700].map(function (w) { return 'https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-myanmar@5.2.5/files/noto-sans-myanmar-myanmar-' + w + '-normal.woff2'; });
-var FILES = ['./', 'index.html', 'style.css?v=1.9.54-t31', 'app.js?v=1.9.54-t31', 'manifest.webmanifest', 'icon.svg', 'icon-192.png', 'icon-512.png'];
+var FILES = ['./', 'index.html', 'style.css?v=1.9.54-t33', 'app.js?v=1.9.54-t33', 'manifest.webmanifest', 'icon.svg', 'icon-192.png', 'icon-512.png'];
 // B5 新前端（docs/24 A5）：v2/ 的全部文件一起预缓存（没打开过的新页面断网也能开）。下一行由 AWMS 仓库 scripts/pda-publish.mjs 写入，缓存名也跟着带上新前端的构建号
-var V2 = ["v2/boot.js?b=793653","v2/c-chunk-3X3B6JIC.js","v2/c-chunk-6F2KL4IT.js","v2/c-chunk-BOW7ZL4F.js","v2/c-chunk-FCNDDBTT.js","v2/c-chunk-JP23I2P2.js","v2/c-chunk-LIMHLXSY.js","v2/c-chunk-LKJT5WZV.js","v2/c-chunk-NAZHVNJ2.js","v2/c-chunk-OJIP2DVY.js","v2/c-chunk-QY7J47CI.js","v2/c-chunk-S46QI2OY.js","v2/c-chunk-VJVY77GT.js","v2/c-chunk-W5V2DMRR.js","v2/c-chunk-XWCSJCRN.js","v2/c-chunk-YI3UU3Y7.js","v2/p-auth.js?b=793653","v2/p-is.js?b=793653","v2/p-lc.js?b=793653","v2/p-ld.js?b=793653","v2/p-map.js?b=793653","v2/p-pl.js?b=793653","v2/p-q.js?b=793653","v2/p-sort.js?b=793653","v2/p-sys.js?b=793653","v2/p-t.js?b=793653","v2/perf.js?b=793653"];
+var V2 = ["v2/boot.js?b=0184e3","v2/c-chunk-3X3B6JIC.js","v2/c-chunk-5ELO3BXK.js","v2/c-chunk-6F2KL4IT.js","v2/c-chunk-BOW7ZL4F.js","v2/c-chunk-EGMTQEXY.js","v2/c-chunk-GEV6FMLQ.js","v2/c-chunk-IO6F7UJV.js","v2/c-chunk-JP23I2P2.js","v2/c-chunk-LIMHLXSY.js","v2/c-chunk-LKJT5WZV.js","v2/c-chunk-NAZHVNJ2.js","v2/c-chunk-NDGVGEYA.js","v2/c-chunk-P2TTLJFF.js","v2/c-chunk-UHCQBMLY.js","v2/c-chunk-XWCSJCRN.js","v2/p-auth.js?b=0184e3","v2/p-is.js?b=0184e3","v2/p-lc.js?b=0184e3","v2/p-ld.js?b=0184e3","v2/p-map.js?b=0184e3","v2/p-pl.js?b=0184e3","v2/p-q.js?b=0184e3","v2/p-sort.js?b=0184e3","v2/p-sys.js?b=0184e3","v2/p-t.js?b=0184e3","v2/perf.js?b=0184e3"];
 FILES = FILES.concat(V2);
 self.addEventListener('install', function (e) {
   e.waitUntil(caches.open(CACHE).then(function (c) { return c.addAll(FILES).then(function () { return Promise.all([LIB].concat(FONTS).map(function (u) { return c.add(u).catch(function () { }); })); }); }).then(function () { return self.skipWaiting(); }));
