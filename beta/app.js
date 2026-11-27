@@ -3,7 +3,7 @@
  * 原则：只采集原始资料，不做任何核对。先存手机（离线队列），再上传云端。 */
 (function () {
   'use strict';
-  var VERSION = '1.9.54-t35';
+  var VERSION = '1.9.54-t36';
   var PL_MIX_MAX = 10;      // v1.9.52.2 P-052：一托最多 10 种商品，超过 2 种要确认「混托 N 样」
   var $ = function (s, el) { return (el || document).querySelector(s); };
   var app = $('#app');
@@ -7025,10 +7025,24 @@
       else { var now = Date.now(); if (v !== st.last || now - st.lastT > 1500) { st.last = v; st.lastT = now; return; } }
       st.done = true; beep(); stopCamera(); onCode(v);
     }
+    // P-141 #3: no camera / not allowed → one Chinese sentence + 重试 / 返回 (作业员 = data-worker: a crossed-camera icon,
+    // ⟳ / ← only, no words). The raw browser error (「NotFoundError: Requested device not found」…) goes to the console only.
     function fail(err) {
       if (camState !== st) return;
-      var r = $('.scanner .camview'); if (r) r.innerHTML = '<p style="color:#fff;padding:20px">无法打开摄像头：' + esc(err && (err.message || err.name) || err) +
-        '<br><br>请在 Chrome 网站设置里允许本网站使用相机；或改用扫描头 / 手动输入。</p>';
+      try { console.warn('[camera]', err); } catch (e) { }
+      var wk = document.documentElement.hasAttribute('data-worker');
+      var r = $('.scanner .camview'); if (!r) return;
+      var bt = $('.scanner .bottom'); if (bt) bt.hidden = true;
+      var tp = $('#camTip'); if (tp) tp.textContent = '';
+      if (wk) { var tl = $('.scanner .top'); if (tl) tl.style.visibility = 'hidden'; }
+      var ic = '<svg viewBox="0 0 48 48" width="96" height="96" aria-hidden="true" fill="none" stroke="#fff" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round">' +
+        '<path d="M6 16h8l4-5h12l4 5h8v22H6z"/><circle cx="24" cy="26" r="7"/><path d="M5 5l38 38" stroke="#ef4444" stroke-width="4.5"/></svg>';
+      r.innerHTML = '<div class="camfail" id="camFail">' + ic +
+        (wk ? '' : '<p>' + (typeof err === 'string' ? esc(err) : '这台设备没有摄像头，或没有允许本网站使用摄像头') + '</p>') +
+        '<div class="camfail-b"><button class="btn" id="camRetry" aria-label="重试">' + (wk ? '⟳' : '重试') + '</button>' +
+        '<button class="btn ghost" id="camBack" aria-label="返回">' + (wk ? '←' : '返回') + '</button></div></div>';
+      $('#camRetry').onclick = function () { stopCamera(); openCamera(kind, onCode, opts); };
+      $('#camBack').onclick = stopCamera;
     }
     /** v1.9.25 上下层标签挨得近，一次认出好几个库位码 → 按画面位置列出来，点哪个用哪个（系统不自己挑） */
     function pickMany(L) {
