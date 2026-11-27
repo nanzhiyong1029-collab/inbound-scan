@@ -1,5 +1,5 @@
 {
- "build": "a45560",
+ "build": "6edd12",
  "target": "chrome61",
  "files": [
   "v2/boot.js",

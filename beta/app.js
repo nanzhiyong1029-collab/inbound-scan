@@ -3,7 +3,7 @@
  * 原则：只采集原始资料，不做任何核对。先存手机（离线队列），再上传云端。 */
 (function () {
   'use strict';
-  var VERSION = '1.9.54-t25';
+  var VERSION = '1.9.54-t26';
   var PL_MIX_MAX = 10;      // v1.9.52.2 P-052：一托最多 10 种商品，超过 2 种要确认「混托 N 样」
   var $ = function (s, el) { return (el || document).querySelector(s); };
   var app = $('#app');
@@ -132,7 +132,7 @@
       var o = JSON.parse(json);
       if (o.u && TOKEN_RE.test(o.d || '')) {
         cfg = { u: o.u, d: o.d, r: o.r === 'up' || o.r === 'rc' || o.r === 'wc' ? o.r : '' }; CFGK.save(cfg); authMsg = ''; cfgHold = false;
-        if (inAppBrowser()) setTimeout(function () { modal('<h3>请用 Chrome 打开</h3><p>现在是在聊天软件（WhatsApp / 微信等）里面打开的。设置只保存在这里，以后从桌面图标或 Chrome 打开会找不到。</p><p>请点右上角 <b>⋮</b> →「<b>在 Chrome 中打开</b>」（或复制链接到 Chrome 打开）。</p><div class="row"><button class="btn save" id="iaOk">知道了</button></div>', function (m) { $('#iaOk', m).onclick = closeModal; }); }, 300);
+        if (inAppBrowser()) setTimeout(function () { var N = window.AWMS_NEW; if (N && N.showAuth && N.flag('login') === 'new') return; /* P-106 #3 #28：新登录页自己提示，不弹旧弹窗 */ modal('<h3>请用 Chrome 打开</h3><p>现在是在聊天软件（WhatsApp / 微信等）里面打开的。设置只保存在这里，以后从桌面图标或 Chrome 打开会找不到。</p><p>请点右上角 <b>⋮</b> →「<b>在 Chrome 中打开</b>」（或复制链接到 Chrome 打开）。</p><div class="row"><button class="btn save" id="iaOk">知道了</button></div>', function (m) { $('#iaOk', m).onclick = closeModal; }); }, 300);
         setSession(null); toast(cfg.r === 'up' ? '设置已保存：这台电脑用来上传 DO' : cfg.r === 'rc' ? '设置已保存：这台电脑用来查看库位记录' : cfg.r === 'wc' ? '设置已保存：库位中控台平板，请登录' : '设置已保存，请登录');
       } else if (o.k) { authMsg = '这是旧版设置链接，已停用。请找办公室在【PDA 设备管理】生成本设备的新链接。'; toast('旧版链接已停用', 3000); }
       else toast('设置链接无效');
@@ -7175,7 +7175,7 @@
       logout: function () { guardLeave(function () { if (sess && cfg) api({ action: 'logout' }).catch(function () { }); setSession(null); route(); }); },
       togglePda: function () { prefs.pda = !prefs.pda; LS.set('prefs', prefs); route(); },
       toggleNext: function () { prefs.autoNext = !prefs.autoNext; LS.set('prefs', prefs); },
-      setup: function () { viewSetup(true); },
+      setup: function () { if (!newAuth('setup')) viewSetup(true); },      // P-106 #3 #27：新设置页（新页面打不开才用旧的）
       clearCache: function () { Object.keys(localStorage).forEach(function (k) { if (k.indexOf('p_') === 0) LS.del(k); }); memCache = {}; toast('已清除'); route(); }
     },
     // P-067 ② 新登录 / 设备设置页：登录完成、员工名单缓存、手动设置、重试（规则和 viewLogin / viewSetup 一样）
