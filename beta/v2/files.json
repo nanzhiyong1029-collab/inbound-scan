@@ -1,5 +1,5 @@
 {
- "build": "f3a907",
+ "build": "2ff903",
  "target": "chrome61",
  "files": [
   "v2/boot.js",
