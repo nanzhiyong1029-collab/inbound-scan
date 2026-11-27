@@ -3,7 +3,7 @@
  * 原则：只采集原始资料，不做任何核对。先存手机（离线队列），再上传云端。 */
 (function () {
   'use strict';
-  var VERSION = '1.9.54-t37';
+  var VERSION = '1.9.54-t38';
   var PL_MIX_MAX = 10;      // v1.9.52.2 P-052：一托最多 10 种商品，超过 2 种要确认「混托 N 样」
   var $ = function (s, el) { return (el || document).querySelector(s); };
   var app = $('#app');
@@ -4324,6 +4324,9 @@
         '<ul class="hint">' + (R.inbLog || []).map(function (m) { return '<li>✓ ' + esc(m) + '</li>'; }).join('') + '</ul></div>';
       if (I.err && q) h += '<p><button class="tbtn" id="inbSkip">跳过这个文件，读下一个</button></p>';
       if (I.msg) h += '<p class="' + (I.err ? 'err' : 'hint') + '"><b>' + esc(I.msg) + '</b></p>';
+      if (I.notes) [['newNo', '没有 Item Code，建成临时新品（以后有货号再「商品合并」）'], ['bad', '这些 2级单位 / 单品码不像条码，没有学（请在 AutoCount / 入库单核对）'], ['odd', '这些整箱码不像条码（照旧学了，请核对是不是真的箱码）'], ['noCtn', '这些行没有整箱码也没有 2级单位码（扫单品码认得的不用管）']].forEach(function (k) {
+        var L = I.notes[k[0]] || []; if (L.length) h += '<details class="inb-notes"' + (k[0] === 'bad' ? ' open' : '') + '><summary>' + k[1] + '：' + L.length + ' 行</summary><ul class="hint">' + L.map(function (x) { return '<li>' + esc(x) + '</li>'; }).join('') + '</ul></details>';
+      });
       var d = I.res;
       if (d && !d.committed) {
         var c = d.counts, L = d.list.filter(function (x) { return (I.all || x.kind !== 'same') && !x.blocked && !x.need; }), nW = inbWritable(d, I);
@@ -4403,21 +4406,31 @@
           var cs = rowCells(sh, r); if (cs.length) seen.push(cs.map(function (c) { return cellText(c.v); }).filter(Boolean).join(' | '));
           // 正式模版（FINAL DETAILS）：Item Code | BARCODE（单品）| Detail Description | … | UOM | Qty | BARCODE（整箱）| …；整箱条码才是箱码
           var bc = pickCol(cs, /整箱|箱码/i) || pickCol(cs, /条码|bar\s*code/i), it = pickCol(cs, /item\s*code|itemcode|商品编码|商品代码|货号|产品编码/i);
-          if (bc && it) { hr = r; C = { bc: bc, item: it, unit: pickCol(cs, /单品|^bar\s*code$/i, /整箱/), desc: pickCol(cs, /品名|名称|description|^desc/i, /code|description\s*2/i), uom: pickCol(cs, /^(uom|单位)/i),
+          if (bc && it) { hr = r; C = { bc: bc, item: it, unit: pickCol(cs, /单品|^bar\s*code$/i, /整箱/), mid: pickCol(cs, /2\s*级|二级|中包|middle/i, /整箱/), desc: pickCol(cs, /品名|名称|description|^desc/i, /code|description\s*2/i), uom: pickCol(cs, /^(uom|单位)/i),
             qty: pickCol(cs, /收货数量|实收/) || pickCol(cs, /^qty$|数量/i), mfg: pickCol(cs, /生产日期|mfg/i), exp: pickCol(cs, /截止日期|到期|有效期至|expiry|exp\s*date/i, /保质期\s*\(?月/) }; }
         }
         if (!hr) throw new Error('认不出入库单：要有“箱码 / 条码”和“Item Code”两列。文件前几行是：' + seen.slice(0, 3).join(' ／ '));
-        var rows = [], batches = [];
+        var rows = [], batches = [], notes = { newNo: [], bad: [], odd: [], noCtn: [] };
+        // V-260：像不像条码（只要数字；8 / 12 / 13 / 14 位；12–14 位校验位要对）。不像的不学，列出来
+        var inbBad = function (x) { if (!/^\d+$/.test(x)) return '有字母或符号'; if ([8, 12, 13, 14].indexOf(x.length) < 0) return x.length + ' 位，不像条码';
+          if (x.length >= 12) { var sum = 0, n = x.length - 1, w = 3; for (var k = n - 1; k >= 0; k--, w = 4 - w) sum += Number(x.charAt(k)) * w; if ((10 - (sum % 10)) % 10 !== Number(x.charAt(n))) return '校验位不对'; }
+          return ''; };
         for (var rr = hr + 1; rr <= sh.maxRow; rr++) {
           var o = {}; rowCells(sh, rr).forEach(function (x) { o[x.c1] = x.v; });
           var b = cellText(o[C.bc]).replace(/\s+/g, ''), i = cellText(o[C.item]), u = C.unit && C.unit !== C.bc ? cellText(o[C.unit]).replace(/\s+/g, '') : '';
+          var m = C.mid && C.mid !== C.bc && C.mid !== C.unit ? cellText(o[C.mid]).replace(/\s+/g, '') : '', nm = C.desc ? cellText(o[C.desc]) : '';
           if (!i && u) i = u;                    // Item Code 空着：用单品条码（我们的 Item Code 一般就是单品条码）
+          // V-260：没开货号的新品（只有 2级单位码 / 整箱码）→ 临时商品号 NEW-<码>，以后有了 AutoCount 货号用「商品合并」并过去
+          if (!i && (m || b) && !inbBad(m || b)) { i = 'NEW-' + (m || b); notes.newNo.push('第 ' + rr + ' 行 ' + (nm || '') + ' → ' + i); }
           if (!b && !i) continue;
+          if (m && m !== b && m !== i && m !== u) { var em = inbBad(m); if (em) notes.bad.push('第 ' + rr + ' 行 2级单位 ' + m + '：' + em); else if (i) rows.push([m, i, nm, '2级单位']); }
+          if (u && i && u !== i && u !== b && u !== m) { var eu = inbBad(u); if (eu) notes.bad.push('第 ' + rr + ' 行 单品 ' + u + '：' + eu); else rows.push([u, i, nm, '单品']); }
           if (i && C.exp) batches.push([i, C.desc ? cellText(o[C.desc]) : '', C.uom ? cellText(o[C.uom]) : '', C.qty ? Number(o[C.qty]) || 0 : 0, C.mfg ? inbDate(o[C.mfg]) : '', inbDate(o[C.exp])]);
-          if (!b || b === i || b === u) { skip++; continue; }       // 没有整箱条码（散装 / 桶装扫单品码就认得）
-          rows.push([b, i, C.desc ? cellText(o[C.desc]) : '', C.uom ? cellText(o[C.uom]) : '']);
+          if (!b || b === i || b === u) { skip++; if (!b && !m) notes.noCtn.push('第 ' + rr + ' 行 ' + (nm || i)); continue; }       // 没有整箱条码（散装 / 桶装扫单品码就认得）
+          var eb = inbBad(b); if (eb) notes.odd.push('第 ' + rr + ' 行 整箱 ' + b + '：' + eb);       // V-260：整箱码照旧学，只提醒
+          rows.push([b, i, nm, C.uom ? cellText(o[C.uom]) : '']);
         }
-        R.inb.skip = skip;
+        R.inb.skip = skip; R.inb.notes = notes;
         if (!rows.length && !batches.length) throw new Error('入库单里没有整箱条码' + (skip ? '（' + skip + ' 行没有整箱条码）' : ''));
         R.inb.rows = rows; R.inb.batches = batches;
         var cm = /([A-Z]{2,}\d{3,})/i.exec(file.name); R.inb.container = cm ? cm[1].toUpperCase() : '';      // 柜号从文件名找（例如 LX26246-297 (DSSB).xlsx）
