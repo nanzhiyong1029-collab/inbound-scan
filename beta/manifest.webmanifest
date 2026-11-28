@@ -1,6 +1,6 @@
 {
-  "name": "AWMS 0.9 过渡版",
-  "short_name": "AWMS 过渡版",
+  "name": "AWMS",
+  "short_name": "AWMS",
   "start_url": "./#/",
   "scope": "./",
   "display": "standalone",
