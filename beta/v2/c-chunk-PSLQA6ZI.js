@@ -1,0 +1,1 @@
+import{h as e,i as n,j as o,l as s}from"./c-chunk-MYDPO7RZ.js";function m({active:l}){let r=n(null),t=o().modTabs(l);return e(()=>{o().bindModTabs()}),t?s("div",{ref:r,class:"v2-mods",dangerouslySetInnerHTML:{__html:t}}):null}export{m as a};
