@@ -1,5 +1,5 @@
 {
- "build": "a60c8a",
+ "build": "927111",
  "target": "chrome61",
  "files": [
   "v2/boot.js",
@@ -8,7 +8,6 @@
   "v2/c-chunk-6X6MWN6A.js",
   "v2/c-chunk-CTIKKDDT.js",
   "v2/c-chunk-DTNKOGW7.js",
-  "v2/c-chunk-EETYWPWM.js",
   "v2/c-chunk-EGSSAS2J.js",
   "v2/c-chunk-JN7ZZ643.js",
   "v2/c-chunk-JXEXHM7K.js",
@@ -18,6 +17,7 @@
   "v2/c-chunk-S4LPWFJI.js",
   "v2/c-chunk-SCUUBVI6.js",
   "v2/c-chunk-SOAVTYEO.js",
+  "v2/c-chunk-T4E5SB3W.js",
   "v2/c-chunk-UCNKNTET.js",
   "v2/c-chunk-WUNE2SDU.js",
   "v2/p-auth.js",
