@@ -3,7 +3,7 @@
  * 原则：只采集原始资料，不做任何核对。先存手机（离线队列），再上传云端。 */
 (function () {
   'use strict';
-  var VERSION = '1.9.54-t44';
+  var VERSION = '1.9.54-t45';
   var PL_MIX_MAX = 10;      // v1.9.52.2 P-052：一托最多 10 种商品，超过 2 种要确认「混托 N 样」
   var $ = function (s, el) { return (el || document).querySelector(s); };
   var app = $('#app');
@@ -944,7 +944,7 @@
     var h = location.hash || '#/';
     var m;
     if ((h === '#/' || h === '#/h') && v2Home()) { if (h !== '#/h') history.replaceState(null, '', '#/h'); return window.AWMS_NEW.show('#/h'); }      // docs/31 新首页；入库列表改走 #/in
-    if (myMods().indexOf(hashMod(h)) < 0 && !(h === '#/tq' && myMods().indexOf('lm') >= 0 && v2Owns(h) && window.AWMS_NEW.flag('q') === 'new')) {          // 没有这个模块的权限 → 去第一个能用的模块（C3b：查询「新」时只有库位分配权限也能进，只读托盘资料）
+    if (myMods().indexOf(hashMod(h)) < 0 && !(h === '#/tq' && myMods().indexOf('lm') >= 0 && v2Owns(h) && window.AWMS_NEW.flag('q') === 'new') && !(v2Owns(h) && window.AWMS_NEW.common && window.AWMS_NEW.common(h))) { if (window.AWMS_NEW && window.AWMS_NEW.denied) { try { window.AWMS_NEW.denied(); } catch (e) { } }          // 没有这个模块的权限 → 去第一个能用的模块（C3b：查询「新」时只有库位分配权限也能进，只读托盘资料）；P-193：查询 / 库位图「新」= 通用权限，所有登录账号都能进（只读）；被挡回首页 → 首页红字说原因
       var home = modHome();
       if (home) { location.hash = home; return; }
       else {
