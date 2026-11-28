@@ -3,7 +3,7 @@
  * 原则：只采集原始资料，不做任何核对。先存手机（离线队列），再上传云端。 */
 (function () {
   'use strict';
-  var VERSION = '1.9.54-t50';
+  var VERSION = '1.9.54-t51';
   var PL_MIX_MAX = 10;      // v1.9.52.2 P-052：一托最多 10 种商品，超过 2 种要确认「混托 N 样」
   var $ = function (s, el) { return (el || document).querySelector(s); };
   var app = $('#app');
